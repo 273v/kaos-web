@@ -430,8 +430,16 @@ Five tools following `docs/TOOL_DESIGN_GUIDE.md`.
 
 All tools: `openWorldHint=True` (makes HTTP requests), `destructiveHint=False`.
 
-Error messages follow the three-part rule: what went wrong + how to fix it +
-alternative approach.
+**KAOS conventions** (from top-level CLAUDE.md):
+- Tool names match `^[a-z0-9]+(?:-[a-z0-9]+){2,}$` — all 5 names comply.
+- Error messages follow the three-part rule: what went wrong + how to fix it +
+  alternative approach.
+- `FetchPage` uses `ArtifactManifest.to_tool_result()` for automatic inline/summary/link
+  tiering (16 KB / 256 KB thresholds).
+- `SearchPage` searches per-paragraph via DocumentView (AST-grounded), not on raw
+  serialized text. Results carry `block_ref` from the AST.
+- Tools pass `KaosContext` through for `session_id`/`trace_id` logging.
+- Flat inputs with `ParameterSchema` and `constraints` for enums.
 
 ---
 
@@ -444,7 +452,12 @@ kaos-web search URL QUERY [--top-k 10] [--level paragraph|sentence] [--json]
 kaos-web metadata URL [--json]
 ```
 
-Follows `docs/CLI_STANDARD.md`: `--json` envelope, errors to stderr, `main(argv)`.
+Follows `docs/CLI_STANDARD.md`:
+- `--json` envelope: `{"command": "...", "url": "...", ...}`
+- Human-readable output by default, JSON for piping/agents
+- Errors to stderr with non-zero exit, output to stdout
+- `main(argv: list[str] | None = None)` signature for testability
+- Lazy-import heavy deps inside command handlers (fast `--help`)
 
 ---
 
