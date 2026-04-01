@@ -35,7 +35,11 @@ class HttpClientConfig(BaseModel):
     # Behavior
     follow_redirects: bool = True
     max_redirects: int = 10
-    user_agent: str = "KAOS-Web/0.1 (+https://273ventures.com/kaos-web)"
+    user_agent: str = ""
+    """User-Agent string. Empty = random realistic desktop browser UA per request."""
+
+    randomize_user_agent: bool = True
+    """If True and user_agent is empty, use a random desktop browser UA."""
 
     # Authentication (mutually exclusive — first non-None wins)
     basic_auth: tuple[str, str] | None = None

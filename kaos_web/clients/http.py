@@ -77,8 +77,16 @@ class HttpClient:
         # Authentication
         auth = self._build_auth()
 
-        # Default headers
-        headers = {"User-Agent": cfg.user_agent}
+        # Default headers — realistic UA by default
+        from kaos_web.clients.user_agents import KAOS_BOT_UA, random_desktop_ua
+
+        if cfg.user_agent:
+            ua = cfg.user_agent
+        elif cfg.randomize_user_agent:
+            ua = random_desktop_ua()
+        else:
+            ua = KAOS_BOT_UA
+        headers = {"User-Agent": ua}
 
         # API key goes in headers, not in httpx auth
         if cfg.api_key:
