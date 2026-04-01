@@ -357,8 +357,8 @@ class SearchPageTool(KaosTool):
             )
 
         try:
+            from kaos_content.search import search_document
             from kaos_web.extract import html_to_document
-            from kaos_web.extract.search import search_document
 
             doc = html_to_document(html, url=final_url)
             search_results = search_document(doc, query, top_k=top_k, level=level)
