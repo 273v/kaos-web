@@ -100,6 +100,30 @@ _INLINE_FORMATTING_TAGS = frozenset(
 _TRANSPARENT_BLOCK_TAGS = frozenset({"div", "section", "article", "main", "aside", "details"})
 
 _WS_RE = re.compile(r"[ \t\n\r]+")
+
+# Block-level tags — used to decide if <li> has block vs inline content.
+_BLOCK_LEVEL_TAGS = frozenset(
+    {
+        "p",
+        "div",
+        "blockquote",
+        "pre",
+        "ul",
+        "ol",
+        "dl",
+        "table",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "figure",
+        "section",
+        "article",
+    }
+)
 _LANG_RE = re.compile(r"\b(?:language|lang|highlight)-(\S+)")
 
 # Dangerous URI schemes to reject.
@@ -139,6 +163,59 @@ def _strip_or_empty(text: str | None) -> str:
     if text is None:
         return ""
     return text
+
+
+def _trim_inline_whitespace(inlines: list[Inline]) -> list[Inline]:
+    """Strip leading/trailing whitespace from a list of inline nodes.
+
+    Trims whitespace from leading/trailing Text nodes and removes empty ones.
+    """
+    # Trim leading
+    while inlines and isinstance(inlines[0], Text):
+        stripped = inlines[0].value.lstrip()
+        if stripped:
+            inlines[0] = Text(value=stripped)
+            break
+        inlines.pop(0)
+    # Trim trailing
+    while inlines and isinstance(inlines[-1], Text):
+        stripped = inlines[-1].value.rstrip()
+        if stripped:
+            inlines[-1] = Text(value=stripped)
+            break
+        inlines.pop()
+    return inlines
+
+
+def _merge_adjacent_text(inlines: list[Inline]) -> list[Inline]:
+    """Merge adjacent Text nodes and collapse double spaces.
+
+    When a dangerous link is stripped, the surrounding text nodes may have
+    adjacent spaces that produce double-space gaps. This merges them.
+    """
+    if not inlines:
+        return inlines
+    result: list[Inline] = []
+    for node in inlines:
+        if isinstance(node, Text) and result and isinstance(result[-1], Text):
+            # Merge adjacent text nodes, collapsing double spaces
+            merged = result[-1].value + node.value
+            merged = _WS_RE.sub(" ", merged)
+            result[-1] = Text(value=merged)
+        else:
+            result.append(node)
+    return result
+
+
+def _is_whitespace_only_inlines(inlines: tuple[Inline, ...] | list[Inline]) -> bool:
+    """Check if inline nodes contain only whitespace text."""
+    for c in inlines:
+        if isinstance(c, Text):
+            if c.value.strip():
+                return False
+        else:
+            return False  # Non-text node means not whitespace-only
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +317,7 @@ def _process_inlines(el: HtmlElement, url: str) -> list[Inline]:
             if collapsed:
                 result.append(Text(value=collapsed))
 
-    return result
+    return _merge_adjacent_text(result)
 
 
 def _element_to_inline(el: HtmlElement, url: str) -> Inline | None:
@@ -249,14 +326,20 @@ def _element_to_inline(el: HtmlElement, url: str) -> Inline | None:
 
     if tag in ("strong", "b"):
         children = tuple(_process_inlines(el, url))
-        if not children:
+        if not children or _is_whitespace_only_inlines(children):
             return None
+        # Collapse redundant nesting: <b><b>text</b></b> → Strong(text)
+        if len(children) == 1 and isinstance(children[0], Strong):
+            return children[0]
         return Strong(children=children)
 
     if tag in ("em", "i"):
         children = tuple(_process_inlines(el, url))
-        if not children:
+        if not children or _is_whitespace_only_inlines(children):
             return None
+        # Collapse redundant nesting
+        if len(children) == 1 and isinstance(children[0], Emphasis):
+            return children[0]
         return Emphasis(children=children)
 
     if tag in ("s", "del", "strike"):
@@ -340,10 +423,10 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
     # Headings.
     if tag in _HEADING_TAGS:
         depth = int(tag[1])
-        children = tuple(_process_inlines(el, url))
+        children = _trim_inline_whitespace(list(_process_inlines(el, url)))
         if not children:
             return []
-        return [Heading(depth=depth, children=children, provenance=prov)]
+        return [Heading(depth=depth, children=tuple(children), provenance=prov)]
 
     # Paragraph.
     if tag == "p":
@@ -505,6 +588,9 @@ def _process_pre(el: HtmlElement, url: str, prov: Provenance | None) -> list[Blo
 
     if not value:
         return []
+    # Strip leading newline per HTML spec (browsers do this for <pre>)
+    if value.startswith("\n"):
+        value = value[1:]
     return [CodeBlock(language=language, value=value, provenance=prov)]
 
 
@@ -519,12 +605,21 @@ def _process_list_items(el: HtmlElement, url: str) -> list[ListItem]:
         if child.tag.lower() != "li":
             continue
 
-        blocks = _process_children_as_blocks(child, url)
-        if not blocks:
-            # Try inline content.
+        # Check if <li> has block-level children (p, ul, ol, blockquote, etc.)
+        has_block_children = any(
+            isinstance(c.tag, str) and c.tag.lower() in _BLOCK_LEVEL_TAGS for c in child
+        )
+
+        if has_block_children:
+            blocks = _process_children_as_blocks(child, url)
+        else:
+            # Inline-only content — wrap in a single paragraph
             inlines = tuple(_process_inlines(child, url))
-            if inlines:
+            if inlines and not _is_whitespace_only_inlines(inlines):
+                inlines = tuple(_trim_inline_whitespace(list(inlines)))
                 blocks = [Paragraph(children=inlines, provenance=prov)]
+            else:
+                blocks = []
 
         if blocks:
             items.append(ListItem(children=tuple(blocks), provenance=prov))

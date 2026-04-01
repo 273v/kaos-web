@@ -43,6 +43,7 @@ dev = [
   "kaos-nlp-core>=0.1.0",
   "pytest>=8.3.5",
   "pytest-asyncio>=0.26.0",
+  "pytest-benchmark>=5.2.3",
   "pytest-cov>=6.0.0",
   "ruff>=0.11.0",
   "ty>=0.0.1a17",
