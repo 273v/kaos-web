@@ -17,9 +17,9 @@ from lxml.html import HtmlElement
 # ---------------------------------------------------------------------------
 
 _NEGATIVE_RE = re.compile(
-    r"comment|sidebar|footer|footnote|nav|ad[-_]?|sponsor|social|share|widget"
-    r"|popup|banner|cookie|modal|menu|breadcrumb|pager|pagination|promo|related"
-    r"|shoutbox|combx|masthead|media|meta|outbrain|taboola|disqus",
+    r"comment|sidebar|footer|footnote|\bnav\b|(?:^|[-_ ])ad(?:[-_ ]|$)|sponsor|social|share|widget"
+    r"|popup|banner|cookie|modal|\bmenu\b|breadcrumb|pager|pagination|promo|related"
+    r"|shoutbox|combx|masthead|media|\bmeta\b|outbrain|taboola|disqus",
     re.IGNORECASE,
 )
 
