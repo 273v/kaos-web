@@ -40,9 +40,9 @@ Measured on Linux (Python 3.13, lxml 5.x). All times include readability + AST c
 
 | HTML Size | Throughput | Docs/sec |
 |-----------|-----------|----------|
-| ~2 KB (10 paragraphs) | 2,292 KB/s | 918 docs/s |
-| ~20 KB (100 paragraphs) | 2,279 KB/s | 100 docs/s |
-| ~200 KB (1000 paragraphs) | 2,089 KB/s | 9 docs/s |
+| ~2 KB (10 paragraphs) | 2,357 KB/s | 1,322 docs/s |
+| ~20 KB (100 paragraphs) | 2,366 KB/s | 142 docs/s |
+| ~200 KB (1000 paragraphs) | 2,104 KB/s | 13 docs/s |
 
 Throughput is consistent (~2.1-2.3 MB/s) regardless of document size, indicating linear
 scaling with no algorithmic blowup.
@@ -60,9 +60,9 @@ scaling with no algorithmic blowup.
 ### Scaling
 
 - **Sub-millisecond** for metadata extraction on typical pages
-- **~1.5 ms** for full pipeline on a typical article page
-- **~11 ms** for a 100-paragraph page (20 KB)
-- **~122 ms** for a 1000-paragraph page (200 KB)
+- **~1.1 ms** for full pipeline on a typical article page
+- **~7 ms** for a 100-paragraph page (20 KB)
+- **~80 ms** for a 1000-paragraph page (200 KB)
 - Readability is ~7% of total time; AST conversion dominates
 - Markdown serialization adds ~10% on top of AST conversion
 
@@ -75,23 +75,26 @@ with provenance; the others produce markdown strings. Measured with 3s runs per 
 
 | Tool | Latency | Throughput | Docs/s |
 |------|---------|-----------|--------|
-| **kaos-web** (AST + markdown) | **1.65 ms** | **2,346 KB/s** | **605** |
-| markdownify (BS4 → string) | 2.10 ms | 1,843 KB/s | 476 |
-| trafilatura (lxml + XPath) | 1.90 ms | 2,035 KB/s | 525 |
+| **kaos-web** (AST + markdown) | **1.14 ms** | **3,411 KB/s** | **880** |
+| trafilatura (lxml + XPath) | 1.85 ms | 2,097 KB/s | 541 |
+| markdownify (BS4 → string) | 2.11 ms | 1,837 KB/s | 474 |
 
 **Medium (~16 KB):**
 
 | Tool | Latency | Throughput | Docs/s |
 |------|---------|-----------|--------|
-| kaos-web (AST + markdown) | 11.28 ms | 1,481 KB/s | 89 |
-| **markdownify** (BS4 → string) | **9.01 ms** | **1,854 KB/s** | **111** |
-| trafilatura (lxml + XPath) | 9.34 ms | 1,791 KB/s | 107 |
+| **kaos-web** (AST + markdown) | **6.98 ms** | **1,567 KB/s** | **143** |
+| trafilatura (lxml + XPath) | 8.21 ms | 1,331 KB/s | 122 |
+| markdownify (BS4 → string) | 8.39 ms | 1,304 KB/s | 119 |
 
-**Summary**: Comparable throughput across all three. kaos-web is fastest on small
-articles (~1.3x), markdownify is fastest on larger documents (~1.25x). The difference
-is that kaos-web produces a typed `ContentDocument` AST with provenance, block_refs,
-and full kaos ecosystem integration (DocumentView, BM25 search, MCP resources) —
-the others produce markdown strings.
+**Summary**: kaos-web is fastest across all sizes — 1.6-1.9x faster on articles,
+1.2x faster on larger pages — while producing a typed `ContentDocument` AST with
+provenance, block_refs, and full kaos ecosystem integration (DocumentView, BM25 search,
+MCP resources). The others produce markdown strings.
+
+Optimization: uses `model_construct()` to bypass Pydantic validation (trusted code) and
+`uuid4` instead of `uuid7` for node IDs. Profiling showed Pydantic `__init__` + deepcopy
+was 70% of time; `model_construct` eliminated this.
 
 Reproduce with:
 ```bash

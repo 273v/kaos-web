@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import re
+import uuid
 from urllib.parse import urljoin
 
 from lxml import html as lxml_html
 from lxml.html import HtmlElement
 
-from kaos_content.model.attr import Caption, Provenance, SourceRef
+from kaos_content.model.attr import Attr, Caption, Provenance, SourceRef
 from kaos_content.model.blocks import (
     Block,
     BlockQuote,
@@ -129,6 +130,95 @@ _LANG_RE = re.compile(r"\b(?:language|lang|highlight)-(\S+)")
 # Dangerous URI schemes to reject.
 _UNSAFE_SCHEMES = frozenset({"javascript", "data", "vbscript"})
 
+# Shared default Attr instance (frozen, safe to reuse).
+_DEFAULT_ATTR = Attr()
+
+
+def _fast_id() -> str:
+    """Generate a fast unique ID (UUID4 hex — standard, faster than UUID7)."""
+    return uuid.uuid4().hex
+
+
+# ---------------------------------------------------------------------------
+# Fast node constructors — bypass Pydantic validation for trusted code.
+# Uses model_construct() which skips schema validation and deepcopy.
+# ---------------------------------------------------------------------------
+
+
+def _mk_text(value: str) -> Text:
+    return Text.model_construct(
+        id=_fast_id(), attr=_DEFAULT_ATTR, provenance=None, node_type="text", value=value
+    )
+
+
+def _mk_strong(children: tuple[Inline, ...]) -> Strong:
+    return Strong.model_construct(
+        id=_fast_id(), attr=_DEFAULT_ATTR, provenance=None, node_type="strong", children=children
+    )
+
+
+def _mk_emphasis(children: tuple[Inline, ...]) -> Emphasis:
+    return Emphasis.model_construct(
+        id=_fast_id(), attr=_DEFAULT_ATTR, provenance=None, node_type="emphasis", children=children
+    )
+
+
+def _mk_code(value: str) -> Code:
+    return Code.model_construct(
+        id=_fast_id(), attr=_DEFAULT_ATTR, provenance=None, node_type="code", value=value
+    )
+
+
+def _mk_link(url: str, children: tuple[Inline, ...], title: str | None = None) -> Link:
+    return Link.model_construct(
+        id=_fast_id(),
+        attr=_DEFAULT_ATTR,
+        provenance=None,
+        node_type="link",
+        url=url,
+        title=title,
+        children=children,
+    )
+
+
+def _mk_image(src: str, alt: str | None = None, title: str | None = None) -> Image:
+    return Image.model_construct(
+        id=_fast_id(),
+        attr=_DEFAULT_ATTR,
+        provenance=None,
+        node_type="image",
+        src=src,
+        alt=alt,
+        title=title,
+    )
+
+
+def _mk_linebreak() -> LineBreak:
+    return LineBreak.model_construct(
+        id=_fast_id(), attr=_DEFAULT_ATTR, provenance=None, node_type="line_break"
+    )
+
+
+def _mk_paragraph(children: tuple[Inline, ...], prov: Provenance | None) -> Paragraph:
+    return Paragraph.model_construct(
+        id=_fast_id(),
+        attr=_DEFAULT_ATTR,
+        provenance=prov,
+        node_type="paragraph",
+        children=children,
+    )
+
+
+def _mk_heading(depth: int, children: tuple[Inline, ...], prov: Provenance | None) -> Heading:
+    return Heading.model_construct(
+        id=_fast_id(),
+        attr=_DEFAULT_ATTR,
+        provenance=prov,
+        node_type="heading",
+        depth=depth,
+        children=children,
+    )
+
 
 # ---------------------------------------------------------------------------
 # URL helpers
@@ -174,14 +264,14 @@ def _trim_inline_whitespace(inlines: list[Inline]) -> list[Inline]:
     while inlines and isinstance(inlines[0], Text):
         stripped = inlines[0].value.lstrip()
         if stripped:
-            inlines[0] = Text(value=stripped)
+            inlines[0] = _mk_text(stripped)
             break
         inlines.pop(0)
     # Trim trailing
     while inlines and isinstance(inlines[-1], Text):
         stripped = inlines[-1].value.rstrip()
         if stripped:
-            inlines[-1] = Text(value=stripped)
+            inlines[-1] = _mk_text(stripped)
             break
         inlines.pop()
     return inlines
@@ -205,16 +295,22 @@ def _merge_adjacent_text(inlines: list[Inline]) -> list[Inline]:
         # Merge adjacent Text nodes
         if isinstance(node, Text) and isinstance(prev, Text):
             merged = _WS_RE.sub(" ", prev.value + node.value)
-            result[-1] = Text(value=merged)
+            result[-1] = _mk_text(merged)
         # Merge adjacent Strong nodes
         elif isinstance(node, Strong) and isinstance(prev, Strong):
-            result[-1] = Strong(children=prev.children + node.children)
+            result[-1] = _mk_strong(prev.children + node.children)
         # Merge adjacent Emphasis nodes
         elif isinstance(node, Emphasis) and isinstance(prev, Emphasis):
-            result[-1] = Emphasis(children=prev.children + node.children)
+            result[-1] = _mk_emphasis(prev.children + node.children)
         # Merge adjacent Strikethrough nodes
         elif isinstance(node, Strikethrough) and isinstance(prev, Strikethrough):
-            result[-1] = Strikethrough(children=prev.children + node.children)
+            result[-1] = Strikethrough.model_construct(
+                id=_fast_id(),
+                attr=_DEFAULT_ATTR,
+                provenance=None,
+                node_type="strikethrough",
+                children=prev.children + node.children,
+            )
         else:
             result.append(node)
     return result
@@ -267,8 +363,12 @@ def _make_provenance(url: str) -> Provenance | None:
     """Create a Provenance for block nodes."""
     if not url:
         return None
-    return Provenance(
-        source=SourceRef(uri=url, mime_type="text/html"),
+    return Provenance.model_construct(
+        source=SourceRef.model_construct(uri=url, mime_type="text/html", artifact_id=None),
+        page=None,
+        bbox=None,
+        char_span=None,
+        confidence=None,
         extractor="kaos-web",
     )
 
@@ -292,7 +392,7 @@ def _process_inlines(el: HtmlElement, url: str) -> list[Inline]:
     if text:
         collapsed = _collapse_whitespace(text)
         if collapsed:
-            result.append(Text(value=collapsed))
+            result.append(_mk_text(collapsed))
 
     for child in el:
         if not isinstance(child.tag, str):
@@ -301,7 +401,7 @@ def _process_inlines(el: HtmlElement, url: str) -> list[Inline]:
             if tail:
                 collapsed = _collapse_whitespace(tail)
                 if collapsed:
-                    result.append(Text(value=collapsed))
+                    result.append(_mk_text(collapsed))
             continue
 
         tag = child.tag.lower()
@@ -312,7 +412,7 @@ def _process_inlines(el: HtmlElement, url: str) -> list[Inline]:
             if tail:
                 collapsed = _collapse_whitespace(tail)
                 if collapsed:
-                    result.append(Text(value=collapsed))
+                    result.append(_mk_text(collapsed))
             continue
 
         # Transparent inline elements: expand their children directly.
@@ -328,7 +428,7 @@ def _process_inlines(el: HtmlElement, url: str) -> list[Inline]:
         if tail:
             collapsed = _collapse_whitespace(tail)
             if collapsed:
-                result.append(Text(value=collapsed))
+                result.append(_mk_text(collapsed))
 
     return _merge_adjacent_text(result)
 
@@ -344,7 +444,7 @@ def _element_to_inline(el: HtmlElement, url: str) -> Inline | None:
         # Collapse redundant nesting: <b><b>text</b></b> → Strong(text)
         if len(children) == 1 and isinstance(children[0], Strong):
             return children[0]
-        return Strong(children=children)
+        return _mk_strong(children)
 
     if tag in ("em", "i"):
         children = tuple(_process_inlines(el, url))
@@ -353,20 +453,26 @@ def _element_to_inline(el: HtmlElement, url: str) -> Inline | None:
         # Collapse redundant nesting
         if len(children) == 1 and isinstance(children[0], Emphasis):
             return children[0]
-        return Emphasis(children=children)
+        return _mk_emphasis(children)
 
     if tag in ("s", "del", "strike"):
         children = tuple(_process_inlines(el, url))
         if not children:
             return None
-        return Strikethrough(children=children)
+        return Strikethrough.model_construct(
+            id=_fast_id(),
+            attr=_DEFAULT_ATTR,
+            provenance=None,
+            node_type="strikethrough",
+            children=children,
+        )
 
     if tag == "code":
         # Inline code: use text_content to flatten children.
         value = el.text_content() or ""
         if not value:
             return None
-        return Code(value=value)
+        return _mk_code(value)
 
     if tag == "a":
         href = el.get("href", "")
@@ -379,9 +485,9 @@ def _element_to_inline(el: HtmlElement, url: str) -> Inline | None:
             return None
         if not children:
             # Link with no visible text — use href as text.
-            children = (Text(value=resolved),)
+            children = (_mk_text(resolved),)
         title = el.get("title")
-        return Link(url=resolved, title=title or None, children=children)
+        return _mk_link(resolved, children, title or None)
 
     if tag == "img":
         src = _get_image_src(el)
@@ -392,27 +498,39 @@ def _element_to_inline(el: HtmlElement, url: str) -> Inline | None:
             return None
         alt = el.get("alt", "")
         title = el.get("title")
-        return Image(src=resolved, alt=alt or None, title=title or None)
+        return _mk_image(resolved, alt or None, title or None)
 
     if tag == "br":
-        return LineBreak()
+        return _mk_linebreak()
 
     if tag == "sub":
         children = tuple(_process_inlines(el, url))
         if not children:
             return None
-        return Subscript(children=children)
+        return Subscript.model_construct(
+            id=_fast_id(),
+            attr=_DEFAULT_ATTR,
+            provenance=None,
+            node_type="subscript",
+            children=children,
+        )
 
     if tag == "sup":
         children = tuple(_process_inlines(el, url))
         if not children:
             return None
-        return Superscript(children=children)
+        return Superscript.model_construct(
+            id=_fast_id(),
+            attr=_DEFAULT_ATTR,
+            provenance=None,
+            node_type="superscript",
+            children=children,
+        )
 
     # Unknown inline-ish tag — flatten text content.
     text = el.text_content() or ""
     if text.strip():
-        return Text(value=_collapse_whitespace(text))
+        return _mk_text(_collapse_whitespace(text))
     return None
 
 
@@ -439,7 +557,7 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
         children = _trim_inline_whitespace(list(_process_inlines(el, url)))
         if not children:
             return []
-        return [Heading(depth=depth, children=tuple(children), provenance=prov)]
+        return [_mk_heading(depth, tuple(children), prov)]
 
     # Paragraph.
     if tag == "p":
@@ -451,7 +569,7 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
             text = "".join(c.value for c in children).strip()
             if not text:
                 return []
-        return [Paragraph(children=children, provenance=prov)]
+        return [_mk_paragraph(children, prov)]
 
     # Blockquote.
     if tag == "blockquote":
@@ -460,10 +578,18 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
             # Try as inline content wrapped in a paragraph.
             inlines = tuple(_process_inlines(el, url))
             if inlines:
-                blocks = (Paragraph(children=inlines, provenance=prov),)
+                blocks = (_mk_paragraph(inlines, prov),)
         if not blocks:
             return []
-        return [BlockQuote(children=blocks, provenance=prov)]
+        return [
+            BlockQuote.model_construct(
+                id=_fast_id(),
+                attr=_DEFAULT_ATTR,
+                provenance=prov,
+                node_type="blockquote",
+                children=blocks,
+            )
+        ]
 
     # Preformatted / code blocks.
     if tag == "pre":
@@ -474,7 +600,15 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
         items = _process_list_items(el, url)
         if not items:
             return []
-        return [BulletList(children=tuple(items), provenance=prov)]
+        return [
+            BulletList.model_construct(
+                id=_fast_id(),
+                attr=_DEFAULT_ATTR,
+                provenance=prov,
+                node_type="bullet_list",
+                children=tuple(items),
+            )
+        ]
 
     if tag == "ol":
         items = _process_list_items(el, url)
@@ -485,7 +619,16 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
         if start_attr is not None:
             with contextlib.suppress(ValueError):
                 start = int(start_attr)
-        return [OrderedList(start=start, children=tuple(items), provenance=prov)]
+        return [
+            OrderedList.model_construct(
+                id=_fast_id(),
+                attr=_DEFAULT_ATTR,
+                provenance=prov,
+                node_type="ordered_list",
+                start=start,
+                children=tuple(items),
+            )
+        ]
 
     # Definition list.
     if tag == "dl":
@@ -497,7 +640,11 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
 
     # Horizontal rule.
     if tag == "hr":
-        return [ThematicBreak(provenance=prov)]
+        return [
+            ThematicBreak.model_construct(
+                id=_fast_id(), attr=_DEFAULT_ATTR, provenance=prov, node_type="thematic_break"
+            )
+        ]
 
     # Figure.
     if tag == "figure":
@@ -512,7 +659,7 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
     if tag in _INLINE_FORMATTING_TAGS:
         inlines = _element_to_inline_list(el, url)
         if inlines:
-            return [Paragraph(children=tuple(inlines), provenance=prov)]
+            return [_mk_paragraph(tuple(inlines), prov)]
         return []
 
     # Unknown tags — try to process children as blocks.
@@ -523,7 +670,7 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
     # Last resort: try as inline content.
     inlines = tuple(_process_inlines(el, url))
     if inlines:
-        return [Paragraph(children=inlines, provenance=prov)]
+        return [_mk_paragraph(inlines, prov)]
 
     return []
 
@@ -558,7 +705,7 @@ def _process_children_as_blocks(el: HtmlElement, url: str) -> list[Block]:
     if text:
         collapsed = _collapse_whitespace(text).strip()
         if collapsed:
-            result.append(Paragraph(children=(Text(value=collapsed),), provenance=prov))
+            result.append(_mk_paragraph((_mk_text(collapsed),), prov))
 
     for child in el:
         if not isinstance(child.tag, str):
@@ -567,7 +714,7 @@ def _process_children_as_blocks(el: HtmlElement, url: str) -> list[Block]:
             if tail:
                 collapsed = _collapse_whitespace(tail).strip()
                 if collapsed:
-                    result.append(Paragraph(children=(Text(value=collapsed),), provenance=prov))
+                    result.append(_mk_paragraph((_mk_text(collapsed),), prov))
             continue
 
         blocks = _process_element(child, url)
@@ -578,7 +725,7 @@ def _process_children_as_blocks(el: HtmlElement, url: str) -> list[Block]:
         if tail:
             collapsed = _collapse_whitespace(tail).strip()
             if collapsed:
-                result.append(Paragraph(children=(Text(value=collapsed),), provenance=prov))
+                result.append(_mk_paragraph((_mk_text(collapsed),), prov))
 
     return result
 
@@ -604,7 +751,16 @@ def _process_pre(el: HtmlElement, url: str, prov: Provenance | None) -> list[Blo
     # Strip leading newline per HTML spec (browsers do this for <pre>)
     if value.startswith("\n"):
         value = value[1:]
-    return [CodeBlock(language=language, value=value, provenance=prov)]
+    return [
+        CodeBlock.model_construct(
+            id=_fast_id(),
+            attr=_DEFAULT_ATTR,
+            provenance=prov,
+            node_type="codeblock",
+            language=language,
+            value=value,
+        )
+    ]
 
 
 def _process_list_items(el: HtmlElement, url: str) -> list[ListItem]:
@@ -630,12 +786,21 @@ def _process_list_items(el: HtmlElement, url: str) -> list[ListItem]:
             inlines = tuple(_process_inlines(child, url))
             if inlines and not _is_whitespace_only_inlines(inlines):
                 inlines = tuple(_trim_inline_whitespace(list(inlines)))
-                blocks = [Paragraph(children=inlines, provenance=prov)]
+                blocks = [_mk_paragraph(inlines, prov)]
             else:
                 blocks = []
 
         if blocks:
-            items.append(ListItem(children=tuple(blocks), provenance=prov))
+            items.append(
+                ListItem.model_construct(
+                    id=_fast_id(),
+                    attr=_DEFAULT_ATTR,
+                    provenance=prov,
+                    node_type="list_item",
+                    checked=None,
+                    children=tuple(blocks),
+                )
+            )
 
     return items
 
@@ -657,10 +822,13 @@ def _process_definition_list(el: HtmlElement, url: str, prov: Provenance | None)
             if current_terms and current_defs:
                 for term in current_terms:
                     items.append(
-                        DefinitionItem(
+                        DefinitionItem.model_construct(
+                            id=_fast_id(),
+                            attr=_DEFAULT_ATTR,
+                            provenance=prov,
+                            node_type="definition_item",
                             term=term,
                             definitions=tuple(current_defs),
-                            provenance=prov,
                         )
                     )
                 current_terms = []
@@ -678,7 +846,7 @@ def _process_definition_list(el: HtmlElement, url: str, prov: Provenance | None)
             if not blocks:
                 inlines = tuple(_process_inlines(child, url))
                 if inlines:
-                    blocks = [Paragraph(children=inlines, provenance=prov)]
+                    blocks = [_mk_paragraph(inlines, prov)]
             if blocks:
                 current_defs.append(tuple(blocks))
 
@@ -686,16 +854,27 @@ def _process_definition_list(el: HtmlElement, url: str, prov: Provenance | None)
     if current_terms:
         for term in current_terms:
             items.append(
-                DefinitionItem(
+                DefinitionItem.model_construct(
+                    id=_fast_id(),
+                    attr=_DEFAULT_ATTR,
+                    provenance=prov,
+                    node_type="definition_item",
                     term=term,
                     definitions=tuple(current_defs) if current_defs else (),
-                    provenance=prov,
                 )
             )
 
     if not items:
         return []
-    return [DefinitionList(children=tuple(items), provenance=prov)]
+    return [
+        DefinitionList.model_construct(
+            id=_fast_id(),
+            attr=_DEFAULT_ATTR,
+            provenance=prov,
+            node_type="definition_list",
+            children=tuple(items),
+        )
+    ]
 
 
 def _process_table(el: HtmlElement, url: str, prov: Provenance | None) -> list[Block]:
@@ -708,7 +887,13 @@ def _process_table(el: HtmlElement, url: str, prov: Provenance | None) -> list[B
     if thead is not None:
         rows = _process_table_rows(thead, url, is_header=True)
         if rows:
-            head = TableSection(rows=tuple(rows))
+            head = TableSection.model_construct(
+                id=_fast_id(),
+                attr=_DEFAULT_ATTR,
+                provenance=None,
+                node_type="table_section",
+                rows=tuple(rows),
+            )
 
     # Process <tbody> elements.
     tbodies = el.findall("tbody")
@@ -716,12 +901,28 @@ def _process_table(el: HtmlElement, url: str, prov: Provenance | None) -> list[B
         for tbody in tbodies:
             rows = _process_table_rows(tbody, url, is_header=False)
             if rows:
-                bodies.append(TableSection(rows=tuple(rows)))
+                bodies.append(
+                    TableSection.model_construct(
+                        id=_fast_id(),
+                        attr=_DEFAULT_ATTR,
+                        provenance=None,
+                        node_type="table_section",
+                        rows=tuple(rows),
+                    )
+                )
     else:
         # No explicit <tbody>: process direct <tr> children.
         rows = _process_table_rows(el, url, is_header=False)
         if rows:
-            bodies.append(TableSection(rows=tuple(rows)))
+            bodies.append(
+                TableSection.model_construct(
+                    id=_fast_id(),
+                    attr=_DEFAULT_ATTR,
+                    provenance=None,
+                    node_type="table_section",
+                    rows=tuple(rows),
+                )
+            )
 
     # Process <tfoot>.
     foot: TableSection | None = None
@@ -729,7 +930,13 @@ def _process_table(el: HtmlElement, url: str, prov: Provenance | None) -> list[B
     if tfoot is not None:
         rows = _process_table_rows(tfoot, url, is_header=False)
         if rows:
-            foot = TableSection(rows=tuple(rows))
+            foot = TableSection.model_construct(
+                id=_fast_id(),
+                attr=_DEFAULT_ATTR,
+                provenance=None,
+                node_type="table_section",
+                rows=tuple(rows),
+            )
 
     # Extract caption.
     caption: Caption | None = None
@@ -737,18 +944,22 @@ def _process_table(el: HtmlElement, url: str, prov: Provenance | None) -> list[B
     if cap_el is not None:
         inlines = tuple(_process_inlines(cap_el, url))
         if inlines:
-            caption = Caption(body=(Paragraph(children=inlines, provenance=prov),))
+            caption = Caption.model_construct(short=None, body=(_mk_paragraph(inlines, prov),))
 
     if not head and not bodies and not foot:
         return []
 
     return [
-        Table(
+        Table.model_construct(
+            id=_fast_id(),
+            attr=_DEFAULT_ATTR,
+            provenance=prov,
+            node_type="table",
             caption=caption,
+            col_specs=(),
             head=head,
             bodies=tuple(bodies),
             foot=foot,
-            provenance=prov,
         )
     ]
 
@@ -774,7 +985,7 @@ def _process_table_rows(container: HtmlElement, url: str, *, is_header: bool) ->
             if not blocks:
                 inlines = tuple(_process_inlines(td, url))
                 if inlines:
-                    blocks = [Paragraph(children=inlines, provenance=_make_provenance(url))]
+                    blocks = [_mk_paragraph(inlines, _make_provenance(url))]
 
             col_span = 1
             row_span = 1
@@ -788,7 +999,12 @@ def _process_table_rows(container: HtmlElement, url: str, *, is_header: bool) ->
                     row_span = max(1, int(rs))
 
             cells.append(
-                Cell(
+                Cell.model_construct(
+                    id=_fast_id(),
+                    attr=_DEFAULT_ATTR,
+                    provenance=None,
+                    node_type="cell",
+                    alignment=None,
                     content=tuple(blocks),
                     col_span=col_span,
                     row_span=row_span,
@@ -796,7 +1012,15 @@ def _process_table_rows(container: HtmlElement, url: str, *, is_header: bool) ->
             )
 
         if cells:
-            rows.append(Row(cells=tuple(cells)))
+            rows.append(
+                Row.model_construct(
+                    id=_fast_id(),
+                    attr=_DEFAULT_ATTR,
+                    provenance=None,
+                    node_type="row",
+                    cells=tuple(cells),
+                )
+            )
 
     return rows
 
@@ -814,15 +1038,15 @@ def _process_figure(el: HtmlElement, url: str, prov: Provenance | None) -> list[
         if tag == "figcaption":
             inlines = tuple(_process_inlines(child, url))
             if inlines:
-                caption = Caption(body=(Paragraph(children=inlines, provenance=prov),))
+                caption = Caption.model_construct(short=None, body=(_mk_paragraph(inlines, prov),))
         elif tag == "img":
             src = _get_image_src(child)
             if src:
                 resolved = _resolve_url(src, url)
                 if _is_safe_url(resolved):
                     alt = child.get("alt", "")
-                    img = Image(src=resolved, alt=alt or None)
-                    children.append(Paragraph(children=(img,), provenance=prov))
+                    img = _mk_image(resolved, alt or None)
+                    children.append(_mk_paragraph((img,), prov))
         else:
             blocks = _process_element(child, url)
             children.extend(blocks)
@@ -830,7 +1054,16 @@ def _process_figure(el: HtmlElement, url: str, prov: Provenance | None) -> list[
     if not children and not caption:
         return []
 
-    return [Figure(caption=caption, children=tuple(children), provenance=prov)]
+    return [
+        Figure.model_construct(
+            id=_fast_id(),
+            attr=_DEFAULT_ATTR,
+            provenance=prov,
+            node_type="figure",
+            caption=caption,
+            children=tuple(children),
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -856,7 +1089,21 @@ def html_to_document(
         ContentDocument with Block/Inline AST nodes and provenance.
     """
     if not html_content or not html_content.strip():
-        return ContentDocument()
+        return ContentDocument.model_construct(
+            metadata=DocumentMetadata.model_construct(
+                title=None,
+                authors=(),
+                date=None,
+                language=None,
+                source=None,
+                document_type=None,
+                extra={},
+            ),
+            body=(),
+            footnotes={},
+            definitions={},
+            annotations=(),
+        )
 
     root: HtmlElement | None = None
 
@@ -868,10 +1115,38 @@ def html_to_document(
         try:
             doc = lxml_html.document_fromstring(html_content)
         except Exception:
-            return ContentDocument()
+            return ContentDocument.model_construct(
+                metadata=DocumentMetadata.model_construct(
+                    title=None,
+                    authors=(),
+                    date=None,
+                    language=None,
+                    source=None,
+                    document_type=None,
+                    extra={},
+                ),
+                body=(),
+                footnotes={},
+                definitions={},
+                annotations=(),
+            )
         root = doc.body
         if root is None:
-            return ContentDocument()
+            return ContentDocument.model_construct(
+                metadata=DocumentMetadata.model_construct(
+                    title=None,
+                    authors=(),
+                    date=None,
+                    language=None,
+                    source=None,
+                    document_type=None,
+                    extra={},
+                ),
+                body=(),
+                footnotes={},
+                definitions={},
+                annotations=(),
+            )
 
     # Convert the element tree to AST blocks.
     blocks = _process_children_as_blocks(root, url)
@@ -886,12 +1161,22 @@ def html_to_document(
     except Exception:
         pass
 
-    metadata = DocumentMetadata(
+    metadata = DocumentMetadata.model_construct(
         title=title,
-        source=SourceRef(uri=url, mime_type="text/html") if url else None,
+        authors=(),
+        date=None,
+        language=None,
+        source=SourceRef.model_construct(uri=url, mime_type="text/html", artifact_id=None)
+        if url
+        else None,
+        document_type=None,
+        extra={},
     )
 
-    return ContentDocument(
+    return ContentDocument.model_construct(
         metadata=metadata,
         body=tuple(blocks),
+        footnotes={},
+        definitions={},
+        annotations=(),
     )
