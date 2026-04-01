@@ -191,7 +191,10 @@ class GetPageTextTool(KaosTool):
             text = serialize_text(doc)
             return ToolResult.create_success(text)
         except Exception as exc:
-            return ToolResult.create_error(f"Extraction failed for {url}: {exc}")
+            return ToolResult.create_error(
+                f"Extraction failed for {url}: {exc}. "
+                "The HTML may be malformed. Try 'kaos-web-fetch-page' for full AST extraction."
+            )
 
 
 class GetPageMarkdownTool(KaosTool):
@@ -243,7 +246,10 @@ class GetPageMarkdownTool(KaosTool):
             md = serialize_markdown(doc)
             return ToolResult.create_success(md)
         except Exception as exc:
-            return ToolResult.create_error(f"Extraction failed for {url}: {exc}")
+            return ToolResult.create_error(
+                f"Extraction failed for {url}: {exc}. "
+                "The HTML may be malformed. Try 'kaos-web-fetch-page' for full AST extraction."
+            )
 
 
 class GetPageMetadataTool(KaosTool):
@@ -286,7 +292,10 @@ class GetPageMetadataTool(KaosTool):
             meta = extract_metadata(html, url=final_url)
             return ToolResult.create_success(output=meta.model_dump(exclude_none=True))
         except Exception as exc:
-            return ToolResult.create_error(f"Metadata extraction failed for {url}: {exc}")
+            return ToolResult.create_error(
+                f"Metadata extraction failed for {url}: {exc}. "
+                "The HTML may be malformed or the page may not have standard metadata tags."
+            )
 
 
 class SearchPageTool(KaosTool):
