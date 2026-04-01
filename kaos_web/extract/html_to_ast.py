@@ -188,20 +188,33 @@ def _trim_inline_whitespace(inlines: list[Inline]) -> list[Inline]:
 
 
 def _merge_adjacent_text(inlines: list[Inline]) -> list[Inline]:
-    """Merge adjacent Text nodes and collapse double spaces.
+    """Merge adjacent Text nodes and adjacent same-type inline formatting nodes.
 
-    When a dangerous link is stripped, the surrounding text nodes may have
-    adjacent spaces that produce double-space gaps. This merges them.
+    - Adjacent Text nodes: merge and collapse double spaces.
+    - Adjacent Strong+Strong, Emphasis+Emphasis, Strikethrough+Strikethrough:
+      merge children into a single node.
     """
     if not inlines:
         return inlines
     result: list[Inline] = []
     for node in inlines:
-        if isinstance(node, Text) and result and isinstance(result[-1], Text):
-            # Merge adjacent text nodes, collapsing double spaces
-            merged = result[-1].value + node.value
-            merged = _WS_RE.sub(" ", merged)
+        if not result:
+            result.append(node)
+            continue
+        prev = result[-1]
+        # Merge adjacent Text nodes
+        if isinstance(node, Text) and isinstance(prev, Text):
+            merged = _WS_RE.sub(" ", prev.value + node.value)
             result[-1] = Text(value=merged)
+        # Merge adjacent Strong nodes
+        elif isinstance(node, Strong) and isinstance(prev, Strong):
+            result[-1] = Strong(children=prev.children + node.children)
+        # Merge adjacent Emphasis nodes
+        elif isinstance(node, Emphasis) and isinstance(prev, Emphasis):
+            result[-1] = Emphasis(children=prev.children + node.children)
+        # Merge adjacent Strikethrough nodes
+        elif isinstance(node, Strikethrough) and isinstance(prev, Strikethrough):
+            result[-1] = Strikethrough(children=prev.children + node.children)
         else:
             result.append(node)
     return result

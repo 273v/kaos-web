@@ -100,7 +100,7 @@ Rust-native tools, but produces typed AST with provenance instead of markdown st
 
 | Limitation | Impact | Workaround |
 |-----------|--------|-----------|
-| Adjacent bold not merged | `**bold1****bold2**` instead of `**bold1bold2**` | Cosmetic only; valid markdown. Fix requires serializer change. |
+| ~~Adjacent bold not merged~~ | Fixed — adjacent same-type inline nodes (Strong, Emphasis, Strikethrough) are merged at AST construction time | |
 | Table without thead | Empty header row in markdown output | Acceptable GFM behavior. Consider inferring header from first row. |
 | Figure caption | Rendered as italic paragraph, not associated with figure | kaos-content `Figure` has caption field; serializer doesn't use it for non-image figures. |
 | Multi-paragraph list items | `<li><p>A</p><p>B</p></li>` merges without blank line | Serializer limitation; AST correctly has two Paragraph blocks in ListItem. |
