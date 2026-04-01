@@ -29,7 +29,7 @@ _has_kaos_pdf = bool(sys.modules.get("kaos_pdf")) or (
 class TestRegisterTools:
     def test_register_web_tools(self) -> None:
         """Register 5 tools with a runtime and verify count and names."""
-        runtime = KaosRuntime.default()
+        runtime = KaosRuntime()
         count = register_web_tools(runtime)
 
         assert count == 5, f"Expected 5 tools registered, got {count}"

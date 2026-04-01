@@ -110,6 +110,11 @@ class CacheMiddleware:
         # Cache the response if appropriate
         if self._is_cacheable(request, response):
             ttl = self._get_ttl(response)
+
+            # TTL of 0 means don't cache (no-cache directive)
+            if ttl <= 0:
+                return response
+
             size_bytes = self._estimate_size(response)
 
             # Evict if needed before inserting
@@ -120,7 +125,7 @@ class CacheMiddleware:
                 key=key,
                 response=response,
                 created_at=now,
-                expires_at=now + ttl if ttl > 0 else None,
+                expires_at=now + ttl,
                 size_bytes=size_bytes,
             )
             self._cache[key] = entry
