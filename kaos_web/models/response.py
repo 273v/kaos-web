@@ -27,3 +27,14 @@ class WebResponse(BaseModel):
 
     elapsed_ms: float = 0.0
     """Request duration in milliseconds."""
+
+    cookies: dict[str, str] = {}
+    """Response cookies."""
+
+    error: str | None = None
+    """Error message if request failed but produced a partial response."""
+
+    @property
+    def ok(self) -> bool:
+        """True if status code is 2xx or 3xx."""
+        return 200 <= self.status_code < 400

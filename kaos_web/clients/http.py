@@ -1,52 +1,258 @@
-"""HTTP client using httpx with HTTP/2 support."""
+"""HTTP client using httpx with connection pooling, auth, proxy, SSL, and error mapping."""
 
 from __future__ import annotations
 
+import logging
+import ssl
+from typing import Self
+
 import httpx
 
+from kaos_web.clients.config import HttpClientConfig
+from kaos_web.errors import (
+    WebClientError,
+    WebNetworkError,
+    WebProxyError,
+    WebRateLimitError,
+    WebRedirectError,
+    WebServerError,
+    WebTimeoutError,
+)
 from kaos_web.models import WebRequest, WebResponse
 
-_USER_AGENT = "KAOS-Web/0.1 (+https://273ventures.com/kaos-web)"
+logger = logging.getLogger(__name__)
 
 
 class HttpClient:
-    """Async HTTP client wrapping httpx.AsyncClient."""
+    """Async HTTP client wrapping httpx.AsyncClient.
 
-    def __init__(
-        self,
-        *,
-        user_agent: str = _USER_AGENT,
-        http2: bool = True,
-        max_redirects: int = 10,
-    ) -> None:
-        self._client = httpx.AsyncClient(
-            http2=http2,
-            follow_redirects=True,
-            max_redirects=max_redirects,
-            headers={"User-Agent": user_agent},
+    Features:
+    - Connection pooling with configurable limits
+    - HTTP/2 support
+    - Fine-grained timeouts (connect, read, write, pool)
+    - SSL/TLS configuration (custom CA bundles, client certs, disable verification)
+    - Proxy support (HTTP, HTTPS, SOCKS)
+    - Authentication (Basic, Bearer token, API key)
+    - Cookie persistence across requests
+    - Structured error mapping to WebError hierarchy
+    """
+
+    def __init__(self, config: HttpClientConfig | None = None) -> None:
+        self._config = config or HttpClientConfig()
+        self._client = self._build_client()
+
+    def _build_client(self) -> httpx.AsyncClient:
+        """Build httpx.AsyncClient from config."""
+        cfg = self._config
+
+        # Timeouts
+        timeout = httpx.Timeout(
+            connect=cfg.connect_timeout,
+            read=cfg.read_timeout,
+            write=cfg.write_timeout,
+            pool=cfg.pool_timeout,
         )
+
+        # Connection pool limits
+        limits = httpx.Limits(
+            max_connections=cfg.max_connections,
+            max_keepalive_connections=cfg.max_keepalive_connections,
+            keepalive_expiry=cfg.keepalive_expiry,
+        )
+
+        # SSL verification
+        verify: bool | ssl.SSLContext = cfg.verify_ssl
+        if cfg.ca_bundle:
+            ctx = ssl.create_default_context(cafile=cfg.ca_bundle)
+            if cfg.client_cert:
+                ctx.load_cert_chain(certfile=cfg.client_cert, keyfile=cfg.client_key)
+            verify = ctx
+        elif cfg.client_cert:
+            ctx = ssl.create_default_context()
+            ctx.load_cert_chain(certfile=cfg.client_cert, keyfile=cfg.client_key)
+            verify = ctx
+        elif not cfg.verify_ssl:
+            verify = False
+
+        # Authentication
+        auth = self._build_auth()
+
+        # Default headers
+        headers = {"User-Agent": cfg.user_agent}
+
+        # API key goes in headers, not in httpx auth
+        if cfg.api_key:
+            headers[cfg.api_key_header] = cfg.api_key
+
+        return httpx.AsyncClient(
+            http2=True,
+            timeout=timeout,
+            limits=limits,
+            verify=verify,
+            proxy=cfg.proxy,
+            auth=auth,
+            headers=headers,
+            follow_redirects=cfg.follow_redirects,
+            max_redirects=cfg.max_redirects,
+        )
+
+    def _build_auth(self) -> httpx.Auth | None:
+        """Build httpx auth from config (first non-None wins)."""
+        cfg = self._config
+        if cfg.basic_auth:
+            return httpx.BasicAuth(username=cfg.basic_auth[0], password=cfg.basic_auth[1])
+        if cfg.bearer_token:
+            return _BearerAuth(cfg.bearer_token)
+        return None
 
     async def fetch(self, request: WebRequest) -> WebResponse:
-        """Fetch a URL and return the response."""
-        headers = {**request.headers}
+        """Fetch a URL and return the response.
 
-        resp = await self._client.request(
-            method=request.method,
-            url=request.url,
-            headers=headers,
-            timeout=request.timeout,
-            follow_redirects=request.follow_redirects,
-        )
+        Maps httpx exceptions to WebError hierarchy for structured error handling.
+        """
+        url = request.url
+        headers = {**request.headers} if request.headers else {}
+
+        try:
+            resp = await self._client.request(
+                method=request.method,
+                url=url,
+                headers=headers,
+                timeout=request.timeout,
+                follow_redirects=request.follow_redirects,
+            )
+        except httpx.ConnectTimeout as exc:
+            raise WebTimeoutError(
+                f"Connection timed out for {url}. "
+                f"The server may be unreachable or DNS resolution is slow. "
+                f"Try increasing connect_timeout (current: {self._config.connect_timeout}s).",
+                url=url,
+                timeout_type="connect",
+            ) from exc
+        except httpx.ReadTimeout as exc:
+            raise WebTimeoutError(
+                f"Read timed out for {url}. "
+                f"The server accepted the connection but stopped sending data. "
+                f"Try increasing read_timeout (current: {self._config.read_timeout}s).",
+                url=url,
+                timeout_type="read",
+            ) from exc
+        except httpx.WriteTimeout as exc:
+            raise WebTimeoutError(
+                f"Write timed out for {url}.",
+                url=url,
+                timeout_type="write",
+            ) from exc
+        except httpx.PoolTimeout as exc:
+            raise WebTimeoutError(
+                f"Connection pool exhausted for {url}. "
+                f"All {self._config.max_connections} connections are in use. "
+                f"Try increasing max_connections or reducing concurrency.",
+                url=url,
+                timeout_type="pool",
+            ) from exc
+        except httpx.ConnectError as exc:
+            raise WebNetworkError(
+                f"Failed to connect to {url}. "
+                f"DNS resolution failed, connection refused, or network is unreachable.",
+                url=url,
+            ) from exc
+        except httpx.ProxyError as exc:
+            raise WebProxyError(
+                f"Proxy error for {url}: {exc}. "
+                f"Check proxy configuration (current: {self._config.proxy}).",
+                url=url,
+            ) from exc
+        except httpx.TooManyRedirects as exc:
+            raise WebRedirectError(
+                f"Too many redirects for {url} (max: {self._config.max_redirects}). "
+                f"The server may be in a redirect loop.",
+                url=url,
+            ) from exc
+        except httpx.NetworkError as exc:
+            raise WebNetworkError(
+                f"Network error for {url}: {exc}",
+                url=url,
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise WebTimeoutError(
+                f"Request timed out for {url}: {exc}",
+                url=url,
+                timeout_type="unknown",
+            ) from exc
+
+        # Map HTTP status codes to errors
+        final_url = str(resp.url)
+        status = resp.status_code
+
+        if status == 429:
+            retry_after = _parse_retry_after(resp.headers.get("retry-after"))
+            raise WebRateLimitError(
+                f"Rate limited (429) by {final_url}. "
+                + (f"Retry after {retry_after:.0f}s." if retry_after else "No Retry-After header.")
+                + " Reduce request frequency or add rate limiting middleware.",
+                url=final_url,
+                retry_after=retry_after,
+            )
+
+        if status >= 500:
+            raise WebServerError(
+                f"Server error ({status}) from {final_url}. "
+                f"The server encountered an internal error. This may be transient.",
+                url=final_url,
+                status_code=status,
+            )
+
+        if status >= 400:
+            raise WebClientError(
+                f"Client error ({status}) from {final_url}. "
+                "The request was rejected. Check URL, authentication, or parameters.",
+                url=final_url,
+                status_code=status,
+            )
 
         return WebResponse(
-            url=str(resp.url),
-            status_code=resp.status_code,
+            url=final_url,
+            status_code=status,
             content_type=resp.headers.get("content-type", ""),
             html=resp.text,
             headers=dict(resp.headers),
             elapsed_ms=resp.elapsed.total_seconds() * 1000 if resp.elapsed else 0.0,
+            cookies=dict(resp.cookies.items()),
         )
 
     async def close(self) -> None:
         """Release client resources."""
         await self._client.aclose()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        await self.close()
+
+    @property
+    def config(self) -> HttpClientConfig:
+        """Current client configuration."""
+        return self._config
+
+
+class _BearerAuth(httpx.Auth):
+    """Bearer token authentication."""
+
+    def __init__(self, token: str) -> None:
+        self._token = token
+
+    def auth_flow(self, request: httpx.Request):
+        request.headers["Authorization"] = f"Bearer {self._token}"
+        yield request
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Parse Retry-After header (seconds or HTTP-date)."""
+    if not value:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
