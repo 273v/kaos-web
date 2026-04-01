@@ -26,6 +26,26 @@ def main(argv: list[str] | None = None) -> None:
     p_meta.add_argument("source", help="URL or path to HTML file")
     p_meta.add_argument("--json", action="store_true", help="Structured JSON output")
 
+    # fetch
+    p_fetch = sub.add_parser("fetch", help="Fetch a URL and show response info")
+    p_fetch.add_argument("source", help="URL to fetch")
+    p_fetch.add_argument("--browser", action="store_true", help="Use browser rendering")
+    p_fetch.add_argument("--output", "-o", type=Path, help="Save HTML to file")
+    p_fetch.add_argument("--json", action="store_true", help="Structured JSON output")
+
+    # search
+    p_search = sub.add_parser("search", help="Fetch and search within a web page")
+    p_search.add_argument("source", help="URL or path to HTML file")
+    p_search.add_argument("query", help="Search query")
+    p_search.add_argument("--top-k", "-k", type=int, default=10, help="Max results (default: 10)")
+    p_search.add_argument(
+        "--level",
+        choices=["paragraph", "sentence"],
+        default="paragraph",
+        help="Search granularity (default: paragraph)",
+    )
+    p_search.add_argument("--json", action="store_true", help="Structured JSON output")
+
     args = parser.parse_args(argv)
 
     if not args.command:
@@ -35,6 +55,8 @@ def main(argv: list[str] | None = None) -> None:
     handlers = {
         "extract": _cmd_extract,
         "metadata": _cmd_metadata,
+        "fetch": _cmd_fetch,
+        "search": _cmd_search,
     }
     handlers[args.command](args)
 
@@ -136,3 +158,86 @@ def _cmd_metadata(args: argparse.Namespace) -> None:
         print(f"JSON-LD: {len(meta.structured_data)} items")
     if meta.opengraph:
         print(f"OpenGraph: {len(meta.opengraph)} properties")
+
+
+def _cmd_fetch(args: argparse.Namespace) -> None:
+    """Fetch a URL and show response info."""
+    import asyncio
+
+    from kaos_web.clients.http import HttpClient
+    from kaos_web.models import WebRequest
+
+    async def _do_fetch() -> None:
+        async with HttpClient() as client:
+            resp = await client.fetch(WebRequest(url=args.source))
+            if args.json:
+                _json_out(
+                    {
+                        "command": "fetch",
+                        "url": resp.url,
+                        "status_code": resp.status_code,
+                        "content_type": resp.content_type,
+                        "content_length": len(resp.html),
+                        "elapsed_ms": resp.elapsed_ms,
+                    }
+                )
+            elif args.output:
+                args.output.write_text(resp.html, encoding="utf-8")
+                print(f"Written {len(resp.html)} bytes to {args.output}", file=sys.stderr)
+            else:
+                print(f"URL: {resp.url}")
+                print(f"Status: {resp.status_code}")
+                print(f"Content-Type: {resp.content_type}")
+                print(f"Content-Length: {len(resp.html)}")
+                print(f"Elapsed: {resp.elapsed_ms:.0f} ms")
+
+    asyncio.run(_do_fetch())
+
+
+def _cmd_search(args: argparse.Namespace) -> None:
+    """Fetch and search within a web page."""
+    from kaos_web.extract import html_to_document
+
+    html, url = _get_html(args.source)
+    doc = html_to_document(html, url=url)
+
+    from kaos_pdf.search import search_document
+
+    search_results = search_document(doc, args.query, top_k=args.top_k, level=args.level)
+
+    if args.json:
+        _json_out(
+            {
+                "command": "search",
+                "source": args.source,
+                "url": url,
+                "query": args.query,
+                "level": args.level,
+                "total_matches": search_results.total_matches,
+                "has_more": search_results.has_more,
+                "results": [
+                    {
+                        "text": r.text,
+                        "score": r.score,
+                        "page": r.page,
+                        "section": r.section_title,
+                        "ref": r.block_ref,
+                    }
+                    for r in search_results.results
+                ],
+            }
+        )
+        return
+
+    results = search_results.results
+    if not results:
+        print(f'No results for "{args.query}"')
+        return
+
+    print(f'Results for "{args.query}" ({search_results.total_matches} matches):\n')
+    for i, r in enumerate(results, 1):
+        section_str = f" | {r.section_title}" if r.section_title else ""
+        print(f"[{i}] Score: {r.score:.1f}{section_str}")
+        for line in r.text.splitlines():
+            print(f"    {line}")
+        print()
