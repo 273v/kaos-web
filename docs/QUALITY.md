@@ -66,15 +66,43 @@ scaling with no algorithmic blowup.
 - Readability is ~7% of total time; AST conversion dominates
 - Markdown serialization adds ~10% on top of AST conversion
 
+### Comparison to Alternatives (measured head-to-head)
+
+All three tools run on the same HTML inputs, same machine. kaos-web produces typed AST
+with provenance; the others produce markdown strings. Measured with 3s runs per case.
+
+**Article (~3 KB):**
+
+| Tool | Latency | Throughput | Docs/s |
+|------|---------|-----------|--------|
+| **kaos-web** (AST + markdown) | **1.65 ms** | **2,346 KB/s** | **605** |
+| markdownify (BS4 → string) | 2.10 ms | 1,843 KB/s | 476 |
+| trafilatura (lxml + XPath) | 1.90 ms | 2,035 KB/s | 525 |
+
+**Medium (~16 KB):**
+
+| Tool | Latency | Throughput | Docs/s |
+|------|---------|-----------|--------|
+| kaos-web (AST + markdown) | 11.28 ms | 1,481 KB/s | 89 |
+| **markdownify** (BS4 → string) | **9.01 ms** | **1,854 KB/s** | **111** |
+| trafilatura (lxml + XPath) | 9.34 ms | 1,791 KB/s | 107 |
+
+**Summary**: Comparable throughput across all three. kaos-web is fastest on small
+articles (~1.3x), markdownify is fastest on larger documents (~1.25x). The difference
+is that kaos-web produces a typed `ContentDocument` AST with provenance, block_refs,
+and full kaos ecosystem integration (DocumentView, BM25 search, MCP resources) —
+the others produce markdown strings.
+
+Reproduce with:
+```bash
+uv run --with markdownify --with trafilatura python scripts/benchmark_comparison.py
+```
+
 ### Notes
 
-All benchmarks are reproducible via `uv run pytest tests/unit/test_benchmarks.py -v -s`.
+All internal benchmarks are reproducible via `uv run pytest tests/unit/test_benchmarks.py -v -s`.
 The throughput test runs each size for 1 second and reports KB/s and docs/s. The latency
 benchmarks use `pytest-benchmark` with statistical min/max/mean/stddev.
-
-kaos-web uses lxml (C extension) directly without BeautifulSoup4, which avoids the
-primary bottleneck in pure-Python HTML converters. It produces typed AST with provenance,
-not markdown strings, so it does more work per document than a simple string converter.
 
 ---
 
