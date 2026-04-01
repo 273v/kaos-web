@@ -13,9 +13,10 @@ MCP resource templates, and all downstream tooling work automatically.
 
 ## Design Principles
 
-- **Minimal dependencies**: 3 required deps (httpx, lxml, html-to-markdown). No trafilatura,
-  no readability-lxml, no extruct. Core extraction algorithms are implemented in-house for
-  full control and a lean dependency tree.
+- **Minimal dependencies**: 2 required deps (httpx, lxml — lxml already in kaos-content).
+  No trafilatura, no readability-lxml, no extruct, no html-to-markdown. Core extraction
+  algorithms are implemented in-house. HTML maps directly to ContentDocument AST; markdown
+  output comes from the existing `serialize_markdown()` serializer.
 - **ContentDocument output**: All extraction paths produce `kaos-content` AST. Agents interact
   with web content through the same DocumentView/block_ref/search APIs as PDF content.
 - **Dual client**: HTTP (httpx) for static pages, Playwright (optional) for JS-rendered pages.
@@ -69,10 +70,9 @@ kaos_web/
 | Package | Version | License | Purpose |
 |---------|---------|---------|---------|
 | `kaos-core` | >=0.1.0 | Proprietary | Runtime, tools, artifacts |
-| `kaos-content` | >=0.1.0 | Proprietary | ContentDocument AST |
+| `kaos-content` | >=0.1.0 | Proprietary | ContentDocument AST, serializers |
 | `httpx[http2]` | >=0.28 | BSD-3 | HTTP client with HTTP/2, connection pooling |
-| `lxml` | >=5.0 | BSD | HTML parsing (already in kaos-content) |
-| `html-to-markdown` | >=2.28 | MIT | HTML→Markdown conversion |
+| `lxml` | >=5.0 | BSD | HTML parsing (already a transitive dep via kaos-content) |
 
 ### Optional
 
@@ -87,6 +87,7 @@ kaos_web/
 | `trafilatura` | 15 transitive deps, 12K lines. We implement readability-style extraction in ~400 lines |
 | `readability-lxml` | Core algorithm is ~300 lines, easy to reimplement. Drops chardet + cssselect deps |
 | `extruct` | 20 transitive deps (rdflib, pyrdfa3, beautifulsoup4). JSON-LD + OpenGraph extraction is ~50 lines with lxml |
+| `html-to-markdown` | Unnecessary — we map HTML directly to ContentDocument AST; `serialize_markdown()` handles markdown output |
 | `beautifulsoup4` | lxml handles all parsing needs. BS4 adds complexity without benefit |
 | `html2text` | GPLv3 — license incompatible |
 | `protego` | stdlib `urllib.robotparser` sufficient. Add wildcard matching later if needed |
@@ -217,7 +218,7 @@ Key = (method, url, params). Configurable TTL and max size.
 |------|------|-------------|
 | **FetchPage** | `kaos-web-fetch-page` | Fetch URL → ContentDocument artifact. Uses HTTP by default, browser if `use_browser=true`. Returns summary + artifact link. |
 | **GetPageText** | `kaos-web-get-text` | Fetch URL → plain text (no artifact storage needed). Lightweight. |
-| **GetPageMarkdown** | `kaos-web-get-markdown` | Fetch URL → markdown. Uses readability + html-to-markdown. |
+| **GetPageMarkdown** | `kaos-web-get-markdown` | Fetch URL → markdown. Uses readability → ContentDocument AST → `serialize_markdown()`. |
 | **GetPageMetadata** | `kaos-web-get-metadata` | Extract JSON-LD, OpenGraph, meta tags from URL. No content extraction. |
 | **SearchPage** | `kaos-web-search-page` | Fetch + extract + BM25 search within the page. Returns matching sentences/paragraphs with block_refs. |
 
@@ -306,7 +307,6 @@ Key differences:
 
 - Mozilla Readability.js: https://github.com/mozilla/readability
 - readability-lxml (algorithm reference): https://github.com/buriy/python-readability
-- html-to-markdown: https://pypi.org/project/html-to-markdown/
 - httpx: https://www.python-httpx.org/
 - Playwright Python: https://playwright.dev/python/
 - kelvin-web: `../kelvin-modules/kelvin_web/`
