@@ -66,18 +66,15 @@ scaling with no algorithmic blowup.
 - Readability is ~7% of total time; AST conversion dominates
 - Markdown serialization adds ~10% on top of AST conversion
 
-### Comparison to Alternatives
+### Notes
 
-| Tool | Approach | Throughput (est.) |
-|------|----------|-------------------|
-| **kaos-web** | lxml + custom readability + AST | ~2.2 MB/s |
-| markdownify | BeautifulSoup4 → string | ~0.3 MB/s (typical) |
-| html-to-markdown (kreuzberg) | Rust core (lol_html) | ~150-280 MB/s |
-| trafilatura | lxml + XPath + justext | ~0.5-1.0 MB/s |
+All benchmarks are reproducible via `uv run pytest tests/unit/test_benchmarks.py -v -s`.
+The throughput test runs each size for 1 second and reports KB/s and docs/s. The latency
+benchmarks use `pytest-benchmark` with statistical min/max/mean/stddev.
 
-kaos-web is ~4-7x faster than pure-Python alternatives (markdownify, trafilatura) because
-it uses lxml (C extension) directly without BeautifulSoup4 overhead. It's slower than
-Rust-native tools, but produces typed AST with provenance instead of markdown strings.
+kaos-web uses lxml (C extension) directly without BeautifulSoup4, which avoids the
+primary bottleneck in pure-Python HTML converters. It produces typed AST with provenance,
+not markdown strings, so it does more work per document than a simple string converter.
 
 ---
 
