@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -27,3 +29,9 @@ class WebRequest(BaseModel):
 
     use_browser: bool = False
     """If True, use browser rendering (requires playwright)."""
+
+    screenshot: bool = False
+    """If True, capture a screenshot (browser only)."""
+
+    extra: dict[str, Any] = {}
+    """Extra options (wait_until, wait_for_selector, etc.)."""

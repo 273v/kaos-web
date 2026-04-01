@@ -10,3 +10,6 @@ __all__ = [
     "HttpClientConfig",
     "WebClientProtocol",
 ]
+
+# BrowserClient is lazily importable (requires [browser] extra)
+# from kaos_web.clients.browser import BrowserClient

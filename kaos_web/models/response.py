@@ -31,6 +31,13 @@ class WebResponse(BaseModel):
     cookies: dict[str, str] = {}
     """Response cookies."""
 
+    # Browser-specific (None for HttpClient)
+    title: str | None = None
+    """Page title from browser (None for HTTP client)."""
+
+    screenshot: bytes | None = None
+    """Screenshot bytes (None unless requested)."""
+
     error: str | None = None
     """Error message if request failed but produced a partial response."""
 
