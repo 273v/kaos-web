@@ -5,13 +5,17 @@ from kaos_web.extract.images import ExtractedImage, extract_images
 from kaos_web.extract.links import ExtractedLink, extract_links
 from kaos_web.extract.metadata import extract_metadata
 from kaos_web.extract.readability import extract_content
+from kaos_web.extract.search import SearchResult, SearchResults, search_document
 
 __all__ = [
     "ExtractedImage",
     "ExtractedLink",
+    "SearchResult",
+    "SearchResults",
     "extract_content",
     "extract_images",
     "extract_links",
     "extract_metadata",
     "html_to_document",
+    "search_document",
 ]

@@ -17,6 +17,15 @@ from kaos_web.errors import (
 )
 from kaos_web.models import WebRequest, WebResponse
 
+# Config with NO middleware for unit tests that mock httpx responses.
+# Middleware (retry, rate limit) would send extra requests that break mocks.
+_NO_MIDDLEWARE = HttpClientConfig(
+    enable_retry=False,
+    enable_rate_limit=False,
+    enable_robots=False,
+    enable_cache=False,
+)
+
 
 class TestBasicFetch:
     async def test_basic_get(self, httpx_mock: HTTPXMock) -> None:
@@ -28,7 +37,7 @@ class TestBasicFetch:
             headers={"content-type": "text/html; charset=utf-8"},
         )
 
-        async with HttpClient() as client:
+        async with HttpClient(_NO_MIDDLEWARE) as client:
             resp = await client.fetch(WebRequest(url="https://example.com/page"))
 
         assert isinstance(resp, WebResponse), "fetch should return a WebResponse"
@@ -150,7 +159,7 @@ class TestErrorMapping:
             url="https://example.com/slow",
         )
 
-        async with HttpClient() as client:
+        async with HttpClient(_NO_MIDDLEWARE) as client:
             with pytest.raises(WebTimeoutError) as exc_info:
                 await client.fetch(WebRequest(url="https://example.com/slow"))
 
@@ -167,7 +176,7 @@ class TestErrorMapping:
             url="https://example.com/down",
         )
 
-        async with HttpClient() as client:
+        async with HttpClient(_NO_MIDDLEWARE) as client:
             with pytest.raises(WebNetworkError) as exc_info:
                 await client.fetch(WebRequest(url="https://example.com/down"))
 
@@ -181,7 +190,7 @@ class TestErrorMapping:
             status_code=500,
         )
 
-        async with HttpClient() as client:
+        async with HttpClient(_NO_MIDDLEWARE) as client:
             with pytest.raises(WebServerError) as exc_info:
                 await client.fetch(WebRequest(url="https://example.com/error"))
 
@@ -195,7 +204,7 @@ class TestErrorMapping:
             status_code=404,
         )
 
-        async with HttpClient() as client:
+        async with HttpClient(_NO_MIDDLEWARE) as client:
             with pytest.raises(WebClientError) as exc_info:
                 await client.fetch(WebRequest(url="https://example.com/missing"))
 
@@ -210,7 +219,7 @@ class TestErrorMapping:
             headers={"retry-after": "30"},
         )
 
-        async with HttpClient() as client:
+        async with HttpClient(_NO_MIDDLEWARE) as client:
             with pytest.raises(WebRateLimitError) as exc_info:
                 await client.fetch(WebRequest(url="https://example.com/api"))
 
@@ -226,7 +235,7 @@ class TestContextManager:
         """Test the async context manager pattern opens and closes cleanly."""
         httpx_mock.add_response(status_code=200, html="<html></html>")
 
-        async with HttpClient() as client:
+        async with HttpClient(_NO_MIDDLEWARE) as client:
             resp = await client.fetch(WebRequest(url="https://example.com/"))
             assert resp.status_code == 200
 

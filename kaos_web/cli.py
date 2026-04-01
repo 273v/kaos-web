@@ -201,7 +201,7 @@ def _cmd_search(args: argparse.Namespace) -> None:
     html, url = _get_html(args.source)
     doc = html_to_document(html, url=url)
 
-    from kaos_pdf.search import search_document
+    from kaos_web.extract.search import search_document
 
     search_results = search_document(doc, args.query, top_k=args.top_k, level=args.level)
 

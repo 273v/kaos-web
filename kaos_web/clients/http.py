@@ -40,6 +40,7 @@ class HttpClient:
     def __init__(self, config: HttpClientConfig | None = None) -> None:
         self._config = config or HttpClientConfig()
         self._client = self._build_client()
+        self._chain = self._build_middleware_chain()
 
     def _build_client(self) -> httpx.AsyncClient:
         """Build httpx.AsyncClient from config."""
@@ -59,6 +60,11 @@ class HttpClient:
             max_keepalive_connections=cfg.max_keepalive_connections,
             keepalive_expiry=cfg.keepalive_expiry,
         )
+
+        # Validate SSL config
+        if cfg.client_cert and not cfg.client_key:
+            msg = "client_cert requires client_key"
+            raise ValueError(msg)
 
         # SSL verification
         verify: bool | ssl.SSLContext = cfg.verify_ssl
@@ -113,11 +119,56 @@ class HttpClient:
             return _BearerAuth(cfg.bearer_token)
         return None
 
-    async def fetch(self, request: WebRequest) -> WebResponse:
-        """Fetch a URL and return the response.
+    def _build_middleware_chain(self):
+        """Build the middleware chain from config.
 
-        Maps httpx exceptions to WebError hierarchy for structured error handling.
+        Chain order (outermost first): retry → rate_limit → robots → cache → _raw_fetch
+        - Retry wraps everything: if inner middleware or fetch fails, retry catches it
+        - Rate limit throttles before hitting the network
+        - Robots checks before fetching
+        - Cache is innermost: returns cached response before network, caches after
         """
+        from kaos_web.middleware.base import MiddlewareChain
+
+        chain = MiddlewareChain(self._raw_fetch)
+        cfg = self._config
+
+        # Add middleware in reverse order of desired execution
+        # (MiddlewareChain reverses internally — first added = outermost)
+        if cfg.enable_retry:
+            from kaos_web.middleware.retry import RetryConfig, RetryMiddleware
+
+            chain.add(RetryMiddleware(RetryConfig(max_retries=cfg.max_retries)))
+
+        if cfg.enable_rate_limit:
+            from kaos_web.middleware.rate_limit import RateLimitConfig, RateLimitMiddleware
+
+            chain.add(
+                RateLimitMiddleware(RateLimitConfig(requests_per_second=cfg.requests_per_second))
+            )
+
+        if cfg.enable_robots:
+            from kaos_web.middleware.robots import RobotsMiddleware
+
+            chain.add(RobotsMiddleware())
+
+        if cfg.enable_cache:
+            from kaos_web.middleware.cache import CacheConfig, CacheMiddleware
+
+            chain.add(CacheMiddleware(CacheConfig(default_ttl=cfg.cache_ttl)))
+
+        return chain
+
+    async def fetch(self, request: WebRequest) -> WebResponse:
+        """Fetch a URL through the middleware chain.
+
+        Goes through: retry → rate_limit → robots → cache → raw HTTP.
+        Configure middleware via HttpClientConfig flags.
+        """
+        return await self._chain.execute(request)
+
+    async def _raw_fetch(self, request: WebRequest) -> WebResponse:
+        """Raw HTTP fetch without middleware. Maps httpx exceptions to WebError."""
         url = request.url
         headers = {**request.headers} if request.headers else {}
 

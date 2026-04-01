@@ -47,6 +47,28 @@ class HttpClientConfig(BaseModel):
     api_key: str | None = None
     api_key_header: str = "X-API-Key"
 
+    # Middleware (enabled by default for production use)
+    enable_retry: bool = True
+    """Enable automatic retry with exponential backoff on transient failures."""
+
+    enable_rate_limit: bool = True
+    """Enable per-domain rate limiting."""
+
+    enable_robots: bool = False
+    """Enable robots.txt checking (disabled by default — opt-in for scraping)."""
+
+    enable_cache: bool = False
+    """Enable in-memory HTTP response caching."""
+
+    max_retries: int = 3
+    """Maximum retry attempts (when enable_retry=True)."""
+
+    requests_per_second: float = 10.0
+    """Per-domain rate limit (when enable_rate_limit=True)."""
+
+    cache_ttl: int = 300
+    """Default cache TTL in seconds (when enable_cache=True)."""
+
 
 class BrowserClientConfig(BaseModel):
     """Configuration for BrowserClient."""

@@ -21,16 +21,22 @@ _data: dict = {}
 if _DATA_FILE.exists():
     _data = json.loads(_DATA_FILE.read_text())
 
-DESKTOP_USER_AGENTS: list[str] = _data.get("desktop", [
-    # Fallback if data file missing
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
-])
+DESKTOP_USER_AGENTS: list[str] = _data.get(
+    "desktop",
+    [
+        # Fallback if data file missing
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+    ],
+)
 
-MOBILE_USER_AGENTS: list[str] = _data.get("mobile", [
-    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36",
-])
+MOBILE_USER_AGENTS: list[str] = _data.get(
+    "mobile",
+    [
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36",
+    ],
+)
 
 ALL_USER_AGENTS: list[str] = DESKTOP_USER_AGENTS + MOBILE_USER_AGENTS
 
@@ -40,14 +46,14 @@ KAOS_BOT_UA = "KAOS-Web/0.1 (+https://273ventures.com/kaos-web)"
 
 def random_desktop_ua() -> str:
     """Return a random realistic desktop browser user-agent."""
-    return random.choice(DESKTOP_USER_AGENTS)  # noqa: S311
+    return random.choice(DESKTOP_USER_AGENTS)
 
 
 def random_mobile_ua() -> str:
     """Return a random realistic mobile browser user-agent."""
-    return random.choice(MOBILE_USER_AGENTS)  # noqa: S311
+    return random.choice(MOBILE_USER_AGENTS)
 
 
 def random_ua() -> str:
     """Return a random realistic browser user-agent (desktop or mobile)."""
-    return random.choice(ALL_USER_AGENTS)  # noqa: S311
+    return random.choice(ALL_USER_AGENTS)
