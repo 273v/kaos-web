@@ -1,0 +1,75 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kaos-web"
+dynamic = ["version"]
+description = "Web content extraction for KAOS — HTML to ContentDocument AST with provenance"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "LicenseRef-Proprietary" }
+authors = [
+  { name = "273 Ventures LLC", email = "it@273ventures.com" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = [
+  "kaos-content>=0.1.0",
+  "kaos-core>=0.1.0",
+  "httpx[http2]>=0.28.0",
+  "lxml>=5.0.0",
+]
+
+[project.scripts]
+kaos-web = "kaos_web.cli:main"
+
+[project.optional-dependencies]
+browser = ["playwright>=1.50.0"]
+mcp = ["kaos-mcp>=0.1.0"]
+nlp = ["kaos-nlp-core>=0.1.0"]
+
+[dependency-groups]
+dev = [
+  "kaos-mcp>=0.1.0",
+  "kaos-nlp-core>=0.1.0",
+  "pytest>=8.3.5",
+  "pytest-asyncio>=0.26.0",
+  "pytest-cov>=6.0.0",
+  "ruff>=0.11.0",
+  "ty>=0.0.1a17",
+]
+
+[project.urls]
+Repository = "https://github.com/273v/kaos-modules"
+
+[tool.hatch.version]
+path = "kaos_web/_version.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["kaos_web", "kaos_core", "kaos_content"]
+
+[tool.uv.sources]
+kaos-content = { path = "../kaos-content", editable = true }
+kaos-core = { path = "../kaos-core", editable = true }
+kaos-mcp = { path = "../kaos-mcp", editable = true }
+kaos-nlp-core = { path = "../kaos-nlp-core", editable = true }

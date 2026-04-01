@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Test Article — Example Site</title>
+    <meta name="description" content="A test article for kaos-web extraction.">
+    <meta name="author" content="Jane Doe">
+    <meta property="og:title" content="Test Article OG Title">
+    <meta property="og:description" content="OG description for the article.">
+    <meta property="og:url" content="https://example.com/article">
+    <meta property="og:site_name" content="Example Site">
+    <meta property="og:image" content="https://example.com/image.jpg">
+    <meta property="article:published_time" content="2026-03-15T10:00:00Z">
+    <link rel="canonical" href="https://example.com/article">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        "headline": "Test Article JSON-LD",
+        "author": {"@type": "Person", "name": "Jane Doe"},
+        "datePublished": "2026-03-15"
+    }
+    </script>
+</head>
+<body>
+    <nav>
+        <a href="/">Home</a>
+        <a href="/about">About</a>
+        <a href="/contact">Contact</a>
+    </nav>
+
+    <aside class="sidebar">
+        <h3>Related Posts</h3>
+        <ul>
+            <li><a href="/post1">Post 1</a></li>
+            <li><a href="/post2">Post 2</a></li>
+        </ul>
+    </aside>
+
+    <article class="post-content">
+        <h1>Main Article Heading</h1>
+        <p>This is the <strong>first paragraph</strong> of the article. It contains
+        some <em>emphasized text</em> and a <a href="/internal">link to another page</a>.</p>
+
+        <h2>Section One</h2>
+        <p>A paragraph with <code>inline code</code> and more text to ensure this
+        scores well in the readability algorithm. The content needs to be substantial
+        enough to be selected as the main content by the scoring heuristics.</p>
+
+        <pre><code class="language-python">def extract(url: str) -> ContentDocument:
+    """Extract content from a URL."""
+    response = fetch(url)
+    return html_to_document(response.html)</code></pre>
+
+        <h2>Section Two</h2>
+        <p>This section has a list of items that demonstrate list extraction:</p>
+        <ul>
+            <li>First item with some text</li>
+            <li>Second item with <strong>bold</strong> text</li>
+            <li>Third item with a <a href="https://example.com">link</a></li>
+        </ul>
+
+        <p>And an ordered list:</p>
+        <ol>
+            <li>Step one</li>
+            <li>Step two</li>
+            <li>Step three</li>
+        </ol>
+
+        <h2>Section Three: Tables</h2>
+        <table>
+            <thead>
+                <tr><th>Name</th><th>Value</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>alpha</td><td>1</td><td>First item</td></tr>
+                <tr><td>beta</td><td>2</td><td>Second item</td></tr>
+            </tbody>
+        </table>
+
+        <h2>Section Four: Blockquotes and Media</h2>
+        <blockquote>
+            <p>This is a blockquote with an important statement that should be
+            preserved in the extracted content.</p>
+        </blockquote>
+
+        <p>Here is an image: <img src="/images/photo.jpg" alt="A test photo"></p>
+        <p>Lazy image: <img data-src="/images/real.jpg" src="/placeholder.gif" alt="Lazy loaded"></p>
+
+        <hr>
+
+        <h2>Section Five: Definition List</h2>
+        <dl>
+            <dt>Term One</dt>
+            <dd>The definition of term one.</dd>
+            <dt>Term Two</dt>
+            <dd>The definition of term two.</dd>
+        </dl>
+
+        <p>Final paragraph with a <a href="javascript:alert(1)">dangerous link</a> that
+        should be stripped, and a <a href="https://safe.example.com">safe link</a>.</p>
+    </article>
+
+    <footer>
+        <p>Copyright 2026 Example Site</p>
+        <nav>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+        </nav>
+    </footer>
+</body>
+</html>
