@@ -1,7 +1,7 @@
 # kaos-web Roadmap & TODO
 
 **Updated**: 2026-04-02
-**Status**: Phases 1-4 complete. Browser interaction (Phase 5) is the critical gap.
+**Status**: Phase 5 complete (18 browser tools, 23 total). Phase 6 next.
 
 ---
 
@@ -25,7 +25,7 @@
 - [x] User-agent randomization (100 real UAs from microlinkhq, updatable via script)
 
 ### Phase 3: Browser Client (DONE)
-- [x] BrowserClient with Playwright (chromium/firefox/webkit, channel="chrome")
+- [x] BrowserClient with Playwright (chromium/firefox/webkit, auto-detected channel)
 - [x] Lazy browser launch, context-per-request isolation
 - [x] Named context pooling (session persistence via context_id)
 - [x] Resource blocking (images, fonts, CSS, media)
@@ -51,57 +51,84 @@
 
 ---
 
-## Next: Phase 5 — Browser Interaction (P0)
+## Phase 5 — Browser Interaction
 
-The critical competitive gap. Every serious MCP server (Playwright MCP, Chrome DevTools,
-Browserbase, Firecrawl) exposes browser interaction tools. Without these, agents cannot
-get past cookie banners, log in, click "load more", or fill forms.
+### 5.1 Browser Interaction MCP Tools (DONE)
 
-### 5.1 Browser Interaction MCP Tools
+12 tools (10 interaction + 2 context management) in `browser_tools.py`:
 
-New tools to add (following existing tool design patterns):
+| Tool | Name | Annotations | Description |
+|------|------|-------------|-------------|
+| BrowserNavigate | `kaos-web-browser-navigate` | write, openWorld | Navigate to URL, create persistent page |
+| ClickElement | `kaos-web-browser-click` | write, openWorld | Click element by CSS selector |
+| FillInput | `kaos-web-browser-fill` | write, openWorld | Fill input field (clears first) |
+| TypeText | `kaos-web-browser-type` | write, openWorld | Type character-by-character (autocomplete) |
+| PressKey | `kaos-web-browser-press` | write, openWorld | Press keyboard key (Enter, Tab, etc.) |
+| SelectOption | `kaos-web-browser-select` | write, openWorld | Select dropdown option |
+| Screenshot | `kaos-web-browser-screenshot` | readOnly, openWorld | Take screenshot (context or URL) |
+| EvaluateJS | `kaos-web-browser-evaluate` | write, openWorld | Execute JS expression |
+| GetSnapshot | `kaos-web-browser-snapshot` | readOnly, openWorld | Accessibility tree |
+| GetContent | `kaos-web-browser-content` | readOnly, openWorld | Extract updated page content |
+| ListContexts | `kaos-web-browser-list-contexts` | readOnly, openWorld | List active browser contexts |
+| CloseContext | `kaos-web-browser-close-context` | write, openWorld | Close context and free resources |
 
-| Tool | Name | Input | Description |
-|------|------|-------|-------------|
-| ClickElement | `kaos-web-browser-click` | url_or_context, selector | Click element by CSS selector |
-| FillInput | `kaos-web-browser-fill` | url_or_context, selector, value | Type into input field |
-| Screenshot | `kaos-web-browser-screenshot` | url, full_page, format | Take screenshot, return as artifact |
-| EvaluateJS | `kaos-web-browser-evaluate` | url_or_context, expression | Execute JS, return result |
-| GetSnapshot | `kaos-web-browser-snapshot` | url_or_context | Accessibility tree (text representation of page) |
+Architecture:
+- [x] `BrowserClient` enhanced with page tracking (`_pages: dict[str, Page]`)
+- [x] Named contexts keep pages alive for multi-step interaction workflows
+- [x] Unnamed contexts (no context_id) retain original fetch-and-cleanup behavior
+- [x] Shared `_browser_client` singleton with configurable browser channel
+- [x] Auto-detection: system Chrome on Linux, bundled Chromium elsewhere
+- [x] Env vars: `KAOS_BROWSER_CHANNEL`, `KAOS_BROWSER_HEADLESS`, `KAOS_BROWSER_TYPE`
+- [x] `configure_browser(config)` Python API for programmatic override
+- [x] `_require_page()` with agent-friendly error messages listing active contexts
+- [x] `_raise_browser_error(exc, url, operation)` with per-operation error messages
+- [x] Context management: ListContexts + CloseContext tools for agent resource cleanup
+- [x] 70 unit tests (page tracking, interaction, tool metadata, error paths, config detection)
 
-Design decisions:
-- All browser tools use `openWorldHint=True`, `readOnlyHint=False` (click/fill modify state)
-- `ClickElement` and `FillInput` are `destructiveHint=False` (additive, not destructive)
-- Tools that need persistence across calls use named contexts via `context_id`
-- `Screenshot` returns `KaosImage` artifact (via kaos-content images)
-- `GetSnapshot` returns accessibility tree as text (like Playwright MCP's `browser_snapshot`)
+### 5.2 Cookie / Storage MCP Tools (DONE)
 
-### 5.2 Cookie / Storage MCP Tools
+| Tool | Name | Annotations | Description |
+|------|------|-------------|-------------|
+| GetCookies | `kaos-web-browser-cookies` | readOnly, openWorld | List cookies for context |
+| SetCookie | `kaos-web-browser-set-cookie` | write, openWorld | Set a cookie (name, value, domain/url) |
+| SaveAuthState | `kaos-web-browser-save-auth` | write, local | Save context state to JSON file |
 
-| Tool | Name | Description |
-|------|------|-------------|
-| GetCookies | `kaos-web-browser-cookies` | List cookies for a domain |
-| SetCookie | `kaos-web-browser-set-cookie` | Set a cookie |
-| SaveAuthState | `kaos-web-browser-save-auth` | Save browser context state to file |
-| LoadAuthState | `kaos-web-browser-load-auth` | Load saved auth state |
+Architecture:
+- [x] `BrowserClient.get_cookies()`, `set_cookies()`, `save_storage_state()` methods
+- [x] Cookie CRUD operates on context (not page) — persists across page navigations
+- [x] `SaveAuthState` has `openWorldHint=False` (writes to local disk only)
+- [x] LoadAuthState deferred — use `BrowserClientConfig(storage_state="path.json")` directly
 
-### 5.3 Network Monitoring Tools
+### 5.3 Network Monitoring Tools (DONE)
 
-| Tool | Name | Description |
-|------|------|-------------|
-| ListRequests | `kaos-web-browser-requests` | List network requests made by a page |
-| GetRequest | `kaos-web-browser-get-request` | Get full request/response detail by ID |
+| Tool | Name | Annotations | Description |
+|------|------|-------------|-------------|
+| EnableRequestLogging | `kaos-web-browser-log-requests` | write, openWorld | Start recording network requests |
+| ListRequests | `kaos-web-browser-requests` | readOnly, openWorld | List recorded requests with filter |
+| GetRequestDetail | `kaos-web-browser-get-request` | readOnly, openWorld | Full request/response detail by ID |
 
-### Implementation approach:
-- All browser tools delegate to `BrowserClient` methods
-- Named contexts enable multi-step workflows (login → navigate → extract)
-- Network monitoring via Playwright's `page.on("request")` / `page.on("response")`
-- Accessibility snapshot via `page.accessibility.snapshot()`
+Architecture:
+- [x] `BrowserClient.enable_request_logging()` attaches `page.on("request")`/`page.on("response")`
+- [x] `_request_logs: dict[str, list[dict]]` stores per-context request logs
+- [x] Response matching by URL (reversed scan for latest matching request)
+- [x] Logs cleaned up on `close_context()` and `close()`
+- [x] `resource_type` filter on ListRequests (document, xhr, fetch, script, etc.)
 
-### Tests needed:
-- Unit tests with mocked Playwright
-- Integration tests: login flow (httpbin basic auth), form fill, screenshot
-- E2E through kaos-mcp adapter
+### Phase 5 Integration Tests (DONE)
+
+29 integration tests against real browsers and real sites:
+- [x] Navigate + page tracking (3 tests)
+- [x] Click elements on example.com + books.toscrape.com (2 tests)
+- [x] Fill forms on httpbin.org (3 tests: fill, type, submit)
+- [x] Press keys (1 test)
+- [x] Screenshots: PNG + JPEG from named contexts (2 tests)
+- [x] Accessibility snapshots via Playwright aria_snapshot() (2 tests)
+- [x] JavaScript evaluation: title, complex expressions, DOM queries (3 tests)
+- [x] Content extraction after interaction (2 tests)
+- [x] Cookies: set via httpbin, programmatic set + read (2 tests)
+- [x] Network monitoring: log, list, detail, filter (3 tests)
+- [x] Multi-step workflows: fill+submit+extract, click+navigate (2 tests)
+- [x] MCP tool E2E: navigate, snapshot, click+content, screenshot (4 tests)
 
 ---
 
@@ -167,17 +194,18 @@ This already exists as `extract_links()` but needs an MCP tool wrapper.
 | In-page search | **A** (BM25) | None | None | None | None |
 | Structured metadata | **A** (JSON-LD/OG) | None | None | None | None |
 | HTTP middleware | **A** (retry/cache/robots) | None | None | N/A (SaaS) | N/A |
-| Browser interaction | **F** (fetch only) | **A** (50+ tools) | **A** (29 tools) | B (interact) | A (act/observe) |
-| Auth/cookies | C (storage_state) | **A** (full CRUD) | B | B | A |
-| Network monitoring | **F** | **A** | **A** | None | None |
-| JS execution | **F** | **A** | **A** | None | A (via Stagehand) |
+| Browser interaction | **A-** (18 tools) | **A** (50+ tools) | **A** (29 tools) | B (interact) | A (act/observe) |
+| Auth/cookies | **B+** (get/set/save) | **A** (full CRUD) | B | B | A |
+| Network monitoring | **B** (log/list/detail) | **A** | **A** | None | None |
+| JS execution | **B+** (evaluate) | **A** | **A** | None | A (via Stagehand) |
 | Multi-page crawl | **F** | None | None | **A** | None |
 | Self-hosted | **A** | **A** | **A** | F (SaaS) | F (SaaS) |
 | License clean | **A** | A | A | F (AGPL) | N/A |
 
-**Strategy**: Phase 5 closes the browser interaction gap (F → B+). Combined with
-our content extraction advantage (A vs C), kaos-web becomes the most complete
-self-hosted MCP server for web content.
+**Strategy**: Phase 5 closes the browser interaction gap (F → A-). Combined with
+our content extraction advantage (A vs C), kaos-web is now the most complete
+self-hosted MCP server for web content. No other tool combines structured AST
+extraction with full browser interaction.
 
 ---
 
@@ -186,6 +214,7 @@ self-hosted MCP server for web content.
 | Milestone | Tests | Current |
 |-----------|-------|---------|
 | Phase 4 complete | 250+ | **293** (exceeded) |
-| Phase 5 complete | 350+ | — |
+| Phase 5.1 complete | 330+ | **335** (exceeded) |
+| Phase 5 complete | 350+ | **393** (exceeded) |
 | Phase 6 complete | 400+ | — |
 | Phase 7 complete | 450+ | — |

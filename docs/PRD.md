@@ -1,8 +1,8 @@
 # kaos-web Product Requirements Document
 
-**Date**: 2026-04-01
-**Version**: 0.2
-**Status**: Phase 1 complete, Phases 2-4 in progress
+**Date**: 2026-04-02
+**Version**: 0.3
+**Status**: Phases 1-5 complete. 23 MCP tools, 393 tests.
 
 ## Overview
 
@@ -37,8 +37,17 @@ web content automatically.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     MCP Tools (5)                        │
+│              Extraction MCP Tools (5)                     │
 │  FetchPage · GetText · GetMarkdown · Metadata · Search   │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│            Browser Interaction MCP Tools (18)             │
+│  Navigate · Click · Fill · Type · Press · Select         │
+│  Screenshot · Evaluate · Snapshot · Content              │
+│  Cookies · SetCookie · SaveAuth                          │
+│  LogRequests · ListRequests · GetRequest                 │
+│  ListContexts · CloseContext                             │
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
@@ -55,6 +64,7 @@ web content automatically.
 ┌──────────────────────▼──────────────────────────────────┐
 │                    Clients                                │
 │  HttpClient (httpx)  ·  BrowserClient (Playwright)       │
+│  Auto-detected channel · Page tracking · Context mgmt    │
 └─────────────────────────────────────────────────────────┘
 ```
 

@@ -17,12 +17,13 @@ URL -> Client (HTTP or Browser) -> Middleware (retry/rate/robots/cache) -> Raw H
 
 Key modules:
 - `clients/http.py` — httpx-based async client with connection pooling, auth, SSL, proxy, structured error mapping
-- `clients/browser.py` — Playwright-based browser client with lazy launch, context-per-request isolation, resource blocking
+- `clients/browser.py` — Playwright-based browser client with lazy launch, page tracking, interaction methods, context pooling
 - `extract/readability.py` — Readability algorithm (Mozilla port) for main content extraction
 - `extract/html_to_ast.py` — lxml HTML element tree to kaos-content Block/Inline AST conversion
 - `extract/metadata.py` — JSON-LD, OpenGraph, and meta tag extraction
 - `middleware/` — Composable chain: retry, rate_limit, robots, cache
-- `tools.py` — 5 MCP tools registered with KaosRuntime
+- `tools.py` — 5 extraction MCP tools registered with KaosRuntime
+- `browser_tools.py` — 18 browser interaction MCP tools (navigate, click, fill, type, press, select, screenshot, evaluate, snapshot, content, cookies, set-cookie, save-auth, log-requests, requests, get-request, list-contexts, close-context)
 - `cli.py` — CLI with fetch, search, metadata commands
 
 ## Dependencies
@@ -37,18 +38,37 @@ Key modules:
 
 ## Browser Setup
 
-Playwright's bundled Chromium does **not** work on Ubuntu 26.04. You **must** use system Chrome via the `channel` parameter:
+Browser channel is **auto-detected** — no hardcoded config needed.
 
+### Auto-detection logic (`_detect_browser_channel()`)
+1. `KAOS_BROWSER_CHANNEL` env var (explicit override, e.g. `chrome`, `firefox`, `auto`)
+2. Linux + system Chrome available → `chrome` (bundled Chromium fails on Ubuntu 24.04+)
+3. Otherwise → `None` (use Playwright's bundled Chromium)
+
+### Environment variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAOS_BROWSER_CHANNEL` | auto-detect | Browser channel: `chrome`, `firefox`, `webkit`, `auto` |
+| `KAOS_BROWSER_HEADLESS` | `true` | Set `false` for visible browser |
+| `KAOS_BROWSER_TYPE` | `chromium` | Playwright engine: `chromium`, `firefox`, `webkit` |
+
+### Python API
+```python
+from kaos_web.browser_tools import configure_browser
+from kaos_web.clients.config import BrowserClientConfig
+
+# Override before first tool call
+configure_browser(BrowserClientConfig(channel="firefox", headless=False))
+```
+
+### Direct client usage
 ```python
 from kaos_web.clients.browser import BrowserClient
 from kaos_web.clients.config import BrowserClientConfig
 
-config = BrowserClientConfig(channel="chrome")  # Uses /usr/bin/google-chrome
-async with BrowserClient(config) as client:
+async with BrowserClient(BrowserClientConfig(channel="chrome")) as client:
     resp = await client.fetch(WebRequest(url="https://example.com"))
 ```
-
-System Chrome must be installed at `/usr/bin/google-chrome`. Without `channel="chrome"`, Playwright will attempt to use its bundled browser and fail.
 
 ## Key Patterns
 
@@ -59,7 +79,10 @@ System Chrome must be installed at `/usr/bin/google-chrome`. Without `channel="c
 - **Lazy imports**: Heavy dependencies (playwright, kaos-content serializers) are imported inside handlers, not at module level, keeping `--help` fast.
 - **Search lives in kaos-content**: `kaos_content.search.search_document()` is the canonical search. Never import search from kaos-pdf or duplicate it. All extraction modules share the same search.
 - **Middleware wired in HttpClient**: `HttpClient.fetch()` routes through `MiddlewareChain` (retry → rate_limit → robots → cache → raw httpx). Config flags control which middleware are active. Unit tests use `_NO_MIDDLEWARE` config to avoid mock interference.
-- **Browser context pooling**: Named contexts via `request.extra["context_id"]` persist cookies/storage across requests. Unnamed requests get isolated context-per-request. `close_context(id)` to clean up explicitly.
+- **Browser context pooling**: Named contexts via `request.extra["context_id"]` persist pages and cookies across requests. Unnamed requests get isolated context-per-request. `close_context(id)` to clean up explicitly.
+- **Browser page tracking**: Named contexts store active pages in `_pages` dict, enabling multi-step interaction (navigate → click → fill → screenshot). `_require_page()` raises agent-friendly errors with active context list.
+- **Operation-aware errors**: `_raise_browser_error(exc, url, operation)` includes the operation type (click, fill, type, etc.) in timeout messages so agents can self-correct.
+- **Browser config auto-detection**: Shared singleton auto-detects system Chrome on Linux. Configurable via env vars (`KAOS_BROWSER_CHANNEL`) or `configure_browser()` API.
 
 ## HTML-to-AST
 
@@ -70,7 +93,9 @@ The `html_to_document()` function walks an lxml element tree and produces `Conte
 
 ## MCP Tools
 
-5 tools, all with `openWorldHint=True` (make HTTP requests), `readOnlyHint=True`, `idempotentHint=True`:
+### Extraction tools (5) — `tools.py`
+
+All with `openWorldHint=True`, `readOnlyHint=True`, `idempotentHint=True`:
 
 | Tool | Name | Purpose |
 |------|------|---------|
@@ -79,6 +104,34 @@ The `html_to_document()` function walks an lxml element tree and produces `Conte
 | GetPageMarkdownTool | `kaos-web-get-markdown` | Fetch URL -> markdown (context-free) |
 | GetPageMetadataTool | `kaos-web-get-metadata` | Extract JSON-LD, OpenGraph, meta tags |
 | SearchPageTool | `kaos-web-search-page` | Fetch URL -> BM25 search within content |
+
+### Browser interaction tools (18) — `browser_tools.py`
+
+Write tools use `readOnlyHint=False`, `destructiveHint=False`, `openWorldHint=True`.
+Read tools use `readOnlyHint=True`, `openWorldHint=True`.
+
+| Tool | Name | Purpose |
+|------|------|---------|
+| BrowserNavigateTool | `kaos-web-browser-navigate` | Navigate to URL, create persistent page for interaction |
+| ClickElementTool | `kaos-web-browser-click` | Click element by CSS selector |
+| FillInputTool | `kaos-web-browser-fill` | Fill input field (clears existing content first) |
+| TypeTextTool | `kaos-web-browser-type` | Type character-by-character (autocomplete, JS listeners) |
+| PressKeyTool | `kaos-web-browser-press` | Press keyboard key (Enter, Tab, Escape, modifiers) |
+| SelectOptionTool | `kaos-web-browser-select` | Select dropdown option |
+| ScreenshotTool | `kaos-web-browser-screenshot` | Take screenshot (context page or one-shot URL) |
+| EvaluateJSTool | `kaos-web-browser-evaluate` | Execute JavaScript expression |
+| GetSnapshotTool | `kaos-web-browser-snapshot` | Accessibility tree (find interactive elements) |
+| GetPageContentTool | `kaos-web-browser-content` | Extract updated page content after interaction |
+| GetCookiesTool | `kaos-web-browser-cookies` | List cookies for context |
+| SetCookieTool | `kaos-web-browser-set-cookie` | Set a cookie (name, value, domain/url) |
+| SaveAuthStateTool | `kaos-web-browser-save-auth` | Save context state to JSON file |
+| EnableRequestLoggingTool | `kaos-web-browser-log-requests` | Start recording network requests |
+| ListRequestsTool | `kaos-web-browser-requests` | List recorded network requests with filter |
+| GetRequestDetailTool | `kaos-web-browser-get-request` | Full request/response detail by ID |
+| ListContextsTool | `kaos-web-browser-list-contexts` | List active browser contexts |
+| CloseContextTool | `kaos-web-browser-close-context` | Close context and free resources |
+
+Browser tools use a shared `_browser_client` singleton. Named contexts (via `context_id`) keep pages alive for multi-step workflows. Use `kaos-web-browser-navigate` first, then interact.
 
 ## Middleware
 

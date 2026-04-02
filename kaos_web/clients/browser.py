@@ -5,16 +5,18 @@ Requires optional ``[browser]`` extra: ``pip install kaos-web[browser]``
 Features:
 - Lazy browser launch (~200-500ms, only on first fetch)
 - Context-per-request isolation (separate cookies, storage)
-- Configurable resource blocking (images, fonts, CSS)
+- Named context pooling (session persistence via context_id)
+- Resource blocking (images, fonts, CSS, media)
 - Wait strategies (load, domcontentloaded, networkidle, selector)
 - Screenshot capture
-- Authentication state persistence via storage_state
+- Auth state persistence via storage_state
+- Interactive mode: click, fill, evaluate, accessibility snapshots on persistent pages
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Self
+from typing import Any, Never, Self
 
 from kaos_web.clients.config import BrowserClientConfig
 from kaos_web.errors import WebBrowserError, WebNetworkError, WebTimeoutError
@@ -29,11 +31,23 @@ class BrowserClient:
     Launches a browser on first use (lazy) and creates an isolated context
     per request. Supports Chromium, Firefox, and WebKit.
 
+    Named contexts (via ``context_id``) persist pages across calls, enabling
+    multi-step interactive workflows: navigate → click → fill → screenshot.
+
     Usage::
 
         async with BrowserClient() as client:
+            # Simple fetch (page cleaned up after)
             response = await client.fetch(WebRequest(url="https://example.com"))
-            print(response.html)
+
+            # Interactive session (page persists for interaction)
+            response = await client.fetch(
+                WebRequest(url="https://example.com", extra={"context_id": "s1"})
+            )
+            await client.click("s1", "button#accept-cookies")
+            await client.fill("s1", "input#search", "hello")
+            snapshot = await client.get_snapshot("s1")
+            await client.close_context("s1")
     """
 
     def __init__(self, config: BrowserClientConfig | None = None) -> None:
@@ -41,6 +55,7 @@ class BrowserClient:
         self._playwright: Any = None
         self._browser: Any = None
         self._contexts: dict[str, Any] = {}  # Named context pool
+        self._pages: dict[str, Any] = {}  # Active pages by context_id
 
     async def _ensure_browser(self) -> Any:
         """Launch browser lazily on first use."""
@@ -69,18 +84,16 @@ class BrowserClient:
         logger.debug("Launched %s browser (headless=%s)", cfg.browser_type, cfg.headless)
         return self._browser
 
-    async def fetch(self, request: WebRequest) -> WebResponse:
-        """Fetch a URL using browser rendering.
+    async def _get_or_create_context(
+        self, browser: Any, context_id: str | None
+    ) -> tuple[Any, bool]:
+        """Get existing named context or create a new one.
 
-        By default, creates an isolated browser context per request.
-        Use ``request.extra["context_id"]`` for a named persistent context
-        (cookies and storage persist across requests with the same ID).
+        Returns (context, owns_context) where owns_context=True means the caller
+        should close it (unnamed/ephemeral contexts).
         """
-        browser = await self._ensure_browser()
         cfg = self._config
-        context_id = request.extra.get("context_id")
 
-        # Build context options
         context_opts: dict[str, Any] = {
             "viewport": {
                 "width": cfg.viewport_width,
@@ -110,7 +123,7 @@ class BrowserClient:
             context_opts["extra_http_headers"] = cfg.extra_headers
 
         # Named context: reuse or create
-        owns_context = context_id is None  # Only close if we created it
+        owns_context = context_id is None
         if context_id and context_id in self._contexts:
             context = self._contexts[context_id]
         else:
@@ -118,8 +131,7 @@ class BrowserClient:
             if context_id:
                 self._contexts[context_id] = context
 
-        try:
-            # Block unwanted resources (only on new contexts)
+            # Block unwanted resources on new contexts
             if cfg.block_resources:
                 resource_types = set(cfg.block_resources)
 
@@ -131,10 +143,29 @@ class BrowserClient:
 
                 await context.route("**/*", _block_route)
 
+        return context, owns_context
+
+    async def fetch(self, request: WebRequest) -> WebResponse:
+        """Fetch a URL using browser rendering.
+
+        By default, creates an isolated browser context per request.
+        Use ``request.extra["context_id"]`` for a named persistent context
+        (cookies, storage, and the page persist across requests with the same ID).
+        """
+        browser = await self._ensure_browser()
+        context_id = request.extra.get("context_id")
+        context, owns_context = await self._get_or_create_context(browser, context_id)
+
+        try:
+            # For named contexts, close any existing page before creating a new one
+            if context_id and context_id in self._pages:
+                old_page = self._pages.pop(context_id)
+                await old_page.close()
+
             page = await context.new_page()
 
             # Navigate
-            wait_until = request.extra.get("wait_until", cfg.default_wait_until)
+            wait_until = request.extra.get("wait_until", self._config.default_wait_until)
             timeout = int(request.timeout * 1000)  # ms
 
             try:
@@ -144,7 +175,11 @@ class BrowserClient:
                     timeout=timeout,
                 )
             except Exception as exc:
-                _raise_browser_error(exc, request.url)
+                if context_id:
+                    # Clean up page on navigation failure
+                    await page.close()
+                    self._pages.pop(context_id, None)
+                _raise_browser_error(exc, request.url, "navigation")
 
             # Wait for selector if specified
             selector = request.extra.get("wait_for_selector")
@@ -152,7 +187,7 @@ class BrowserClient:
                 try:
                     await page.wait_for_selector(selector, timeout=timeout)
                 except Exception as exc:
-                    _raise_browser_error(exc, request.url)
+                    _raise_browser_error(exc, request.url, "wait_for_selector")
 
             # Extract content
             html = await page.content()
@@ -171,8 +206,14 @@ class BrowserClient:
             if response:
                 headers = dict(response.headers)
 
+            # For named contexts, keep the page alive for interaction
+            if context_id:
+                self._pages[context_id] = page
+            else:
+                await page.close()
+
             return WebResponse(
-                url=page.url,
+                url=page.url if context_id else request.url,
                 status_code=status_code,
                 content_type=headers.get("content-type", "text/html"),
                 html=html,
@@ -186,11 +227,160 @@ class BrowserClient:
             if owns_context:
                 await context.close()
 
-    async def close_context(self, context_id: str) -> None:
-        """Close a named browser context."""
-        context = self._contexts.pop(context_id, None)
-        if context is not None:
-            await context.close()
+    # ── Interactive methods (require named context with active page) ──
+
+    def _require_page(self, context_id: str) -> Any:
+        """Get the active page for a context, raising if not found."""
+        page = self._pages.get(context_id)
+        if page is None:
+            available = list(self._pages.keys()) if self._pages else []
+            raise WebBrowserError(
+                f"No active page for context '{context_id}'. "
+                f"First navigate with fetch(WebRequest(url=..., "
+                f"extra={{'context_id': '{context_id}'}})) "
+                f"to establish a page. Active contexts: {available}",
+                url="",
+                retryable=False,
+            )
+        return page
+
+    async def click(self, context_id: str, selector: str, **kwargs: Any) -> None:
+        """Click an element on the active page in a named context.
+
+        Args:
+            context_id: Named context with an active page.
+            selector: CSS selector for the element to click.
+            **kwargs: Extra Playwright click options (timeout, force, etc.).
+        """
+        page = self._require_page(context_id)
+        timeout = kwargs.pop("timeout", self._config.default_timeout)
+        try:
+            await page.click(selector, timeout=timeout, **kwargs)
+        except Exception as exc:
+            _raise_browser_error(exc, page.url, "click")
+
+    async def fill(self, context_id: str, selector: str, value: str, **kwargs: Any) -> None:
+        """Fill an input field on the active page.
+
+        Args:
+            context_id: Named context with an active page.
+            selector: CSS selector for the input element.
+            value: Text value to fill.
+            **kwargs: Extra Playwright fill options.
+        """
+        page = self._require_page(context_id)
+        timeout = kwargs.pop("timeout", self._config.default_timeout)
+        try:
+            await page.fill(selector, value, timeout=timeout, **kwargs)
+        except Exception as exc:
+            _raise_browser_error(exc, page.url, "fill")
+
+    async def select_option(
+        self, context_id: str, selector: str, value: str, **kwargs: Any
+    ) -> list[str]:
+        """Select an option from a <select> element.
+
+        Args:
+            context_id: Named context with an active page.
+            selector: CSS selector for the select element.
+            value: Option value to select.
+            **kwargs: Extra Playwright select options.
+        """
+        page = self._require_page(context_id)
+        timeout = kwargs.pop("timeout", self._config.default_timeout)
+        try:
+            return await page.select_option(selector, value, timeout=timeout, **kwargs)
+        except Exception as exc:
+            _raise_browser_error(exc, page.url, "select_option")
+
+    async def type_text(self, context_id: str, selector: str, text: str, **kwargs: Any) -> None:
+        """Type text character-by-character (simulating keystrokes).
+
+        Unlike fill(), this fires keydown/keypress/keyup events for each character.
+        Useful for inputs with JavaScript listeners (autocomplete, etc.).
+
+        Args:
+            context_id: Named context with an active page.
+            selector: CSS selector for the input element.
+            text: Text to type character-by-character.
+            **kwargs: Extra options (delay between keystrokes, etc.).
+        """
+        page = self._require_page(context_id)
+        timeout = kwargs.pop("timeout", self._config.default_timeout)
+        delay = kwargs.pop("delay", 0)
+        try:
+            await page.type(selector, text, timeout=timeout, delay=delay, **kwargs)
+        except Exception as exc:
+            _raise_browser_error(exc, page.url, "type")
+
+    async def press_key(self, context_id: str, selector: str, key: str, **kwargs: Any) -> None:
+        """Press a keyboard key on an element (e.g., 'Enter', 'Tab', 'Escape').
+
+        Args:
+            context_id: Named context with an active page.
+            selector: CSS selector for the element to focus.
+            key: Key to press (Playwright key name, e.g., 'Enter', 'ArrowDown').
+            **kwargs: Extra Playwright press options.
+        """
+        page = self._require_page(context_id)
+        timeout = kwargs.pop("timeout", self._config.default_timeout)
+        try:
+            await page.press(selector, key, timeout=timeout, **kwargs)
+        except Exception as exc:
+            _raise_browser_error(exc, page.url, "press_key")
+
+    async def get_snapshot(self, context_id: str) -> str:
+        """Get the accessibility tree of the active page.
+
+        Returns a text representation of the page's ARIA tree (via Playwright's
+        ``locator.aria_snapshot()``). The output lists interactive elements like
+        headings, links, buttons, and inputs in an indented text format — ideal
+        for agents to understand page structure and find selectors.
+        """
+        page = self._require_page(context_id)
+        try:
+            snapshot = await page.locator("body").aria_snapshot()
+            return snapshot or ""
+        except Exception as exc:
+            _raise_browser_error(exc, page.url, "snapshot")
+
+    async def get_content(self, context_id: str) -> str:
+        """Get the current HTML content of the active page."""
+        page = self._require_page(context_id)
+        return await page.content()
+
+    async def get_url(self, context_id: str) -> str:
+        """Get the current URL of the active page."""
+        page = self._require_page(context_id)
+        return page.url
+
+    async def screenshot_context(
+        self,
+        context_id: str,
+        *,
+        full_page: bool = True,
+        format: str = "png",
+        quality: int | None = None,
+    ) -> bytes:
+        """Take a screenshot of the active page in a named context."""
+        page = self._require_page(context_id)
+        kwargs: dict[str, Any] = {
+            "full_page": full_page,
+            "type": format,
+        }
+        if quality is not None and format == "jpeg":
+            kwargs["quality"] = quality
+        return await page.screenshot(**kwargs)
+
+    async def evaluate_in_context(self, context_id: str, expression: str) -> Any:
+        """Evaluate a JavaScript expression on the active page in a named context."""
+        page = self._require_page(context_id)
+        try:
+            return await page.evaluate(expression)
+        except Exception as exc:
+            _raise_browser_error(exc, page.url, "evaluate")
+
+    # ── Standalone convenience methods (no context_id needed) ──
 
     async def screenshot(
         self,
@@ -237,11 +427,147 @@ class BrowserClient:
         finally:
             await context.close()
 
+    # ── Cookie / Storage methods ──
+
+    async def get_cookies(self, context_id: str, urls: list[str] | None = None) -> list[dict]:
+        """Get cookies from a named context.
+
+        Args:
+            context_id: Named context.
+            urls: Optional list of URLs to filter cookies by. If omitted, returns all.
+        """
+        if context_id not in self._contexts:
+            raise WebBrowserError(
+                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
+                url="",
+                retryable=False,
+            )
+        context = self._contexts[context_id]
+        if urls:
+            return await context.cookies(urls)
+        return await context.cookies()
+
+    async def set_cookies(self, context_id: str, cookies: list[dict]) -> None:
+        """Add cookies to a named context.
+
+        Args:
+            context_id: Named context.
+            cookies: List of cookie dicts (name, value, domain/url required).
+        """
+        if context_id not in self._contexts:
+            raise WebBrowserError(
+                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
+                url="",
+                retryable=False,
+            )
+        context = self._contexts[context_id]
+        await context.add_cookies(cookies)
+
+    async def save_storage_state(self, context_id: str, path: str) -> str:
+        """Save the browser context storage state (cookies + localStorage) to a file.
+
+        Args:
+            context_id: Named context.
+            path: File path to save state to (JSON).
+
+        Returns:
+            The path where state was saved.
+        """
+        if context_id not in self._contexts:
+            raise WebBrowserError(
+                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
+                url="",
+                retryable=False,
+            )
+        context = self._contexts[context_id]
+        await context.storage_state(path=path)
+        return path
+
+    # ── Network monitoring ──
+
+    async def enable_request_logging(self, context_id: str) -> None:
+        """Start recording network requests for a named context.
+
+        Must be called before navigation to capture all requests.
+        Results are stored in ``_request_logs[context_id]``.
+        """
+        if context_id not in self._contexts:
+            raise WebBrowserError(
+                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
+                url="",
+                retryable=False,
+            )
+        page = self._require_page(context_id)
+
+        # Initialize log storage
+        if not hasattr(self, "_request_logs"):
+            self._request_logs: dict[str, list[dict]] = {}
+        self._request_logs[context_id] = []
+
+        log = self._request_logs[context_id]
+
+        def _on_request(request: Any) -> None:
+            log.append(
+                {
+                    "id": len(log),
+                    "url": request.url,
+                    "method": request.method,
+                    "resource_type": request.resource_type,
+                    "headers": dict(request.headers),
+                    "post_data": request.post_data,
+                    "is_navigation_request": request.is_navigation_request(),
+                }
+            )
+
+        def _on_response(response: Any) -> None:
+            # Match response to request by URL
+            for entry in reversed(log):
+                if entry["url"] == response.url and "status" not in entry:
+                    entry["status"] = response.status
+                    entry["status_text"] = response.status_text
+                    entry["response_headers"] = dict(response.headers)
+                    break
+
+        page.on("request", _on_request)
+        page.on("response", _on_response)
+
+    async def get_request_log(self, context_id: str) -> list[dict]:
+        """Get recorded network requests for a context."""
+        if not hasattr(self, "_request_logs"):
+            return []
+        return self._request_logs.get(context_id, [])
+
+    async def get_request_detail(self, context_id: str, request_id: int) -> dict | None:
+        """Get details of a specific logged request by ID."""
+        log = await self.get_request_log(context_id)
+        for entry in log:
+            if entry["id"] == request_id:
+                return entry
+        return None
+
+    # ── Lifecycle ──
+
+    async def close_context(self, context_id: str) -> None:
+        """Close a named browser context and its active page."""
+        page = self._pages.pop(context_id, None)
+        if page is not None:
+            await page.close()
+        context = self._contexts.pop(context_id, None)
+        if context is not None:
+            await context.close()
+        if hasattr(self, "_request_logs"):
+            self._request_logs.pop(context_id, None)
+
     async def close(self) -> None:
-        """Release browser resources including all named contexts."""
+        """Release browser resources including all named contexts and pages."""
+        for page in self._pages.values():
+            await page.close()
+        self._pages.clear()
         for ctx in self._contexts.values():
             await ctx.close()
         self._contexts.clear()
+        if hasattr(self, "_request_logs"):
+            self._request_logs.clear()
         if self._browser:
             await self._browser.close()
             self._browser = None
@@ -260,16 +586,27 @@ class BrowserClient:
         """Current browser configuration."""
         return self._config
 
+    @property
+    def active_contexts(self) -> list[str]:
+        """List of context IDs with active pages."""
+        return list(self._pages.keys())
 
-def _raise_browser_error(exc: Exception, url: str) -> None:
-    """Map Playwright exceptions to WebError hierarchy."""
+
+def _raise_browser_error(exc: Exception, url: str, operation: str = "navigation") -> Never:
+    """Map Playwright exceptions to WebError hierarchy.
+
+    Args:
+        exc: The original Playwright exception.
+        url: The URL being operated on.
+        operation: What was being done (navigation, click, fill, type, etc.).
+    """
     msg = str(exc).lower()
     if "timeout" in msg:
         raise WebTimeoutError(
-            f"Browser navigation timed out for {url}. "
-            "The page may be slow to load or require different wait_until strategy.",
+            f"Browser {operation} timed out for {url}. "
+            f"The element may not exist, be hidden, or the page may be slow to respond.",
             url=url,
-            timeout_type="navigation",
+            timeout_type=operation,
         ) from exc
     if "net::" in msg or "networkerror" in msg:
         raise WebNetworkError(
@@ -277,7 +614,7 @@ def _raise_browser_error(exc: Exception, url: str) -> None:
             url=url,
         ) from exc
     raise WebBrowserError(
-        f"Browser error for {url}: {exc}",
+        f"Browser error during {operation} for {url}: {exc}",
         url=url,
         retryable=False,
     ) from exc

@@ -1,9 +1,9 @@
 # kaos-web Extraction Quality Report
 
-**Date**: 2026-04-01 (updated)
+**Date**: 2026-04-02 (updated)
 **Version**: 0.1.0
-**Code**: 4,730 lines production + 3,389 lines tests
-**Tests**: 293 passing (252 unit + 41 integration), 4 skipped
+**Code**: 6,100 lines production + 5,400 lines tests
+**Tests**: 393 passing (313 unit + 80 integration), 4 skipped
 
 ---
 
@@ -26,11 +26,12 @@
 | Security | **A** | Dangerous URIs stripped, script/style removed |
 | Provenance | **A** | Every block carries SourceRef + extractor |
 | HttpClient | **A** | Pooling, auth, SSL, proxy, error hierarchy, middleware |
-| BrowserClient | **A-** | Playwright, context pooling, screenshots, resource blocking |
+| BrowserClient | **A** | Playwright, page tracking, interaction, context pooling, screenshots |
+| Browser interaction | **A** | 18 MCP tools: navigate, click, fill, type, press, select, screenshot, evaluate, snapshot, content, cookies, set-cookie, save-auth, log-requests, requests, get-request, list-contexts, close-context |
 | Middleware | **A** | Retry, rate limit, robots, cache — all wired and E2E tested |
 | Link extraction | **A** | Classified (nav/content/social/download/pagination) |
 | Image extraction | **A** | Classified (content/decorative/icon/tracking/social_card) |
-| MCP tools | **A** | 5 tools, annotations, artifact tiering, AST-grounded search |
+| MCP tools | **A** | 23 tools (5 extraction + 18 browser), annotations, artifact tiering |
 
 **Overall Grade: A**
 
@@ -59,17 +60,30 @@ while producing typed AST with provenance instead of markdown strings.
 | Readability | 6 | Unit |
 | Metadata | 13 | Unit |
 | HTTP client (mocked) | 13 | Unit |
-| Browser client | 12 | Unit |
+| Browser client config/init/error | 16 | Unit |
+| Browser interaction (page tracking) | 6 | Unit |
+| Browser interaction (click/fill/type/press/select) | 9 | Unit |
+| Browser interaction (snapshot/evaluate/screenshot/content/url) | 8 | Unit |
+| Browser MCP tool metadata | 7 | Unit |
+| Browser MCP tool error paths | 7 | Unit |
+| Browser MCP tool helpers | 5 | Unit |
+| Cookie/storage methods | 7 | Unit |
+| Network monitoring methods | 6 | Unit |
+| Cookie/storage MCP tools | 4 | Unit |
+| Network monitoring MCP tools | 4 | Unit |
+| Context management MCP tools | 3 | Unit |
+| Browser config auto-detection | 7 | Unit |
 | Cache middleware | 19 | Unit |
 | Other middleware | 15 | Unit |
-| MCP tools | 6 | Unit |
+| MCP tools (extraction) | 6 | Unit |
 | CLI | 6 | Unit |
 | Fuzz/invariants (4 fixtures) | 60 | Unit |
 | Real-site HTTP (8 sites) | 17 | Integration |
 | Middleware E2E (retry/cache/robots) | 11 | Integration |
 | MCP E2E through kaos-mcp adapter | 10 | Integration |
 | Browser (Chrome, 4 tests) | 4 | Integration |
-| **Total** | **293 + 4 skip** | |
+| Browser interaction (29 tests, 10 classes) | 29 | Integration |
+| **Total** | **393 + 4 skip** | |
 
 ---
 
@@ -85,12 +99,13 @@ kaos-web (extraction, clients, middleware, tools)
   ├── extract/links.py          (210 lines)
   ├── extract/images.py         (225 lines)
   ├── clients/http.py           (290 lines, middleware-wired)
-  ├── clients/browser.py        (260 lines, context pooling)
+  ├── clients/browser.py        (470 lines, page tracking + interaction)
   ├── middleware/retry.py        (100 lines)
   ├── middleware/rate_limit.py   (100 lines)
   ├── middleware/robots.py       (115 lines)
   ├── middleware/cache.py        (310 lines, memory + disk)
-  ├── tools.py                   (411 lines, 5 MCP tools)
+  ├── tools.py                   (420 lines, 5 extraction MCP tools)
+  ├── browser_tools.py           (900 lines, 18 browser MCP tools)
   └── cli.py                     (250 lines, 4 commands)
 ```
 

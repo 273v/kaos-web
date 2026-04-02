@@ -26,18 +26,33 @@ _WEB_ANNOTATIONS = ToolAnnotations(
 )
 
 
-async def _fetch_html(url: str, use_browser: bool = False) -> tuple[str, str]:
-    """Fetch HTML from a URL. Returns (html, final_url)."""
+async def _fetch_html(
+    url: str, use_browser: bool = False, context_id: str | None = None
+) -> tuple[str, str]:
+    """Fetch HTML from a URL. Returns (html, final_url).
+
+    If ``context_id`` is provided with ``use_browser=True``, the browser page
+    is kept alive for subsequent interaction via browser tools.
+    """
     from kaos_web.clients.http import HttpClient
     from kaos_web.models import WebRequest
 
     if use_browser:
         try:
-            from kaos_web.clients.browser import BrowserClient
+            if context_id:
+                # Use shared browser client so page persists for interaction
+                from kaos_web.browser_tools import _get_browser_client
 
-            async with BrowserClient() as client:
-                resp = await client.fetch(WebRequest(url=url))
+                client = await _get_browser_client()
+                extra: dict[str, Any] = {"context_id": context_id}
+                resp = await client.fetch(WebRequest(url=url, extra=extra))
                 return resp.html, resp.url
+            else:
+                from kaos_web.clients.browser import BrowserClient
+
+                async with BrowserClient() as client:
+                    resp = await client.fetch(WebRequest(url=url))
+                    return resp.html, resp.url
         except ImportError:
             pass  # Fall back to HTTP
 
