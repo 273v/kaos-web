@@ -233,59 +233,99 @@ GitHub). Compared output against Jina Reader (r.jina.ai) on same URLs.
 | react.dev (SPA) | D (65w, only footer text) | B (JS rendering) | A (headless) | httpx can't render JS; Playwright gets same bad result |
 | GitHub README | B+ (478w, clean) | B (nav leaks) | A | We extract README well; Jina includes all nav chrome |
 
+### Academic Context
+
+Bevendorff et al. 2023 compared 14 extractors across combined datasets:
+- **Trafilatura**: F1 0.883 mean (best overall), Precision 0.978, Recall 0.920
+- **Readability**: F1 0.861 mean, but **0.970 median** (more consistent)
+- **Key finding**: "Heuristic extractors perform the best and are most robust;
+  the performance of large neural models is surprisingly bad."
+- **Ensemble wins**: Weighted ensemble of Readability + Trafilatura + Goose = 0.974 median F1
+
+This validates our Readability-based approach over LLM extraction (Jina's ReaderLM,
+Crawl4AI's LLM strategy). The gap is not in the algorithm — it's in our fallback
+logic when Readability's scoring discards non-article content.
+
 ### Where We Actually Win
 
 - **Nav stripping**: On article pages, our readability correctly removes nav/header/footer.
   Jina Reader dumps the full navigation menu into every page's markdown output.
+  Firecrawl's `onlyMainContent` occasionally leaks nav too (their docs recommend
+  `excludeTags`/`includeTags` overrides, which is an implicit admission).
 - **AST with provenance**: No competitor produces a typed document model. Everyone else
   outputs flat markdown strings. This matters for downstream search, references, and MCP.
-- **Structured metadata**: JSON-LD, OpenGraph extraction is solid. Jina returns bare metadata
-  headers but no structured extraction API.
-- **Self-hosted, license-clean**: Firecrawl is AGPL. Jina is SaaS. We're proprietary.
-- **In-page BM25 search**: Unique feature. No competitor offers it.
+- **Structured metadata**: JSON-LD, OpenGraph extraction is solid. Jina returns bare
+  metadata headers. Trafilatura has good metadata too but produces flat text, not AST.
+- **Self-hosted, license-clean**: Firecrawl is AGPL. Jina is SaaS-only for the API
+  (model can be self-hosted but lacks the API). Crawl4AI is Apache 2.0 (closest competitor
+  on licensing). We're proprietary.
+- **In-page BM25 search**: Unique feature. No competitor offers structured AST-grounded search.
+- **Speed**: 1.7-2.2x faster than Trafilatura on article extraction, validated by benchmarks.
 
 ### Where We Actually Lose
 
 - **Readability fails on listing/card pages**: Blog index, product grids, search results —
   any page where the "main content" is a list of cards/excerpts rather than a single article.
   Readability's scoring algorithm treats these as boilerplate. **This is the #1 gap.**
-- **No nav stripping on non-article pages**: When readability fails, we fall through to
-  raw HTML-to-AST which includes everything. But even then, the blog listing gets nothing.
-- **Wikipedia [edit] links**: We include 63 `[edit]` section links in the markdown output.
+  Firecrawl handles these (95.3% success rate on 1000-URL benchmark). Jina returns content
+  but with full nav leakage.
+- **Wikipedia [edit] links**: We include 63 `[edit]` section links in markdown.
   Firecrawl strips these. We should too.
-- **JS-rendered SPAs**: httpx gets nothing useful from react.dev, Next.js apps, etc.
-  Even Playwright gets the same bad result because readability still runs on the rendered
-  HTML and sometimes discards SPAs content. Jina handles this better.
-- **Crawl depth**: Our BFS crawl works but is naive — no priority scoring, no politeness
-  delays beyond rate limiting, no incremental/resumable crawl state.
+- **JS-rendered SPAs**: httpx gets nothing from react.dev, Next.js apps.
+  Firecrawl handles these (96.6% success on JS-heavy SPAs via managed browser fleet).
+  Our Playwright path helps but readability can still discard SPA content shells.
+- **Anti-bot sites**: We have no anti-bot evasion. Firecrawl: 88.4% success.
+  Crawl4AI: 72.0%. Not a priority for our use case (legal data, not scraping) but
+  worth noting.
+- **Crawl sophistication**: No priority queue, no incremental/resumable state, no
+  politeness beyond rate limiting. Firecrawl's managed crawl is more mature.
 
 ### Honest Grades
 
-| Capability | kaos-web | Jina Reader | Firecrawl | Playwright MCP |
-|-----------|----------|-------------|-----------|----------------|
-| Article extraction | **A** | B+ | B+ | N/A |
-| Listing/card pages | **F** | B+ | A | N/A |
-| Nav/chrome stripping | **A** (when readability works) | D | B | N/A |
-| SPA/JS pages | D (need Playwright) | B+ | **A** | **A** |
-| Wikipedia/complex | B | B- | B+ | N/A |
-| Structured metadata | **A** | C | B | N/A |
-| In-page search | **A** (unique) | N/A | N/A | N/A |
-| Multi-page crawl | B (sitemap+BFS) | N/A | **A** | N/A |
-| Browser interaction | B+ (18 tools) | N/A | C | **A** |
-| Self-hosted + clean license | **A** | F (SaaS) | F (AGPL) | **A** |
+| Capability | kaos-web | Jina Reader | Firecrawl | Crawl4AI | Trafilatura |
+|-----------|----------|-------------|-----------|----------|-------------|
+| Article extraction | **A** | B+ | B+ | B | **A** |
+| Listing/card pages | **F** | B+ | A | B | C |
+| Nav/chrome stripping | **A** (articles) | D (nav leaks) | B | C (11.3% noise) | **A** (highest precision) |
+| SPA/JS pages | D | B+ | **A** | B+ | F (no JS) |
+| Wikipedia/complex | B | B- | B+ | B | B+ |
+| Structured metadata | **A** | C | B | C | **A** |
+| In-page search | **A** (unique) | — | — | — | — |
+| Multi-page crawl | B | — | **A** | B+ | — |
+| Browser interaction | B+ (18 tools) | — | C | B | — |
+| Tables | A- (AST) | B+ (GFM) | B+ | B | C (historically buggy) |
+| Images | B+ | C (broken URLs) | B+ | B | D (basically broken) |
+| Self-hosted + clean | **A** (proprietary) | F (SaaS) | F (AGPL) | **A** (Apache 2.0) | **A** (Apache 2.0) |
+
+### Real Competitor Weaknesses (from GitHub issues + benchmarks)
+
+- **Firecrawl**: Self-hosted markdown randomly empty while HTML works (issue #1297).
+  H1/H2 headings lose `#` marks in self-hosted (issue #1360). Credit multiplier trap:
+  JSON+Enhanced = 9x cost per page. Anti-bot looping on self-hosted (issue #2350).
+- **Jina Reader**: Incomplete content on SPAs (issue #1196). Image URLs return SVG
+  placeholders (issue #36). Unannounced table format changes breaking pipelines (#1100).
+  No developer responses on many issues.
+- **Crawl4AI**: LLM extraction hallucinates prices/data (issue #712). Scroll extraction
+  loses content (issue #731). Memory leaks in Docker (issue #1256). Rate limiter broken
+  (issue #1095). 11.3% noise ratio (vs Firecrawl's 6.8%).
+- **Trafilatura**: Images basically broken (issue #610). Table handling historically buggy
+  (#136). No JS rendering. Slower than alternatives.
 
 ### Priority Fixes
 
 1. **P0: Readability fallback for listing pages** — When readability returns < 50 words
    but the raw HTML has > 200 words in `<main>` or `<article>`, skip readability and
    extract from the semantic container directly. This fixes blog listings, product grids,
-   search results pages.
-2. **P1: Strip Wikipedia [edit] links** — Filter `[edit]` span elements from headings
-   during HTML-to-AST conversion.
+   search results pages. Would move us from F → B+ on listing pages.
+2. **P1: Strip Wikipedia [edit] links** — Filter `mw-editsection` class spans during
+   HTML-to-AST conversion. Simple CSS class check.
 3. **P1: Strip vote/action links from HN-style pages** — Detect and remove interactive
    elements (vote buttons, hide links) that aren't content.
 4. **P2: Better SPA handling** — When httpx extraction yields < 50 words, auto-suggest
    or auto-fallback to Playwright in tool error messages.
+5. **P3: Consider Readability+Trafilatura ensemble** — Academic research shows weighted
+   ensemble hits 0.974 median F1, beating any single extractor. Worth evaluating for
+   cases where Readability alone fails. (But Trafilatura is Apache 2.0 — license-safe.)
 
 ---
 

@@ -32,9 +32,7 @@ _HTTP_CONFIG = HttpClientConfig(
 def _browser_config() -> BrowserClientConfig:
     from kaos_web.browser_tools import _detect_browser_channel
 
-    return BrowserClientConfig(
-        channel=_detect_browser_channel(), ignore_https_errors=True
-    )
+    return BrowserClientConfig(channel=_detect_browser_channel(), ignore_https_errors=True)
 
 
 # ============================================================
