@@ -23,6 +23,8 @@ class RateLimitConfig(BaseModel):
     requests_per_second: float = 10.0
     burst_size: int | None = None
     per_host: bool = True
+    wait_on_limit: bool = True
+    """If True (default), block until token available. If False, raise WebRateLimitError."""
 
 
 class RateLimitMiddleware:
@@ -84,6 +86,15 @@ class RateLimitMiddleware:
         wait_time = await self._acquire_token(key)
 
         if wait_time > 0:
+            if not self.config.wait_on_limit:
+                from kaos_web.errors import WebRateLimitError
+
+                raise WebRateLimitError(
+                    f"Rate limit exceeded for {key}. "
+                    f"Max {self.config.requests_per_second} requests/second.",
+                    url=request.url,
+                    retry_after=wait_time,
+                )
             logger.debug("Rate limited: waiting %.2fs for %s", wait_time, key)
             await asyncio.sleep(wait_time)
             # Re-acquire after waiting

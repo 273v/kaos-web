@@ -40,6 +40,7 @@ class BrowserClient:
         self._config = config or BrowserClientConfig()
         self._playwright: Any = None
         self._browser: Any = None
+        self._contexts: dict[str, Any] = {}  # Named context pool
 
     async def _ensure_browser(self) -> Any:
         """Launch browser lazily on first use."""
@@ -71,12 +72,13 @@ class BrowserClient:
     async def fetch(self, request: WebRequest) -> WebResponse:
         """Fetch a URL using browser rendering.
 
-        Creates an isolated browser context per request. Supports
-        wait_until, wait_for_selector, and screenshot options via
-        the WebRequest model.
+        By default, creates an isolated browser context per request.
+        Use ``request.extra["context_id"]`` for a named persistent context
+        (cookies and storage persist across requests with the same ID).
         """
         browser = await self._ensure_browser()
         cfg = self._config
+        context_id = request.extra.get("context_id")
 
         # Build context options
         context_opts: dict[str, Any] = {
@@ -107,10 +109,17 @@ class BrowserClient:
         if cfg.extra_headers:
             context_opts["extra_http_headers"] = cfg.extra_headers
 
-        context = await browser.new_context(**context_opts)
+        # Named context: reuse or create
+        owns_context = context_id is None  # Only close if we created it
+        if context_id and context_id in self._contexts:
+            context = self._contexts[context_id]
+        else:
+            context = await browser.new_context(**context_opts)
+            if context_id:
+                self._contexts[context_id] = context
 
         try:
-            # Block unwanted resources
+            # Block unwanted resources (only on new contexts)
             if cfg.block_resources:
                 resource_types = set(cfg.block_resources)
 
@@ -173,6 +182,14 @@ class BrowserClient:
             )
 
         finally:
+            # Only close unnamed (per-request) contexts
+            if owns_context:
+                await context.close()
+
+    async def close_context(self, context_id: str) -> None:
+        """Close a named browser context."""
+        context = self._contexts.pop(context_id, None)
+        if context is not None:
             await context.close()
 
     async def screenshot(
@@ -221,7 +238,10 @@ class BrowserClient:
             await context.close()
 
     async def close(self) -> None:
-        """Release browser resources."""
+        """Release browser resources including all named contexts."""
+        for ctx in self._contexts.values():
+            await ctx.close()
+        self._contexts.clear()
         if self._browser:
             await self._browser.close()
             self._browser = None

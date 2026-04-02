@@ -1,4 +1,4 @@
-"""In-memory HTTP cache middleware with LRU eviction.
+"""HTTP cache middleware with memory and disk backends.
 
 RFC 7231 compliant: respects Cache-Control directives (no-store, no-cache,
 max-age), only caches GET/HEAD with cacheable status codes, and supports
@@ -8,10 +8,13 @@ TTL expiration with LRU eviction when limits are exceeded.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -35,6 +38,9 @@ class CacheConfig(BaseModel):
     enabled: bool = True
     """Whether caching is enabled."""
 
+    backend: Literal["memory", "disk"] = "memory"
+    """Cache backend: 'memory' (in-process LRU) or 'disk' (persistent files)."""
+
     max_entries: int = 1000
     """Maximum number of cached responses."""
 
@@ -46,6 +52,9 @@ class CacheConfig(BaseModel):
 
     respect_cache_control: bool = True
     """Whether to respect Cache-Control headers from responses."""
+
+    cache_dir: str | None = None
+    """Directory for disk cache (required when backend='disk')."""
 
 
 @dataclass
@@ -61,7 +70,7 @@ class CacheEntry:
 
 
 class CacheMiddleware:
-    """In-memory HTTP cache with LRU eviction.
+    """HTTP cache with memory and disk backends.
 
     Features:
     - LRU eviction when max_entries or max_bytes exceeded
@@ -69,6 +78,7 @@ class CacheMiddleware:
     - Only caches GET/HEAD with cacheable status codes (200, 301, 404, etc.)
     - Respects Cache-Control: no-store, no-cache, max-age
     - Cache key: blake2b hash of (method, url)
+    - Disk backend persists across process restarts
     """
 
     def __init__(self, config: CacheConfig | None = None) -> None:
@@ -77,6 +87,12 @@ class CacheMiddleware:
         self._total_bytes: int = 0
         self._hits: int = 0
         self._misses: int = 0
+
+        # Disk backend: load existing cache from disk
+        if self.config.backend == "disk":
+            self._cache_dir = Path(self.config.cache_dir or ".kaos-web-cache")
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+            self._load_disk_index()
 
     async def process(self, request: WebRequest, next_handler: Handler) -> WebResponse:
         """Check cache, return cached if fresh, otherwise fetch and cache."""
@@ -93,7 +109,6 @@ class CacheMiddleware:
         entry = self._cache.get(key)
         if entry is not None:
             if self._is_fresh(entry):
-                # Move to end (most recently used)
                 self._cache.move_to_end(key)
                 entry.access_count += 1
                 self._hits += 1
@@ -116,8 +131,6 @@ class CacheMiddleware:
                 return response
 
             size_bytes = self._estimate_size(response)
-
-            # Evict if needed before inserting
             self._evict_if_needed(size_bytes)
 
             now = time.monotonic()
@@ -132,6 +145,10 @@ class CacheMiddleware:
             self._total_bytes += size_bytes
             logger.debug("Cached %s (%d bytes, TTL=%ds)", request.url, size_bytes, ttl)
 
+            # Persist to disk
+            if self.config.backend == "disk":
+                self._save_to_disk(key, entry)
+
         return response
 
     def _cache_key(self, request: WebRequest) -> str:
@@ -140,23 +157,15 @@ class CacheMiddleware:
         return hashlib.blake2b(raw.encode(), digest_size=16).hexdigest()
 
     def _is_cacheable(self, request: WebRequest, response: WebResponse) -> bool:
-        """Check if response should be cached.
-
-        Only caches GET/HEAD with cacheable status codes. Respects
-        Cache-Control: no-store directive.
-        """
+        """Check if response should be cached."""
         if request.method.upper() not in _CACHEABLE_METHODS:
             return False
-
         if response.status_code not in _CACHEABLE_STATUS_CODES:
             return False
-
-        # Respect Cache-Control: no-store
         if self.config.respect_cache_control:
             cc = self._parse_cache_control(response.headers)
             if "no-store" in cc:
                 return False
-
         return True
 
     def _is_fresh(self, entry: CacheEntry) -> bool:
@@ -166,41 +175,25 @@ class CacheMiddleware:
         return time.monotonic() < entry.expires_at
 
     def _get_ttl(self, response: WebResponse) -> int:
-        """Extract TTL from Cache-Control max-age or use default.
-
-        Parses Cache-Control header for max-age directive. Falls back
-        to default_ttl if not present or if respect_cache_control is False.
-        """
+        """Extract TTL from Cache-Control max-age or use default."""
         if self.config.respect_cache_control:
             cc = self._parse_cache_control(response.headers)
-
-            # no-cache means must revalidate — use TTL of 0
             if "no-cache" in cc:
                 return 0
-
-            # Extract max-age
             max_age = cc.get("max-age")
             if max_age is not None:
                 try:
                     return int(max_age)
                 except ValueError:
                     pass
-
         return self.config.default_ttl
 
     def _parse_cache_control(self, headers: dict[str, str]) -> dict[str, str | None]:
-        """Parse Cache-Control header into directive dict.
-
-        Returns a dict where keys are directive names (lowercase) and values
-        are directive values (or None for valueless directives like no-store).
-
-        Example: "max-age=300, no-cache" -> {"max-age": "300", "no-cache": None}
-        """
+        """Parse Cache-Control header into directive dict."""
         result: dict[str, str | None] = {}
         raw = headers.get("cache-control", "") or headers.get("Cache-Control", "")
         if not raw:
             return result
-
         for part in raw.split(","):
             part = part.strip().lower()
             if "=" in part:
@@ -208,7 +201,6 @@ class CacheMiddleware:
                 result[key.strip()] = value.strip()
             elif part:
                 result[part] = None
-
         return result
 
     def _estimate_size(self, response: WebResponse) -> int:
@@ -216,35 +208,27 @@ class CacheMiddleware:
         size = len(response.html.encode("utf-8")) if response.html else 0
         size += len(response.url.encode("utf-8"))
         size += len(response.content_type.encode("utf-8"))
-        # Headers contribute ~100 bytes per entry on average
         size += sum(len(k) + len(v) for k, v in response.headers.items())
-        # Screenshot can be large
         if response.screenshot:
             size += len(response.screenshot)
-        # Object overhead
-        size += 256
+        size += 256  # object overhead
         return size
 
     def _evict_if_needed(self, needed_bytes: int) -> None:
-        """Evict LRU entries to make room for a new entry.
-
-        Evicts oldest entries (front of OrderedDict) until both
-        max_entries and max_bytes constraints are satisfied.
-        """
-        # Evict for entry count limit
+        """Evict LRU entries to make room."""
         while len(self._cache) >= self.config.max_entries and self._cache:
             self._evict_oldest()
-
-        # Evict for byte limit
         while self._total_bytes + needed_bytes > self.config.max_bytes and self._cache:
             self._evict_oldest()
 
     def _evict_oldest(self) -> None:
-        """Remove the least-recently-used (oldest) entry from the cache."""
+        """Remove the least-recently-used entry."""
         if not self._cache:
             return
         key, entry = self._cache.popitem(last=False)
         self._total_bytes -= entry.size_bytes
+        if self.config.backend == "disk":
+            self._delete_from_disk(key)
         logger.debug("Evicted cache entry %s (%d bytes)", key, entry.size_bytes)
 
     def _remove_entry(self, key: str) -> None:
@@ -252,19 +236,11 @@ class CacheMiddleware:
         entry = self._cache.pop(key, None)
         if entry is not None:
             self._total_bytes -= entry.size_bytes
+            if self.config.backend == "disk":
+                self._delete_from_disk(key)
 
     def stats(self) -> dict:
-        """Return cache hit/miss statistics.
-
-        Returns a dict with:
-        - hits: number of cache hits
-        - misses: number of cache misses
-        - hit_rate: ratio of hits to total requests (0.0 if no requests)
-        - entries: current number of cached entries
-        - total_bytes: current total cached size in bytes
-        - max_entries: configured maximum entries
-        - max_bytes: configured maximum bytes
-        """
+        """Return cache hit/miss statistics."""
         total = self._hits + self._misses
         return {
             "hits": self._hits,
@@ -274,11 +250,95 @@ class CacheMiddleware:
             "total_bytes": self._total_bytes,
             "max_entries": self.config.max_entries,
             "max_bytes": self.config.max_bytes,
+            "backend": self.config.backend,
         }
 
     def clear(self) -> None:
         """Clear all cached entries and reset statistics."""
+        if self.config.backend == "disk":
+            for key in list(self._cache.keys()):
+                self._delete_from_disk(key)
         self._cache.clear()
         self._total_bytes = 0
         self._hits = 0
         self._misses = 0
+
+    # ─── Disk backend ────────────────────────────────────────────────────
+
+    def _entry_path(self, key: str) -> Path:
+        """Get the file path for a cache entry (sharded by first 2 chars)."""
+        shard = key[:2]
+        return self._cache_dir / shard / f"{key}.json"
+
+    def _save_to_disk(self, key: str, entry: CacheEntry) -> None:
+        """Persist a cache entry to disk as JSON."""
+        path = self._entry_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "key": key,
+            "url": entry.response.url,
+            "status_code": entry.response.status_code,
+            "content_type": entry.response.content_type,
+            "html": entry.response.html,
+            "headers": entry.response.headers,
+            "elapsed_ms": entry.response.elapsed_ms,
+            "cookies": entry.response.cookies,
+            "created_at": entry.created_at,
+            "expires_at": entry.expires_at,
+            "size_bytes": entry.size_bytes,
+            "content_hash": hashlib.blake2b(
+                (entry.response.html or "").encode(), digest_size=16
+            ).hexdigest(),
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def _delete_from_disk(self, key: str) -> None:
+        """Remove a cache entry from disk."""
+        path = self._entry_path(key)
+        if path.exists():
+            path.unlink()
+
+    def _load_disk_index(self) -> None:
+        """Load existing cache entries from disk on startup."""
+        if not self._cache_dir.exists():
+            return
+        now = time.monotonic()
+        loaded = 0
+        for json_file in self._cache_dir.rglob("*.json"):
+            try:
+                data = json.loads(json_file.read_text(encoding="utf-8"))
+                key = data["key"]
+
+                # Verify content hash
+                content_hash = hashlib.blake2b(
+                    (data.get("html") or "").encode(), digest_size=16
+                ).hexdigest()
+                if content_hash != data.get("content_hash"):
+                    logger.warning("Corrupted cache entry %s, removing", key)
+                    json_file.unlink()
+                    continue
+
+                response = WebResponse(
+                    url=data["url"],
+                    status_code=data["status_code"],
+                    content_type=data.get("content_type", ""),
+                    html=data.get("html", ""),
+                    headers=data.get("headers", {}),
+                    elapsed_ms=data.get("elapsed_ms", 0.0),
+                    cookies=data.get("cookies", {}),
+                )
+                entry = CacheEntry(
+                    key=key,
+                    response=response,
+                    created_at=now,  # Reset monotonic clock on load
+                    expires_at=now + self.config.default_ttl,  # Re-apply TTL
+                    size_bytes=data.get("size_bytes", 0),
+                )
+                self._cache[key] = entry
+                self._total_bytes += entry.size_bytes
+                loaded += 1
+            except Exception:
+                logger.debug("Failed to load cache entry %s", json_file)
+
+        if loaded:
+            logger.info("Loaded %d cached entries from disk (%s)", loaded, self._cache_dir)
