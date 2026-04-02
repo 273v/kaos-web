@@ -80,7 +80,9 @@ async with BrowserClient(BrowserClientConfig(channel="chrome")) as client:
 - **`model_construct` for AST nodes**: Bypass Pydantic validation for performance when building AST from trusted lxml data. Uses `uuid4()` for fast IDs.
 - **Provenance on every node**: `SourceRef(source=url)` + `Provenance(source_ref=...)` attached to every block via `Attr`.
 - **Provenance cache**: Single `SourceRef` and `Provenance` created per document, reused across all nodes to avoid allocation overhead.
-- **Readability-first**: Raw HTML goes through readability extraction before AST conversion to strip navigation, ads, sidebars.
+- **Readability-first with semantic fallback**: Raw HTML goes through readability extraction before AST conversion. When readability returns < 50 words but the page has content, falls back to `<main>` → `<article>` parent → `[role=main]` → `<body>`.
+- **Noise filtering**: `_SKIP_CLASSES` filters Wikipedia [edit] links (`mw-editsection`), screen-reader-only text, and noprint elements. `_ACTION_LINK_RE` filters vote/hide/flag action links.
+- **`raw` mode**: `html_to_document(html, extract_content=False)` skips readability. Exposed via `raw=true` parameter on FetchPage, GetText, GetMarkdown tools.
 - **Lazy imports**: Heavy dependencies (playwright, kaos-content serializers) are imported inside handlers, not at module level, keeping `--help` fast.
 - **Search lives in kaos-content**: `kaos_content.search.search_document()` is the canonical search. Never import search from kaos-pdf or duplicate it. All extraction modules share the same search.
 - **Middleware wired in HttpClient**: `HttpClient.fetch()` routes through `MiddlewareChain` (retry → rate_limit → robots → cache → raw httpx). Config flags control which middleware are active. Unit tests use `_NO_MIDDLEWARE` config to avoid mock interference.
@@ -98,9 +100,10 @@ The `html_to_document()` function walks an lxml element tree and produces `Conte
 
 ## MCP Tools
 
-### Extraction tools (5) — `tools.py`
+### Extraction tools (7) — `tools.py`
 
-All with `openWorldHint=True`, `readOnlyHint=True`, `idempotentHint=True`:
+All with `openWorldHint=True`, `readOnlyHint=True`, `idempotentHint=True`.
+FetchPage, GetText, GetMarkdown support `raw=true` to skip readability and return full page.
 
 | Tool | Name | Purpose |
 |------|------|---------|
@@ -109,6 +112,8 @@ All with `openWorldHint=True`, `readOnlyHint=True`, `idempotentHint=True`:
 | GetPageMarkdownTool | `kaos-web-get-markdown` | Fetch URL -> markdown (context-free) |
 | GetPageMetadataTool | `kaos-web-get-metadata` | Extract JSON-LD, OpenGraph, meta tags |
 | SearchPageTool | `kaos-web-search-page` | Fetch URL -> BM25 search within content |
+| GetPageLinksTool | `kaos-web-get-links` | Extract all links with classification (nav/content/social/download) |
+| GetPageImagesTool | `kaos-web-get-images` | Extract all images with classification (content/decorative/icon/tracking) |
 
 ### Browser interaction tools (18) — `browser_tools.py`
 

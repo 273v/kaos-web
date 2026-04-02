@@ -1,7 +1,7 @@
 # kaos-web Roadmap & TODO
 
 **Updated**: 2026-04-02
-**Status**: Phase 6 complete (26 MCP tools, 502 tests). Phase 7 next.
+**Status**: Phase 6.5 complete (28 MCP tools, 558 tests). Phase 7 next.
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Date**: 2026-04-02
 **Version**: 0.4
-**Status**: Phases 1-6 complete. 26 MCP tools, 502 tests.
+**Status**: Phases 1-6.5 complete. 28 MCP tools, 558 tests.
 
 ## Overview
 
@@ -434,17 +434,19 @@ class PageMetadata(BaseModel):
 
 ### 5. MCP Tools
 
-26 tools following `docs/TOOL_DESIGN_GUIDE.md`.
+28 tools following `docs/TOOL_DESIGN_GUIDE.md`.
 
-#### Extraction tools (5) — `tools.py`
+#### Extraction tools (7) — `tools.py`
 
 | Tool | Name | Input | Output | Annotations |
 |------|------|-------|--------|-------------|
-| FetchPage | `kaos-web-fetch-page` | url, use_browser | ContentDocument artifact | readOnly, idempotent, openWorld |
-| GetPageText | `kaos-web-get-text` | url | Plain text string | readOnly, idempotent, openWorld |
-| GetPageMarkdown | `kaos-web-get-markdown` | url | Markdown string | readOnly, idempotent, openWorld |
+| FetchPage | `kaos-web-fetch-page` | url, use_browser, raw | ContentDocument artifact | readOnly, idempotent, openWorld |
+| GetPageText | `kaos-web-get-text` | url, raw | Plain text string | readOnly, idempotent, openWorld |
+| GetPageMarkdown | `kaos-web-get-markdown` | url, raw | Markdown string | readOnly, idempotent, openWorld |
 | GetPageMetadata | `kaos-web-get-metadata` | url | PageMetadata dict | readOnly, idempotent, openWorld |
 | SearchPage | `kaos-web-search-page` | url, query, level, top_k | SearchResults | readOnly, idempotent, openWorld |
+| GetPageLinks | `kaos-web-get-links` | url, link_type, internal_only | Classified links by position | readOnly, idempotent, openWorld |
+| GetPageImages | `kaos-web-get-images` | url, image_type | Classified images with metadata | readOnly, idempotent, openWorld |
 
 #### Browser interaction tools (18) — `browser_tools.py`
 
@@ -585,7 +587,8 @@ Critical gaps found during E2E testing against 273ventures.com and competitors:
 | Integration (MCP E2E) | 10 | Complete |
 | Sitemap, discovery, batch, crawl (unit) | 93 | Complete |
 | Crawl integration (real sites) | 16 | Complete |
-| **Total** | **502** | **Phases 1-6 complete** |
+| Phase 6.5 quality + new tools | 36 | Complete |
+| **Total** | **558** | **Phases 1-6.5 complete** |
 
 Target: 550+ tests by Phase 7 completion.
 

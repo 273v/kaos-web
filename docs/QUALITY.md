@@ -3,7 +3,7 @@
 **Date**: 2026-04-02 (updated)
 **Version**: 0.1.0
 **Code**: 7,200 lines production + 7,200 lines tests
-**Tests**: 502 passing (406 unit + 96 integration), 4 skipped
+**Tests**: 558 passing (440 unit + 118 integration), 4 skipped
 
 ---
 
@@ -32,7 +32,7 @@
 | Middleware | **A** | Retry, rate limit, robots, cache — all wired and E2E tested |
 | Link extraction | **A** | Classified (nav/content/social/download/pagination) |
 | Image extraction | **A** | Classified (content/decorative/icon/tracking/social_card) |
-| MCP tools | **A** | 26 tools (5 extraction + 18 browser + 3 crawl), annotations, artifact tiering |
+| MCP tools | **A** | 28 tools (7 extraction + 18 browser + 3 crawl), annotations, artifact tiering |
 | Sitemap parsing | **A** | XML (with/without NS), text, gzip, index recursion, cycle detection |
 | URL discovery | **A** | Sitemaps + page links, include/exclude patterns, robots.txt |
 | Batch fetch | **A** | Concurrent with semaphore, per-URL error isolation, timing |
