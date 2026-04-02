@@ -92,7 +92,7 @@ async def crawl_site(
     Returns:
         CrawlResult with pages, errors, and statistics.
     """
-    from kaos_web.discovery import discover_urls
+    from kaos_web.discovery import _compile_patterns, _matches_patterns, discover_urls
 
     if not start_url.startswith(("http://", "https://")):
         start_url = f"https://{start_url}"
@@ -100,6 +100,8 @@ async def crawl_site(
     config = client_config or HttpClientConfig(enable_cache=True)
     result = CrawlResult()
     seen: set[str] = set()
+    inc = _compile_patterns(include_patterns)
+    exc = _compile_patterns(exclude_patterns)
     start_time = time.monotonic()
 
     parsed = urlparse(start_url)
@@ -222,6 +224,8 @@ async def crawl_site(
                         if norm in seen:
                             continue
                         if not _same_domain(link_url, base_domain):
+                            continue
+                        if not _matches_patterns(link_url, inc, exc):
                             continue
                         seen.add(norm)
                         queue.append((link_url, page.depth + 1))
