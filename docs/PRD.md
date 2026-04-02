@@ -1,8 +1,8 @@
 # kaos-web Product Requirements Document
 
 **Date**: 2026-04-02
-**Version**: 0.3
-**Status**: Phases 1-5 complete. 23 MCP tools, 393 tests.
+**Version**: 0.4
+**Status**: Phases 1-6 complete. 26 MCP tools, 502 tests.
 
 ## Overview
 
@@ -48,6 +48,12 @@ web content automatically.
 │  Cookies · SetCookie · SaveAuth                          │
 │  LogRequests · ListRequests · GetRequest                 │
 │  ListContexts · CloseContext                             │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│            Multi-Page MCP Tools (3)                      │
+│  DiscoverUrls · BatchFetch · CrawlSite                   │
+│  Sitemap → Discovery → Batch/BFS → Content Extraction    │
 └──────────────────────┬──────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────┐
@@ -428,7 +434,7 @@ class PageMetadata(BaseModel):
 
 ### 5. MCP Tools
 
-23 tools following `docs/TOOL_DESIGN_GUIDE.md`.
+26 tools following `docs/TOOL_DESIGN_GUIDE.md`.
 
 #### Extraction tools (5) — `tools.py`
 
@@ -524,13 +530,14 @@ Follows `docs/CLI_STANDARD.md`:
 - [x] Page tracking, auto-detected browser channel, context management
 - [x] 29 integration tests against real browsers and live sites
 
-### Phase 6: Multi-Page Operations (IN PROGRESS)
+### Phase 6: Multi-Page Operations (DONE)
 
-- [ ] Sitemap parser (XML, text, gzip, sitemap index recursion)
-- [ ] URL discovery (sitemaps + page links, Firecrawl-style sitemap enum)
-- [ ] Batch fetch (concurrent with semaphore + rate limiting)
-- [ ] Site crawl (BFS, depth/page limits, sitemap-first discovery)
-- [ ] 3 MCP tools: discover-urls, batch-fetch, crawl-site
+- [x] Sitemap parser (XML, text, gzip, sitemap index recursion, cycle detection)
+- [x] URL discovery (sitemaps + page links, Firecrawl-style sitemap enum)
+- [x] Batch fetch (concurrent with asyncio.Semaphore + rate limiting)
+- [x] Site crawl (BFS, depth/page limits, sitemap-first discovery)
+- [x] 3 MCP tools: discover-urls, batch-fetch, crawl-site
+- [x] 109 new tests (93 unit + 16 integration)
 
 ---
 
@@ -564,9 +571,11 @@ Follows `docs/CLI_STANDARD.md`:
 | Integration (HTTP, real sites, middleware E2E) | 42 | Complete |
 | Integration (browser interaction) | 29 | Complete |
 | Integration (MCP E2E) | 10 | Complete |
-| **Total** | **393** | **Phases 1-5 complete** |
+| Sitemap, discovery, batch, crawl (unit) | 93 | Complete |
+| Crawl integration (real sites) | 16 | Complete |
+| **Total** | **502** | **Phases 1-6 complete** |
 
-Target: 450+ tests by Phase 6 completion.
+Target: 550+ tests by Phase 7 completion.
 
 ---
 

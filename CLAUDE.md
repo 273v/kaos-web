@@ -24,6 +24,11 @@ Key modules:
 - `middleware/` — Composable chain: retry, rate_limit, robots, cache
 - `tools.py` — 5 extraction MCP tools registered with KaosRuntime
 - `browser_tools.py` — 18 browser interaction MCP tools (navigate, click, fill, type, press, select, screenshot, evaluate, snapshot, content, cookies, set-cookie, save-auth, log-requests, requests, get-request, list-contexts, close-context)
+- `sitemap.py` — Sitemap parser (XML/text/gzip, index recursion, robots.txt discovery)
+- `discovery.py` — URL discovery pipeline (sitemaps + page links, pattern filtering)
+- `batch.py` — Concurrent URL fetching with asyncio.Semaphore
+- `crawl.py` — BFS site crawl orchestrator with depth/page limits
+- `crawl_tools.py` — 3 crawl MCP tools (discover-urls, batch-fetch, crawl-site)
 - `cli.py` — CLI with fetch, search, metadata commands
 
 ## Dependencies
@@ -132,6 +137,18 @@ Read tools use `readOnlyHint=True`, `openWorldHint=True`.
 | CloseContextTool | `kaos-web-browser-close-context` | Close context and free resources |
 
 Browser tools use a shared `_browser_client` singleton. Named contexts (via `context_id`) keep pages alive for multi-step workflows. Use `kaos-web-browser-navigate` first, then interact.
+
+### Multi-page tools (3) — `crawl_tools.py`
+
+All with `openWorldHint=True`, `readOnlyHint=True`, `idempotentHint=True`:
+
+| Tool | Name | Purpose |
+|------|------|---------|
+| DiscoverUrlsTool | `kaos-web-discover-urls` | Fast URL inventory (sitemaps + page links) |
+| BatchFetchTool | `kaos-web-batch-fetch` | Concurrent multi-URL fetch with extraction |
+| CrawlSiteTool | `kaos-web-crawl-site` | Full site crawl with sitemap-first BFS discovery |
+
+Firecrawl-style Map/Crawl: `discover-urls` first (fast, returns URL list), then `batch-fetch` or `crawl-site` on a subset. The `sitemap` parameter (`include`/`skip`/`only`) controls whether sitemaps are used for URL discovery.
 
 ## Middleware
 

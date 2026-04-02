@@ -2,8 +2,8 @@
 
 **Date**: 2026-04-02 (updated)
 **Version**: 0.1.0
-**Code**: 6,100 lines production + 5,400 lines tests
-**Tests**: 393 passing (313 unit + 80 integration), 4 skipped
+**Code**: 7,200 lines production + 7,200 lines tests
+**Tests**: 502 passing (406 unit + 96 integration), 4 skipped
 
 ---
 
@@ -31,7 +31,11 @@
 | Middleware | **A** | Retry, rate limit, robots, cache — all wired and E2E tested |
 | Link extraction | **A** | Classified (nav/content/social/download/pagination) |
 | Image extraction | **A** | Classified (content/decorative/icon/tracking/social_card) |
-| MCP tools | **A** | 23 tools (5 extraction + 18 browser), annotations, artifact tiering |
+| MCP tools | **A** | 26 tools (5 extraction + 18 browser + 3 crawl), annotations, artifact tiering |
+| Sitemap parsing | **A** | XML (with/without NS), text, gzip, index recursion, cycle detection |
+| URL discovery | **A** | Sitemaps + page links, include/exclude patterns, robots.txt |
+| Batch fetch | **A** | Concurrent with semaphore, per-URL error isolation, timing |
+| Site crawl | **A** | BFS, depth/page limits, sitemap-first discovery, content extraction |
 
 **Overall Grade: A**
 
@@ -83,7 +87,18 @@ while producing typed AST with provenance instead of markdown strings.
 | MCP E2E through kaos-mcp adapter | 10 | Integration |
 | Browser (Chrome, 4 tests) | 4 | Integration |
 | Browser interaction (29 tests, 10 classes) | 29 | Integration |
-| **Total** | **393 + 4 skip** | |
+| Sitemap parsing (XML, text, index, cycles) | 27 | Unit |
+| URL discovery (modes, patterns, dedup) | 14 | Unit |
+| Batch fetch (concurrency, errors, timing) | 7 | Unit |
+| Site crawl (depth, pages, isolation, BFS) | 11 | Unit |
+| Crawl MCP tools (metadata, errors, register) | 17 | Unit |
+| Crawl patterns/helpers | 17 | Unit |
+| Sitemap integration (real sitemaps) | 3 | Integration |
+| URL discovery integration (real sites) | 3 | Integration |
+| Batch fetch integration (real URLs) | 2 | Integration |
+| Site crawl integration (real crawl) | 5 | Integration |
+| Crawl MCP tool E2E (real sites) | 3 | Integration |
+| **Total** | **502 + 4 skip** | |
 
 ---
 
@@ -106,6 +121,11 @@ kaos-web (extraction, clients, middleware, tools)
   ├── middleware/cache.py        (310 lines, memory + disk)
   ├── tools.py                   (420 lines, 5 extraction MCP tools)
   ├── browser_tools.py           (900 lines, 18 browser MCP tools)
+  ├── sitemap.py                 (200 lines, XML/text/gzip parser)
+  ├── discovery.py               (150 lines, URL discovery pipeline)
+  ├── batch.py                   (80 lines, concurrent fetch)
+  ├── crawl.py                   (200 lines, BFS crawl orchestrator)
+  ├── crawl_tools.py             (350 lines, 3 crawl MCP tools)
   └── cli.py                     (250 lines, 4 commands)
 ```
 
