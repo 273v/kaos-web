@@ -21,7 +21,8 @@
 | Lists | **A** | Nested 3+ levels, mixed ol/ul, inline formatting inline |
 | Definition lists | **A** | Multiple terms/definitions |
 | Blockquotes | **A** | Nested, with headings/code/lists inside |
-| Readability | **A** | Heading bug fixed, works on Wikipedia/W3C/Cornell |
+| Readability (articles) | **A** | Heading bug fixed, works on Wikipedia/W3C/Cornell |
+| Readability (listings) | **F** | Fails on blog index, card grids, search results — discards content as boilerplate |
 | Metadata (JSON-LD/OG) | **A** | JSON-LD, OpenGraph, meta tags, html lang |
 | Security | **A** | Dangerous URIs stripped, script/style removed |
 | Provenance | **A** | Every block carries SourceRef + extractor |
@@ -37,7 +38,7 @@
 | Batch fetch | **A** | Concurrent with semaphore, per-URL error isolation, timing |
 | Site crawl | **A** | BFS, depth/page limits, sitemap-first discovery, content extraction |
 
-**Overall Grade: A**
+**Overall Grade: B+** (A on articles/infrastructure, F on listing pages)
 
 ---
 
@@ -133,13 +134,15 @@ kaos-web (extraction, clients, middleware, tools)
 
 ## Known Limitations
 
-| Limitation | Impact | Workaround |
-|-----------|--------|-----------|
-| Readability too aggressive on some layouts | usa.gov extracts 1 block | Use extract_content=False |
-| networkidle times out on SPAs | GitHub, Reddit | Use domcontentloaded or load |
-| No streaming for large downloads | Can't stream >100MB files | Phase 4 item |
-| No kaos-source connectors | Not integrated with source pipeline | Phase 4 item |
-| SSL cert issues in some environments | example.com fails in test venv | Use verify_ssl=False or fix CA bundle |
+| Limitation | Severity | Impact | Workaround |
+|-----------|----------|--------|-----------|
+| **Readability fails on listing/card pages** | **Critical** | Blog index, product grids, search results return near-empty extraction. Readability scores article cards as boilerplate. 273v /blog → 9 words (should be 874). | Skip readability for listing pages; fix: fallback to `<main>`/`<article>` when readability yields < 50 words |
+| Wikipedia [edit] links in output | Medium | 63 `[edit]` spans leak into markdown headings | Filter `mw-editsection` class during HTML-to-AST |
+| HN vote/action links in output | Medium | 58 vote links, 30 hide links in markdown | Detect and strip interactive elements that aren't content |
+| JS-rendered SPAs yield little content | Medium | react.dev → 65 words via both httpx and Playwright | Playwright helps but readability still discards SPA shells; need better SPA detection |
+| networkidle times out on SPAs | Low | GitHub, Reddit | Use domcontentloaded or load |
+| No streaming for large downloads | Low | Can't stream >100MB files | Deferred |
+| Crawl has no priority scoring | Low | BFS only; no Crawl4AI-style priority queue | Sufficient for most use cases |
 
 ---
 

@@ -32,7 +32,9 @@ _HTTP_CONFIG = HttpClientConfig(
 def _browser_config() -> BrowserClientConfig:
     from kaos_web.browser_tools import _detect_browser_channel
 
-    return BrowserClientConfig(channel=_detect_browser_channel())
+    return BrowserClientConfig(
+        channel=_detect_browser_channel(), ignore_https_errors=True
+    )
 
 
 # ============================================================
@@ -127,9 +129,7 @@ class TestHttpxE2E:
         from kaos_web.discovery import discover_urls
 
         async with HttpClient(_HTTP_CONFIG) as client:
-            result = await discover_urls(
-                _SITE, client.fetch, sitemap="skip", max_urls=50
-            )
+            result = await discover_urls(_SITE, client.fetch, sitemap="skip", max_urls=50)
         assert result.total > 10
         assert result.page_link_count > 10
         urls = {u.url for u in result.urls}
@@ -259,9 +259,7 @@ class TestPlaywrightE2E:
         from kaos_web.clients.browser import BrowserClient
 
         async with BrowserClient(_browser_config()) as client:
-            await client.fetch(
-                WebRequest(url=_SITE, extra={"context_id": "e2e"})
-            )
+            await client.fetch(WebRequest(url=_SITE, extra={"context_id": "e2e"}))
             snapshot = await client.get_snapshot("e2e")
             assert len(snapshot) > 100
             assert "273" in snapshot or "Ventures" in snapshot
@@ -327,9 +325,7 @@ class TestCrossClientComparison:
             browser_resp = await client.fetch(WebRequest(url=url))
 
         http_text = _serialize_text(html_to_document(http_resp.html, url=http_resp.url))
-        browser_text = _serialize_text(
-            html_to_document(browser_resp.html, url=browser_resp.url)
-        )
+        browser_text = _serialize_text(html_to_document(browser_resp.html, url=browser_resp.url))
 
         http_words = len(http_text.split())
         browser_words = len(browser_text.split())
@@ -358,6 +354,45 @@ class TestCrossClientComparison:
         assert http_meta.title == browser_meta.title
         assert http_meta.description == browser_meta.description
         assert http_meta.site_name == browser_meta.site_name
+
+
+# ============================================================
+# Known failures (regression tests for gaps)
+# ============================================================
+
+
+class TestKnownGaps:
+    """Tests that document known extraction failures.
+
+    These use xfail so they pass the suite but are tracked. When the
+    underlying issue is fixed, the xfail will start failing (strict=True)
+    and we'll know to remove it.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.xfail(reason="Readability discards blog listing cards as boilerplate", strict=True)
+    async def test_blog_listing_extracts_posts(self):
+        """Blog listing page should extract post titles and excerpts."""
+        async with HttpClient(_HTTP_CONFIG) as client:
+            resp = await client.fetch(WebRequest(url=f"{_SITE}/blog"))
+        doc = html_to_document(resp.html, url=resp.url)
+        text = _serialize_text(doc)
+        # Should have at least 100 words of blog post excerpts
+        assert len(text.split()) > 100
+
+    @pytest.mark.asyncio
+    @pytest.mark.xfail(reason="Wikipedia [edit] links leak into markdown", strict=True)
+    async def test_wikipedia_no_edit_links(self):
+        """Wikipedia extraction should not include [edit] section links."""
+        from kaos_content.serializers.markdown import serialize_markdown
+
+        async with HttpClient(_HTTP_CONFIG) as client:
+            resp = await client.fetch(
+                WebRequest(url="https://en.wikipedia.org/wiki/Large_language_model")
+            )
+        doc = html_to_document(resp.html, url=resp.url)
+        md = serialize_markdown(doc)
+        assert md.count("[edit]") == 0
 
 
 # ============================================================

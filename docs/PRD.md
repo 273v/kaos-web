@@ -538,6 +538,18 @@ Follows `docs/CLI_STANDARD.md`:
 - [x] Site crawl (BFS, depth/page limits, sitemap-first discovery)
 - [x] 3 MCP tools: discover-urls, batch-fetch, crawl-site
 - [x] 109 new tests (93 unit + 16 integration)
+- [x] E2E validated against live 273ventures.com (httpx + Playwright)
+
+### Phase 6.5: Extraction Quality Fixes (TODO)
+
+Critical gaps found during E2E testing against 273ventures.com and competitors:
+
+- [ ] **P0: Readability fallback for listing pages** — readability returns 9 words
+  for /blog (should be 874). When readability yields < 50 words but `<main>` or
+  `<article>` has > 200, extract from the semantic container directly.
+- [ ] P1: Strip Wikipedia `[edit]` section links (mw-editsection class)
+- [ ] P1: Strip HN-style vote/action elements from content
+- [ ] P2: Better SPA detection and auto-fallback to Playwright
 
 ---
 

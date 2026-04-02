@@ -216,26 +216,76 @@ cycle detection, robots.txt discovery.
 
 ---
 
-## Competitive Position
+## Honest Competitive Assessment (2026-04-02)
 
-| Capability | kaos-web | Playwright MCP | Chrome DevTools | Firecrawl | Browserbase |
-|-----------|----------|---------------|-----------------|-----------|-------------|
-| Content extraction | **A** (AST + provenance) | C (raw text) | C (raw text) | B (markdown) | B (LLM) |
-| In-page search | **A** (BM25) | None | None | None | None |
-| Structured metadata | **A** (JSON-LD/OG) | None | None | None | None |
-| HTTP middleware | **A** (retry/cache/robots) | None | None | N/A (SaaS) | N/A |
-| Browser interaction | **A-** (18 tools) | **A** (50+ tools) | **A** (29 tools) | B (interact) | A (act/observe) |
-| Auth/cookies | **B+** (get/set/save) | **A** (full CRUD) | B | B | A |
-| Network monitoring | **B** (log/list/detail) | **A** | **A** | None | None |
-| JS execution | **B+** (evaluate) | **A** | **A** | None | A (via Stagehand) |
-| Multi-page crawl | **A-** (sitemap+BFS) | None | None | **A** | None |
-| Self-hosted | **A** | **A** | **A** | F (SaaS) | F (SaaS) |
-| License clean | **A** | A | A | F (AGPL) | N/A |
+Tested head-to-head against live sites (273ventures.com, Wikipedia, HN, react.dev,
+GitHub). Compared output against Jina Reader (r.jina.ai) on same URLs.
 
-**Strategy**: Phase 6 closes the multi-page crawl gap (F → A-). Combined with
-our content extraction advantage (A vs C) and browser interaction (A-), kaos-web
-is now the most complete self-hosted MCP server for web content. Only Firecrawl
-matches on multi-page crawl, but it's AGPL/SaaS-only.
+### Extraction Quality (what actually matters)
+
+| Scenario | kaos-web | Jina Reader | Firecrawl | Notes |
+|----------|----------|-------------|-----------|-------|
+| Blog article (273v) | **A** (1723w, clean) | B+ (nav leaks) | B+ (nav leaks) | Our readability strips nav; Jina/Firecrawl include full nav menu |
+| Blog listing (273v) | **F** (9w, copyright only) | **A** (874w, all posts) | A | **Critical failure**: readability discards article cards as boilerplate |
+| Products page (273v) | B+ (150w, clean) | B (nav leaks) | B | Short pages work but low word count |
+| Wikipedia article | B (16K words but [edit] links, cleanup boxes) | B- (full nav sidebar leaks) | B+ | Both leak junk; Wikipedia is hard for everyone |
+| Hacker News | C (58 vote links in markdown) | C (same problem) | B | HN's flat structure defeats readability |
+| react.dev (SPA) | D (65w, only footer text) | B (JS rendering) | A (headless) | httpx can't render JS; Playwright gets same bad result |
+| GitHub README | B+ (478w, clean) | B (nav leaks) | A | We extract README well; Jina includes all nav chrome |
+
+### Where We Actually Win
+
+- **Nav stripping**: On article pages, our readability correctly removes nav/header/footer.
+  Jina Reader dumps the full navigation menu into every page's markdown output.
+- **AST with provenance**: No competitor produces a typed document model. Everyone else
+  outputs flat markdown strings. This matters for downstream search, references, and MCP.
+- **Structured metadata**: JSON-LD, OpenGraph extraction is solid. Jina returns bare metadata
+  headers but no structured extraction API.
+- **Self-hosted, license-clean**: Firecrawl is AGPL. Jina is SaaS. We're proprietary.
+- **In-page BM25 search**: Unique feature. No competitor offers it.
+
+### Where We Actually Lose
+
+- **Readability fails on listing/card pages**: Blog index, product grids, search results —
+  any page where the "main content" is a list of cards/excerpts rather than a single article.
+  Readability's scoring algorithm treats these as boilerplate. **This is the #1 gap.**
+- **No nav stripping on non-article pages**: When readability fails, we fall through to
+  raw HTML-to-AST which includes everything. But even then, the blog listing gets nothing.
+- **Wikipedia [edit] links**: We include 63 `[edit]` section links in the markdown output.
+  Firecrawl strips these. We should too.
+- **JS-rendered SPAs**: httpx gets nothing useful from react.dev, Next.js apps, etc.
+  Even Playwright gets the same bad result because readability still runs on the rendered
+  HTML and sometimes discards SPAs content. Jina handles this better.
+- **Crawl depth**: Our BFS crawl works but is naive — no priority scoring, no politeness
+  delays beyond rate limiting, no incremental/resumable crawl state.
+
+### Honest Grades
+
+| Capability | kaos-web | Jina Reader | Firecrawl | Playwright MCP |
+|-----------|----------|-------------|-----------|----------------|
+| Article extraction | **A** | B+ | B+ | N/A |
+| Listing/card pages | **F** | B+ | A | N/A |
+| Nav/chrome stripping | **A** (when readability works) | D | B | N/A |
+| SPA/JS pages | D (need Playwright) | B+ | **A** | **A** |
+| Wikipedia/complex | B | B- | B+ | N/A |
+| Structured metadata | **A** | C | B | N/A |
+| In-page search | **A** (unique) | N/A | N/A | N/A |
+| Multi-page crawl | B (sitemap+BFS) | N/A | **A** | N/A |
+| Browser interaction | B+ (18 tools) | N/A | C | **A** |
+| Self-hosted + clean license | **A** | F (SaaS) | F (AGPL) | **A** |
+
+### Priority Fixes
+
+1. **P0: Readability fallback for listing pages** — When readability returns < 50 words
+   but the raw HTML has > 200 words in `<main>` or `<article>`, skip readability and
+   extract from the semantic container directly. This fixes blog listings, product grids,
+   search results pages.
+2. **P1: Strip Wikipedia [edit] links** — Filter `[edit]` span elements from headings
+   during HTML-to-AST conversion.
+3. **P1: Strip vote/action links from HN-style pages** — Detect and remove interactive
+   elements (vote buttons, hide links) that aren't content.
+4. **P2: Better SPA handling** — When httpx extraction yields < 50 words, auto-suggest
+   or auto-fallback to Playwright in tool error messages.
 
 ---
 
