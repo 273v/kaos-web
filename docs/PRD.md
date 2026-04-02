@@ -428,7 +428,9 @@ class PageMetadata(BaseModel):
 
 ### 5. MCP Tools
 
-Five tools following `docs/TOOL_DESIGN_GUIDE.md`.
+23 tools following `docs/TOOL_DESIGN_GUIDE.md`.
+
+#### Extraction tools (5) — `tools.py`
 
 | Tool | Name | Input | Output | Annotations |
 |------|------|-------|--------|-------------|
@@ -437,6 +439,29 @@ Five tools following `docs/TOOL_DESIGN_GUIDE.md`.
 | GetPageMarkdown | `kaos-web-get-markdown` | url | Markdown string | readOnly, idempotent, openWorld |
 | GetPageMetadata | `kaos-web-get-metadata` | url | PageMetadata dict | readOnly, idempotent, openWorld |
 | SearchPage | `kaos-web-search-page` | url, query, level, top_k | SearchResults | readOnly, idempotent, openWorld |
+
+#### Browser interaction tools (18) — `browser_tools.py`
+
+| Tool | Name | Purpose | Annotations |
+|------|------|---------|-------------|
+| BrowserNavigate | `kaos-web-browser-navigate` | Navigate, create persistent page | write, openWorld |
+| ClickElement | `kaos-web-browser-click` | Click by CSS selector | write, openWorld |
+| FillInput | `kaos-web-browser-fill` | Fill input field | write, openWorld |
+| TypeText | `kaos-web-browser-type` | Type character-by-character | write, openWorld |
+| PressKey | `kaos-web-browser-press` | Press keyboard key | write, openWorld |
+| SelectOption | `kaos-web-browser-select` | Select dropdown | write, openWorld |
+| Screenshot | `kaos-web-browser-screenshot` | Screenshot (context or URL) | readOnly, openWorld |
+| EvaluateJS | `kaos-web-browser-evaluate` | Execute JavaScript | write, openWorld |
+| GetSnapshot | `kaos-web-browser-snapshot` | Accessibility tree | readOnly, openWorld |
+| GetContent | `kaos-web-browser-content` | Extract page content | readOnly, openWorld |
+| GetCookies | `kaos-web-browser-cookies` | List cookies | readOnly, openWorld |
+| SetCookie | `kaos-web-browser-set-cookie` | Set a cookie | write, openWorld |
+| SaveAuthState | `kaos-web-browser-save-auth` | Save auth state to file | write, local |
+| EnableRequestLogging | `kaos-web-browser-log-requests` | Start network logging | write, openWorld |
+| ListRequests | `kaos-web-browser-requests` | List network requests | readOnly, openWorld |
+| GetRequestDetail | `kaos-web-browser-get-request` | Request detail by ID | readOnly, openWorld |
+| ListContexts | `kaos-web-browser-list-contexts` | List active contexts | readOnly, openWorld |
+| CloseContext | `kaos-web-browser-close-context` | Close and clean up | write, openWorld |
 
 All tools: `openWorldHint=True` (makes HTTP requests), `destructiveHint=False`.
 
@@ -473,50 +498,39 @@ Follows `docs/CLI_STANDARD.md`:
 
 ## Implementation Phases
 
-### Phase 1: Core Extraction (COMPLETE)
+### Phase 1: Core Extraction (DONE)
 
-- [x] Readability algorithm (349 lines)
-- [x] HTML-to-AST conversion (1219 lines, 20+ element types)
-- [x] Metadata extraction (JSON-LD, OpenGraph, meta tags)
-- [x] Minimal HttpClient (httpx wrapper)
-- [x] CLI: extract, metadata commands
-- [x] 110 tests (95 quality + 15 benchmarks)
-- [x] Performance: 1.7-2.2x faster than alternatives
-- [x] Quality: Grade A across 17 categories
+- [x] Readability algorithm, HTML-to-AST, metadata extraction
+- [x] Performance: 1.7-2.2x faster than alternatives, Grade A across 17 categories
 
-### Phase 2: HTTP Hardening + MCP Tools
+### Phase 2: HTTP Hardening + MCP Tools (DONE)
 
-- [ ] HttpClient with full configuration (connection pooling, timeouts, auth, SSL, proxy)
-- [ ] Error types (WebError hierarchy)
-- [ ] RetryMiddleware with exponential backoff
-- [ ] RateLimitMiddleware with per-domain token bucket
-- [ ] RobotsMiddleware with stdlib robotparser
-- [ ] Middleware chain composition
-- [ ] 5 MCP tools (FetchPage, GetText, GetMarkdown, Metadata, Search)
-- [ ] CLI: fetch, search commands
-- [ ] HTTP client tests (mocked with pytest-httpx)
-- [ ] MCP integration tests
+- [x] HttpClient with full config, WebError hierarchy, middleware chain
+- [x] 5 MCP extraction tools, CLI, user-agent randomization
 
-### Phase 3: Browser Client
+### Phase 3: Browser Client (DONE)
 
-- [ ] BrowserClient with Playwright (chromium, firefox, webkit)
-- [ ] Lazy browser launch, context-per-request isolation
-- [ ] Resource blocking (images, fonts, CSS)
-- [ ] Wait strategies (load, domcontentloaded, networkidle, selector)
-- [ ] Screenshot support → KaosImage
-- [ ] Authentication state persistence (storage_state)
-- [ ] Browser client tests
-- [ ] CLI: `--browser` flag integration
+- [x] BrowserClient with Playwright, lazy launch, context pooling
 
-### Phase 4: Caching + Polish
+### Phase 4: Cache + Extraction + Quality (DONE)
 
-- [ ] CacheMiddleware (memory + disk backends, RFC 7231 compliant)
-- [ ] Cache key generation (blake2b of method + url + params)
-- [ ] LRU eviction with configurable size limits
-- [ ] Background pruning of expired entries
-- [ ] Streaming response support for large downloads
-- [ ] Link extraction with context (standalone extractor)
-- [ ] kaos-source connector integration (HttpConnector, BrowserConnector)
+- [x] CacheMiddleware, link/image extraction, fuzz tests, real-site integration
+
+### Phase 5: Browser Interaction (DONE)
+
+- [x] 18 browser MCP tools (navigate, click, fill, type, press, select, screenshot,
+  evaluate, snapshot, content, cookies, set-cookie, save-auth, log-requests,
+  requests, get-request, list-contexts, close-context)
+- [x] Page tracking, auto-detected browser channel, context management
+- [x] 29 integration tests against real browsers and live sites
+
+### Phase 6: Multi-Page Operations (IN PROGRESS)
+
+- [ ] Sitemap parser (XML, text, gzip, sitemap index recursion)
+- [ ] URL discovery (sitemaps + page links, Firecrawl-style sitemap enum)
+- [ ] Batch fetch (concurrent with semaphore + rate limiting)
+- [ ] Site crawl (BFS, depth/page limits, sitemap-first discovery)
+- [ ] 3 MCP tools: discover-urls, batch-fetch, crawl-site
 
 ---
 
@@ -540,20 +554,19 @@ Follows `docs/CLI_STANDARD.md`:
 
 | Category | Count | Status |
 |----------|-------|--------|
-| Readability | 6 | Complete |
-| HTML-to-AST | 29 | Complete |
-| Metadata | 13 | Complete |
-| Edge cases | 48 | Complete |
+| HTML-to-AST, readability, metadata, edge cases | 162 | Complete |
 | Benchmarks | 15 | Complete |
-| HTTP client | 0 | Phase 2 |
-| Middleware | 0 | Phase 2 |
-| MCP tools | 0 | Phase 2 |
-| Browser client | 0 | Phase 3 |
-| CLI | 0 | Phase 2 |
-| Integration (E2E) | 0 | Phase 2 |
-| **Total** | **111** | **Phase 1 complete** |
+| HTTP client, middleware, cache | 62 | Complete |
+| Browser client + interaction | 70 | Complete |
+| MCP extraction tools | 6 | Complete |
+| CLI | 6 | Complete |
+| Fuzz/invariants | 60 | Complete |
+| Integration (HTTP, real sites, middleware E2E) | 42 | Complete |
+| Integration (browser interaction) | 29 | Complete |
+| Integration (MCP E2E) | 10 | Complete |
+| **Total** | **393** | **Phases 1-5 complete** |
 
-Target: 200+ tests by Phase 4 completion.
+Target: 450+ tests by Phase 6 completion.
 
 ---
 
