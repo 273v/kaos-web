@@ -130,6 +130,32 @@ _LANG_RE = re.compile(r"\b(?:language|lang|highlight)-(\S+)")
 # Dangerous URI schemes to reject.
 _UNSAFE_SCHEMES = frozenset({"javascript", "data", "vbscript"})
 
+# CSS classes whose elements should be filtered entirely.
+# These are well-known noise patterns from major sites.
+_SKIP_CLASSES = frozenset(
+    {
+        "mw-editsection",  # Wikipedia [edit] section links
+        "mw-jump-link",  # Wikipedia "jump to" navigation
+        "mw-cite-backlink",  # Wikipedia citation back-links
+        "sr-only",  # Bootstrap screen-reader only
+        "visually-hidden",  # Modern screen-reader only
+        "screen-reader-text",  # WordPress screen-reader only
+        "noprint",  # Wikipedia print-hide elements
+    }
+)
+
+# Link href patterns that indicate UI action controls, not content links.
+_ACTION_LINK_RE = re.compile(
+    r"(?:^|[?&/])"
+    r"(?:vote|upvote|downvote|flag|hide|collapse|fav|unfav)"
+    r"(?:[?&=]|$)",
+    re.IGNORECASE,
+)
+
+# Minimum words from readability before we accept its result.
+# Below this threshold, we try semantic container fallback.
+_MIN_READABILITY_WORDS = 50
+
 # Shared default Attr instance (frozen, safe to reuse).
 _DEFAULT_ATTR = Attr()
 
@@ -137,6 +163,76 @@ _DEFAULT_ATTR = Attr()
 def _fast_id() -> str:
     """Generate a fast unique ID (UUID4 hex — standard, faster than UUID7)."""
     return uuid.uuid4().hex
+
+
+def _should_skip_element(el: HtmlElement) -> bool:
+    """Check if an element should be skipped based on its CSS classes."""
+    cls = el.get("class", "")
+    if not cls:
+        return False
+    return bool(_SKIP_CLASSES.intersection(cls.split()))
+
+
+def _is_action_link(href: str) -> bool:
+    """Check if a link href is a UI action control, not a content link."""
+    if not href:
+        return False
+    return _ACTION_LINK_RE.search(href) is not None
+
+
+def _empty_document() -> ContentDocument:
+    """Return an empty ContentDocument."""
+    return ContentDocument.model_construct(
+        metadata=DocumentMetadata.model_construct(
+            title=None,
+            authors=(),
+            date=None,
+            language=None,
+            source=None,
+            document_type=None,
+            extra={},
+        ),
+        body=(),
+        footnotes={},
+        definitions={},
+        annotations=(),
+    )
+
+
+def _find_semantic_container(body: HtmlElement) -> HtmlElement | None:
+    """Find the best semantic container when readability returns too little.
+
+    Tries <main> first, then the common parent of multiple <article> elements,
+    then [role=main]. Returns None if no semantic container has enough content.
+    """
+    # Try <main> first (most semantically correct)
+    main_el = body.find(".//main")
+    if main_el is not None:
+        word_count = len((main_el.text_content() or "").split())
+        if word_count >= _MIN_READABILITY_WORDS:
+            return main_el
+
+    # Try role="main"
+    for el in body.iter():
+        if isinstance(el.tag, str) and el.get("role") == "main":
+            word_count = len((el.text_content() or "").split())
+            if word_count >= _MIN_READABILITY_WORDS:
+                return el
+
+    # Try the common parent of multiple <article> elements (listing pattern)
+    articles = body.findall(".//article")
+    if len(articles) > 1:
+        parent = articles[0].getparent()
+        if parent is not None:
+            word_count = len((parent.text_content() or "").split())
+            if word_count >= _MIN_READABILITY_WORDS:
+                return parent
+    elif len(articles) == 1:
+        word_count = len((articles[0].text_content() or "").split())
+        if word_count >= _MIN_READABILITY_WORDS:
+            return articles[0]
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +548,15 @@ def _process_inlines(el: HtmlElement, url: str) -> list[Inline]:
                     result.append(_mk_text(collapsed))
             continue
 
+        # Skip elements with well-known noise classes (e.g. mw-editsection).
+        if _should_skip_element(child):
+            tail = _strip_or_empty(child.tail)
+            if tail:
+                collapsed = _collapse_whitespace(tail)
+                if collapsed:
+                    result.append(_mk_text(collapsed))
+            continue
+
         # Transparent inline elements: expand their children directly.
         if tag in ("span", "u", "mark", "abbr", "time", "small", "font"):
             result.extend(_process_inlines(child, url))
@@ -513,6 +618,9 @@ def _element_to_inline(el: HtmlElement, url: str) -> Inline | None:
 
     if tag == "a":
         href = el.get("href", "")
+        # Skip UI action links (vote, hide, flag, etc.)
+        if href and _is_action_link(href):
+            return None
         resolved = _resolve_url(href, url) if href else ""
         if resolved and not _is_safe_url(resolved):
             # Dangerous URL — return children as plain text, drop the link
@@ -586,6 +694,10 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
 
     # Skip non-content elements.
     if tag in _SKIP_TAGS:
+        return []
+
+    # Skip elements with well-known noise classes (e.g. mw-editsection).
+    if _should_skip_element(el):
         return []
 
     # Headings.
@@ -1126,64 +1238,40 @@ def html_to_document(
         ContentDocument with Block/Inline AST nodes and provenance.
     """
     if not html_content or not html_content.strip():
-        return ContentDocument.model_construct(
-            metadata=DocumentMetadata.model_construct(
-                title=None,
-                authors=(),
-                date=None,
-                language=None,
-                source=None,
-                document_type=None,
-                extra={},
-            ),
-            body=(),
-            footnotes={},
-            definitions={},
-            annotations=(),
-        )
+        return _empty_document()
 
     root: HtmlElement | None = None
+    full_doc: HtmlElement | None = None  # Parsed once, reused if needed
 
     if extract_content:
         root = readability_extract(html_content)
 
+        # Guard: if readability returned a suspiciously small fragment,
+        # fall back to semantic container extraction.
+        if root is not None:
+            readability_words = len((root.text_content() or "").split())
+            if readability_words < _MIN_READABILITY_WORDS:
+                try:
+                    full_doc = lxml_html.document_fromstring(html_content)
+                except Exception:
+                    full_doc = None
+                if full_doc is not None and full_doc.body is not None:
+                    body_words = len((full_doc.body.text_content() or "").split())
+                    if body_words > _MIN_READABILITY_WORDS * 4:
+                        # Readability returned too little — try semantic containers.
+                        semantic = _find_semantic_container(full_doc.body)
+                        root = semantic if semantic is not None else full_doc.body
+
     if root is None:
         # Parse full document and use <body>.
-        try:
-            doc = lxml_html.document_fromstring(html_content)
-        except Exception:
-            return ContentDocument.model_construct(
-                metadata=DocumentMetadata.model_construct(
-                    title=None,
-                    authors=(),
-                    date=None,
-                    language=None,
-                    source=None,
-                    document_type=None,
-                    extra={},
-                ),
-                body=(),
-                footnotes={},
-                definitions={},
-                annotations=(),
-            )
-        root = doc.body
+        if full_doc is None:
+            try:
+                full_doc = lxml_html.document_fromstring(html_content)
+            except Exception:
+                return _empty_document()
+        root = full_doc.body if full_doc is not None else None
         if root is None:
-            return ContentDocument.model_construct(
-                metadata=DocumentMetadata.model_construct(
-                    title=None,
-                    authors=(),
-                    date=None,
-                    language=None,
-                    source=None,
-                    document_type=None,
-                    extra={},
-                ),
-                body=(),
-                footnotes={},
-                definitions={},
-                annotations=(),
-            )
+            return _empty_document()
 
     # Convert the element tree to AST blocks.
     blocks = _process_children_as_blocks(root, url)

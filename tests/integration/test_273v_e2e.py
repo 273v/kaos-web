@@ -368,7 +368,6 @@ class TestKnownGaps:
     """
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Readability discards blog listing cards as boilerplate", strict=True)
     async def test_blog_listing_extracts_posts(self):
         """Blog listing page should extract post titles and excerpts."""
         async with HttpClient(_HTTP_CONFIG) as client:
@@ -379,7 +378,6 @@ class TestKnownGaps:
         assert len(text.split()) > 100
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(reason="Wikipedia [edit] links leak into markdown", strict=True)
     async def test_wikipedia_no_edit_links(self):
         """Wikipedia extraction should not include [edit] section links."""
         from kaos_content.serializers.markdown import serialize_markdown

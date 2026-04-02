@@ -285,8 +285,8 @@ logic when Readability's scoring discards non-article content.
 | Capability | kaos-web | Jina Reader | Firecrawl | Crawl4AI | Trafilatura |
 |-----------|----------|-------------|-----------|----------|-------------|
 | Article extraction | **A** | B+ | B+ | B | **A** |
-| Listing/card pages | **F** | B+ | A | B | C |
-| Nav/chrome stripping | **A** (articles) | D (nav leaks) | B | C (11.3% noise) | **A** (highest precision) |
+| Listing/card pages | **B+** (semantic fallback) | B+ | A | B | C |
+| Nav/chrome stripping | **A** (articles + class filter) | D (nav leaks) | B | C (11.3% noise) | **A** (highest precision) |
 | SPA/JS pages | D | B+ | **A** | B+ | F (no JS) |
 | Wikipedia/complex | B | B- | B+ | B | B+ |
 | Structured metadata | **A** | C | B | C | **A** |
@@ -313,14 +313,13 @@ logic when Readability's scoring discards non-article content.
 
 ### Priority Fixes
 
-1. **P0: Readability fallback for listing pages** — When readability returns < 50 words
-   but the raw HTML has > 200 words in `<main>` or `<article>`, skip readability and
-   extract from the semantic container directly. This fixes blog listings, product grids,
-   search results pages. Would move us from F → B+ on listing pages.
-2. **P1: Strip Wikipedia [edit] links** — Filter `mw-editsection` class spans during
-   HTML-to-AST conversion. Simple CSS class check.
-3. **P1: Strip vote/action links from HN-style pages** — Detect and remove interactive
-   elements (vote buttons, hide links) that aren't content.
+1. ~~**P0: Readability fallback for listing pages**~~ — **DONE**. Semantic container
+   fallback: `<main>` → `<article>` parent → `[role=main]` → `<body>`. Triggers when
+   readability returns < 50 words but body has > 200. 273v /blog: 9 → 400+ words.
+2. ~~**P1: Strip Wikipedia [edit] links**~~ — **DONE**. `_SKIP_CLASSES` filter in
+   `_process_element()` and `_process_inlines()`. 63 → 0 [edit] links on Wikipedia.
+3. ~~**P1: Strip vote/action links**~~ — **DONE**. `_ACTION_LINK_RE` filter in
+   `_element_to_inline()`. 58 → 0 vote links on HN.
 4. **P2: Better SPA handling** — When httpx extraction yields < 50 words, auto-suggest
    or auto-fallback to Playwright in tool error messages.
 5. **P3: Consider Readability+Trafilatura ensemble** — Academic research shows weighted
@@ -336,5 +335,5 @@ logic when Readability's scoring discards non-article content.
 | Phase 4 complete | 250+ | **293** (exceeded) |
 | Phase 5.1 complete | 330+ | **335** (exceeded) |
 | Phase 5 complete | 350+ | **393** (exceeded) |
-| Phase 6 complete | 400+ | **502** (exceeded) |
+| Phase 6 complete | 400+ | **545** (exceeded) |
 | Phase 7 complete | 550+ | — |

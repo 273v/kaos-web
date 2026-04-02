@@ -22,7 +22,7 @@
 | Definition lists | **A** | Multiple terms/definitions |
 | Blockquotes | **A** | Nested, with headings/code/lists inside |
 | Readability (articles) | **A** | Heading bug fixed, works on Wikipedia/W3C/Cornell |
-| Readability (listings) | **F** | Fails on blog index, card grids, search results — discards content as boilerplate |
+| Readability (listings) | **B+** | Semantic fallback: `<main>` → `<article>` parent → `[role=main]` when readability < 50 words |
 | Metadata (JSON-LD/OG) | **A** | JSON-LD, OpenGraph, meta tags, html lang |
 | Security | **A** | Dangerous URIs stripped, script/style removed |
 | Provenance | **A** | Every block carries SourceRef + extractor |
@@ -38,7 +38,7 @@
 | Batch fetch | **A** | Concurrent with semaphore, per-URL error isolation, timing |
 | Site crawl | **A** | BFS, depth/page limits, sitemap-first discovery, content extraction |
 
-**Overall Grade: B+** (A on articles/infrastructure, F on listing pages)
+**Overall Grade: A-** (A on articles, B+ on listing pages via semantic fallback)
 
 ---
 
@@ -136,9 +136,9 @@ kaos-web (extraction, clients, middleware, tools)
 
 | Limitation | Severity | Impact | Workaround |
 |-----------|----------|--------|-----------|
-| **Readability fails on listing/card pages** | **Critical** | Blog index, product grids, search results return near-empty extraction. Readability scores article cards as boilerplate. 273v /blog → 9 words (should be 874). | Skip readability for listing pages; fix: fallback to `<main>`/`<article>` when readability yields < 50 words |
-| Wikipedia [edit] links in output | Medium | 63 `[edit]` spans leak into markdown headings | Filter `mw-editsection` class during HTML-to-AST |
-| HN vote/action links in output | Medium | 58 vote links, 30 hide links in markdown | Detect and strip interactive elements that aren't content |
+| ~~Readability fails on listing/card pages~~ | ~~Critical~~ | **FIXED**: Semantic fallback to `<main>`/`<article>` when readability < 50 words | 273v /blog: 9 → 400+ words |
+| ~~Wikipedia [edit] links~~ | ~~Medium~~ | **FIXED**: `_SKIP_CLASSES` filters `mw-editsection` at block and inline level | 63 → 0 [edit] links |
+| ~~HN vote/action links~~ | ~~Medium~~ | **FIXED**: `_ACTION_LINK_RE` filters vote/hide/flag action hrefs | 58 → 0 vote links |
 | JS-rendered SPAs yield little content | Medium | react.dev → 65 words via both httpx and Playwright | Playwright helps but readability still discards SPA shells; need better SPA detection |
 | networkidle times out on SPAs | Low | GitHub, Reddit | Use domcontentloaded or load |
 | No streaming for large downloads | Low | Can't stream >100MB files | Deferred |
