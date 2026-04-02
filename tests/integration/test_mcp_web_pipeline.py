@@ -27,9 +27,9 @@ def runtime():
 
 
 class TestToolRegistration:
-    def test_register_5_tools(self, runtime: KaosRuntime) -> None:
+    def test_register_6_tools(self, runtime: KaosRuntime) -> None:
         count = register_web_tools(runtime)
-        assert count == 5
+        assert count == 6
 
         names = {t.metadata.name for t in runtime.tools.list_tool_objects()}
         assert "kaos-web-fetch-page" in names
@@ -37,6 +37,7 @@ class TestToolRegistration:
         assert "kaos-web-get-markdown" in names
         assert "kaos-web-get-metadata" in names
         assert "kaos-web-search-page" in names
+        assert "kaos-web-get-links" in names
 
     def test_all_tools_have_annotations(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)

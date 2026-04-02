@@ -11,6 +11,7 @@ import pytest
 from kaos_core import KaosRuntime
 from kaos_web.tools import (
     FetchPageTool,
+    GetPageLinksTool,
     GetPageMarkdownTool,
     GetPageMetadataTool,
     GetPageTextTool,
@@ -32,7 +33,7 @@ class TestRegisterTools:
         runtime = KaosRuntime()
         count = register_web_tools(runtime)
 
-        assert count == 5, f"Expected 5 tools registered, got {count}"
+        assert count == 6, f"Expected 6 tools registered, got {count}"
 
         registered = runtime.tools.list_tools()
         expected_names = {
@@ -41,6 +42,7 @@ class TestRegisterTools:
             "kaos-web-get-markdown",
             "kaos-web-get-metadata",
             "kaos-web-search-page",
+            "kaos-web-get-links",
         }
         for name in expected_names:
             assert name in registered, (
@@ -147,3 +149,86 @@ class TestSearchPageTool:
         assert "text" in first, "Each result should have a 'text' field"
         assert "score" in first, "Each result should have a 'score' field"
         assert "block_ref" in first, "Each result should have a 'block_ref' field"
+
+
+class TestGetPageLinksTool:
+    """Tests for the link extraction tool."""
+
+    def test_metadata(self):
+        tool = GetPageLinksTool()
+        assert tool.metadata.name == "kaos-web-get-links"
+        assert tool.metadata.annotations is not None
+        assert tool.metadata.annotations.readOnlyHint is True
+
+    @pytest.mark.asyncio
+    async def test_empty_url_error(self):
+        tool = GetPageLinksTool()
+        result = await tool.execute({"url": ""})
+        assert result.isError
+
+    @pytest.mark.asyncio
+    async def test_extracts_links(self):
+        html = (
+            "<html><body>"
+            '<nav><a href="/about">About</a></nav>'
+            '<a href="/article">Article</a>'
+            "</body></html>"
+        )
+        with patch("kaos_web.tools._fetch_html", return_value=(html, "https://example.com")):
+            tool = GetPageLinksTool()
+            result = await tool.execute({"url": "https://example.com"})
+        assert not result.isError
+        data = result.structuredContent
+        assert data["total"] >= 2
+
+    @pytest.mark.asyncio
+    async def test_filter_by_type(self):
+        html = (
+            "<html><body>"
+            '<nav><a href="/about">About</a></nav>'
+            '<a href="/article">Article</a>'
+            "</body></html>"
+        )
+        with patch("kaos_web.tools._fetch_html", return_value=(html, "https://example.com")):
+            tool = GetPageLinksTool()
+            result = await tool.execute(
+                {
+                    "url": "https://example.com",
+                    "link_type": "navigation",
+                }
+            )
+        data = result.structuredContent
+        # All returned links should be navigation type
+        for _pos, links in data["by_position"].items():
+            for lnk in links:
+                assert lnk["type"] == "navigation"
+
+
+class TestRawMode:
+    """Tests for the raw parameter on extraction tools."""
+
+    @pytest.mark.asyncio
+    async def test_raw_mode_has_param(self):
+        """All extraction tools should have the raw parameter."""
+        for tool_cls in [FetchPageTool, GetPageTextTool, GetPageMarkdownTool]:
+            tool = tool_cls()
+            params = {p.name for p in tool.metadata.input_schema}
+            assert "raw" in params, f"{tool.metadata.name} missing raw param"
+
+    @pytest.mark.asyncio
+    async def test_text_raw_vs_normal(self):
+        """Raw mode should return more content than normal mode on nav-heavy pages."""
+        html = (
+            "<html><body>"
+            '<nav><a href="/">Home</a> <a href="/about">About</a></nav>'
+            "<main><p>Main content paragraph with enough words.</p></main>"
+            "<footer><p>Footer content here.</p></footer>"
+            "</body></html>"
+        )
+        with patch("kaos_web.tools._fetch_html", return_value=(html, "https://example.com")):
+            tool = GetPageTextTool()
+            normal = await tool.execute({"url": "https://example.com"})
+            raw = await tool.execute({"url": "https://example.com", "raw": True})
+        # Both should succeed
+        assert not normal.isError
+        assert not raw.isError

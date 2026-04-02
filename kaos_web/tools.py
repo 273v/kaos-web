@@ -89,6 +89,17 @@ class FetchPageTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                ParameterSchema(
+                    name="raw",
+                    type="boolean",
+                    description=(
+                        "If true, skip readability content extraction and return the "
+                        "full page body (including navigation, sidebars, footers). "
+                        "Useful when you need the complete page structure."
+                    ),
+                    required=False,
+                    default=False,
+                ),
             ],
         )
 
@@ -97,6 +108,7 @@ class FetchPageTool(KaosTool):
     ) -> ToolResult:
         url = inputs["url"]
         use_browser = inputs.get("use_browser", False)
+        raw = inputs.get("raw", False)
 
         if context is None or context.runtime is None:
             return ToolResult.create_error(
@@ -118,7 +130,7 @@ class FetchPageTool(KaosTool):
             from kaos_content.views import DocumentView
             from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url)
+            doc = html_to_document(html, url=final_url, extract_content=not raw)
             if not doc.body:
                 return ToolResult.create_error(
                     f"No content extracted from {url}. "
@@ -183,6 +195,13 @@ class GetPageTextTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                ParameterSchema(
+                    name="raw",
+                    type="boolean",
+                    description="Skip readability and return full page text.",
+                    required=False,
+                    default=False,
+                ),
             ],
         )
 
@@ -190,6 +209,7 @@ class GetPageTextTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         url = inputs["url"]
+        raw = inputs.get("raw", False)
         try:
             html, final_url = await _fetch_html(url, inputs.get("use_browser", False))
         except Exception as exc:
@@ -202,7 +222,7 @@ class GetPageTextTool(KaosTool):
             from kaos_content.serializers.text import serialize_text
             from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url)
+            doc = html_to_document(html, url=final_url, extract_content=not raw)
             text = serialize_text(doc)
             return ToolResult.create_success(text)
         except Exception as exc:
@@ -238,6 +258,13 @@ class GetPageMarkdownTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                ParameterSchema(
+                    name="raw",
+                    type="boolean",
+                    description="Skip readability and return full page markdown.",
+                    required=False,
+                    default=False,
+                ),
             ],
         )
 
@@ -245,6 +272,7 @@ class GetPageMarkdownTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         url = inputs["url"]
+        raw = inputs.get("raw", False)
         try:
             html, final_url = await _fetch_html(url, inputs.get("use_browser", False))
         except Exception as exc:
@@ -257,7 +285,7 @@ class GetPageMarkdownTool(KaosTool):
             from kaos_content.serializers.markdown import serialize_markdown
             from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url)
+            doc = html_to_document(html, url=final_url, extract_content=not raw)
             md = serialize_markdown(doc)
             return ToolResult.create_success(md)
         except Exception as exc:
@@ -412,6 +440,115 @@ class SearchPageTool(KaosTool):
             )
 
 
+class GetPageLinksTool(KaosTool):
+    """Extract and classify all links from a web page."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-get-links",
+            display_name="Get Page Links",
+            description=(
+                "Extract all links from a URL with classification: navigation, "
+                "content, pagination, social, download, anchor. Each link includes "
+                "position (nav, header, footer, sidebar, body) and internal/external "
+                "flag. Use to discover site structure, navigation menus, and outbound links."
+            ),
+            category=ToolCategory.DOCUMENT,
+            capability=ToolCapability.QUERY,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_WEB_ANNOTATIONS,
+            input_schema=[
+                ParameterSchema(name="url", type="string", description="URL to fetch."),
+                ParameterSchema(
+                    name="link_type",
+                    type="string",
+                    description=(
+                        "Filter by link type: 'navigation', 'content', 'pagination', "
+                        "'social', 'download', 'anchor', 'all' (default 'all')."
+                    ),
+                    required=False,
+                    default="all",
+                    constraints={
+                        "enum": [
+                            "all",
+                            "navigation",
+                            "content",
+                            "pagination",
+                            "social",
+                            "download",
+                            "anchor",
+                        ]
+                    },
+                ),
+                ParameterSchema(
+                    name="internal_only",
+                    type="boolean",
+                    description="If true, only return internal (same-domain) links.",
+                    required=False,
+                    default=False,
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        url = inputs.get("url", "")
+        if not url:
+            return ToolResult.create_error(
+                "URL is required. Provide the page URL to extract links from."
+            )
+
+        link_type_filter = inputs.get("link_type", "all")
+        internal_only = inputs.get("internal_only", False)
+
+        try:
+            html, final_url = await _fetch_html(url)
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Failed to fetch {url}: {exc}. "
+                "Verify the URL is correct and the site is accessible."
+            )
+
+        try:
+            from kaos_web.extract.links import extract_links
+
+            links = extract_links(html, url=final_url)
+
+            if link_type_filter != "all":
+                links = [lnk for lnk in links if lnk.link_type == link_type_filter]
+            if internal_only:
+                links = [lnk for lnk in links if lnk.is_internal]
+
+            # Group by position for structured output
+            by_position: dict[str, list[dict[str, Any]]] = {}
+            for lnk in links:
+                entry = {
+                    "url": lnk.url,
+                    "text": lnk.text,
+                    "type": lnk.link_type,
+                    "internal": lnk.is_internal,
+                }
+                if lnk.title:
+                    entry["title"] = lnk.title
+                by_position.setdefault(lnk.position, []).append(entry)
+
+            return ToolResult.create_success(
+                output={
+                    "url": final_url,
+                    "total": len(links),
+                    "by_position": by_position,
+                    "summary": {pos: len(items) for pos, items in by_position.items()},
+                }
+            )
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Link extraction failed for {url}: {exc}. The HTML may be malformed."
+            )
+
+
 def register_web_tools(runtime: KaosRuntime) -> int:
     """Register all web tools with the runtime. Returns count."""
     tools: list[KaosTool] = [
@@ -420,6 +557,7 @@ def register_web_tools(runtime: KaosRuntime) -> int:
         GetPageMarkdownTool(),
         GetPageMetadataTool(),
         SearchPageTool(),
+        GetPageLinksTool(),
     ]
     for tool in tools:
         runtime.tools.register_tool(tool)
