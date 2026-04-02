@@ -11,6 +11,7 @@ import pytest
 from kaos_core import KaosRuntime
 from kaos_web.tools import (
     FetchPageTool,
+    GetPageImagesTool,
     GetPageLinksTool,
     GetPageMarkdownTool,
     GetPageMetadataTool,
@@ -33,7 +34,7 @@ class TestRegisterTools:
         runtime = KaosRuntime()
         count = register_web_tools(runtime)
 
-        assert count == 6, f"Expected 6 tools registered, got {count}"
+        assert count == 7, f"Expected 7 tools registered, got {count}"
 
         registered = runtime.tools.list_tools()
         expected_names = {
@@ -43,6 +44,7 @@ class TestRegisterTools:
             "kaos-web-get-metadata",
             "kaos-web-search-page",
             "kaos-web-get-links",
+            "kaos-web-get-images",
         }
         for name in expected_names:
             assert name in registered, (
@@ -232,3 +234,91 @@ class TestRawMode:
         # Both should succeed
         assert not normal.isError
         assert not raw.isError
+
+
+class TestGetPageImagesTool:
+    """Tests for the image extraction tool."""
+
+    def test_metadata(self):
+        tool = GetPageImagesTool()
+        assert tool.metadata.name == "kaos-web-get-images"
+        assert tool.metadata.annotations is not None
+        assert tool.metadata.annotations.readOnlyHint is True
+
+    @pytest.mark.asyncio
+    async def test_empty_url_error(self):
+        tool = GetPageImagesTool()
+        result = await tool.execute({"url": ""})
+        assert result.isError
+
+    @pytest.mark.asyncio
+    async def test_extracts_images(self):
+        html = (
+            "<html><body>"
+            '<img src="/photo.jpg" alt="A photo" width="800" height="600">'
+            '<img src="/icon.png" class="icon" width="16" height="16">'
+            "</body></html>"
+        )
+        with patch(
+            "kaos_web.tools._fetch_html",
+            return_value=(html, "https://example.com"),
+        ):
+            tool = GetPageImagesTool()
+            result = await tool.execute({"url": "https://example.com"})
+        assert not result.isError
+        data = result.structuredContent
+        assert data["total"] == 2
+        assert "by_type" in data
+
+    @pytest.mark.asyncio
+    async def test_filter_by_type(self):
+        html = (
+            "<html><body>"
+            '<img src="/photo.jpg" alt="Content image" width="800" height="600">'
+            '<img src="/pixel.gif" width="1" height="1">'
+            "</body></html>"
+        )
+        with patch(
+            "kaos_web.tools._fetch_html",
+            return_value=(html, "https://example.com"),
+        ):
+            tool = GetPageImagesTool()
+            result = await tool.execute({"url": "https://example.com", "image_type": "content"})
+        data = result.structuredContent
+        for img in data["images"]:
+            assert img["type"] == "content"
+
+    @pytest.mark.asyncio
+    async def test_includes_format(self):
+        html = '<html><body><img src="/photo.webp" alt="test"></body></html>'
+        with patch(
+            "kaos_web.tools._fetch_html",
+            return_value=(html, "https://example.com"),
+        ):
+            tool = GetPageImagesTool()
+            result = await tool.execute({"url": "https://example.com"})
+        data = result.structuredContent
+        assert data["images"][0]["format"] == "webp"
+
+
+class TestTrackingPixelClassification:
+    """Verify 1x1 in filenames doesn't trigger false positive tracking detection."""
+
+    def test_1x1_in_filename_not_tracking(self):
+        from kaos_web.extract.images import extract_images
+
+        html = (
+            '<html><body><img src="/headshot-1x1.webp" alt="Person"'
+            ' width="400" height="400"></body></html>'
+        )
+        images = extract_images(html, url="https://example.com")
+        assert len(images) == 1
+        assert images[0].image_type == "content"
+
+    def test_actual_1x1_pixel_is_tracking(self):
+        from kaos_web.extract.images import extract_images
+
+        html = '<html><body><img src="/pixel.gif" width="1" height="1"></body></html>'
+        images = extract_images(html, url="https://example.com")
+        assert len(images) == 1
+        assert images[0].image_type == "tracking"

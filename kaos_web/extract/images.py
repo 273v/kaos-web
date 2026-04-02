@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict
 ImageType = Literal["content", "decorative", "icon", "social_card", "tracking"]
 
 _TRACKING_PATTERNS = re.compile(
-    r"pixel|track|beacon|spacer|blank|1x1|transparent\.gif", re.IGNORECASE
+    r"pixel|track|beacon|spacer|blank|(?<![a-z0-9-])1x1(?![a-z0-9-])|transparent\.gif",
+    re.IGNORECASE,
 )
 _ICON_PATTERNS = re.compile(r"icon|logo|avatar|sprite|favicon", re.IGNORECASE)
 

@@ -549,6 +549,122 @@ class GetPageLinksTool(KaosTool):
             )
 
 
+class GetPageImagesTool(KaosTool):
+    """Extract and classify all images from a web page."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-get-images",
+            display_name="Get Page Images",
+            description=(
+                "Extract all images from a URL with classification: content, "
+                "decorative, icon, social_card, tracking. Includes alt text, "
+                "dimensions, srcset variants, and surrounding context. "
+                "Use to audit images, find content images, or detect tracking pixels."
+            ),
+            category=ToolCategory.DOCUMENT,
+            capability=ToolCapability.QUERY,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_WEB_ANNOTATIONS,
+            input_schema=[
+                ParameterSchema(name="url", type="string", description="URL to fetch."),
+                ParameterSchema(
+                    name="image_type",
+                    type="string",
+                    description=(
+                        "Filter by type: 'content', 'decorative', 'icon', "
+                        "'social_card', 'tracking', 'all' (default 'all')."
+                    ),
+                    required=False,
+                    default="all",
+                    constraints={
+                        "enum": [
+                            "all",
+                            "content",
+                            "decorative",
+                            "icon",
+                            "social_card",
+                            "tracking",
+                        ]
+                    },
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        url = inputs.get("url", "")
+        if not url:
+            return ToolResult.create_error(
+                "URL is required. Provide the page URL to extract images from."
+            )
+
+        image_type_filter = inputs.get("image_type", "all")
+
+        try:
+            html, final_url = await _fetch_html(url)
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Failed to fetch {url}: {exc}. "
+                "Verify the URL is correct and the site is accessible."
+            )
+
+        try:
+            from kaos_web.extract.images import extract_images
+
+            images = extract_images(html, url=final_url)
+
+            if image_type_filter != "all":
+                images = [img for img in images if img.image_type == image_type_filter]
+
+            results = []
+            for img in images:
+                entry: dict[str, Any] = {
+                    "src": img.src,
+                    "type": img.image_type,
+                }
+                if img.alt:
+                    entry["alt"] = img.alt
+                if img.title:
+                    entry["title"] = img.title
+                if img.width:
+                    entry["width"] = img.width
+                if img.height:
+                    entry["height"] = img.height
+                if img.srcset:
+                    entry["srcset"] = [
+                        {"url": s.url, "descriptor": s.descriptor} for s in img.srcset
+                    ]
+                if img.context:
+                    entry["context"] = img.context
+                # Infer format from URL
+                ext = img.src.rsplit(".", 1)[-1].split("?")[0].lower()
+                if ext in ("jpg", "jpeg", "png", "gif", "webp", "svg", "avif"):
+                    entry["format"] = ext
+                results.append(entry)
+
+            # Group by type for summary
+            from collections import Counter
+
+            type_counts = Counter(img.image_type for img in images)
+
+            return ToolResult.create_success(
+                output={
+                    "url": final_url,
+                    "total": len(results),
+                    "by_type": dict(type_counts),
+                    "images": results,
+                }
+            )
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Image extraction failed for {url}: {exc}. The HTML may be malformed."
+            )
+
+
 def register_web_tools(runtime: KaosRuntime) -> int:
     """Register all web tools with the runtime. Returns count."""
     tools: list[KaosTool] = [
@@ -558,6 +674,7 @@ def register_web_tools(runtime: KaosRuntime) -> int:
         GetPageMetadataTool(),
         SearchPageTool(),
         GetPageLinksTool(),
+        GetPageImagesTool(),
     ]
     for tool in tools:
         runtime.tools.register_tool(tool)

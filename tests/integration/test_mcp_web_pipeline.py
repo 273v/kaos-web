@@ -27,9 +27,9 @@ def runtime():
 
 
 class TestToolRegistration:
-    def test_register_6_tools(self, runtime: KaosRuntime) -> None:
+    def test_register_7_tools(self, runtime: KaosRuntime) -> None:
         count = register_web_tools(runtime)
-        assert count == 6
+        assert count == 7
 
         names = {t.metadata.name for t in runtime.tools.list_tool_objects()}
         assert "kaos-web-fetch-page" in names
