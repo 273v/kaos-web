@@ -7,11 +7,12 @@ Web content extraction for KAOS. Fetches HTML from URLs via HTTP or headless bro
 ## Architecture
 
 ```
-URL -> Client (HTTP or Browser) -> Raw HTML
+URL -> Client (HTTP or Browser) -> Middleware (retry/rate/robots/cache) -> Raw HTML
     -> Readability (main content extraction)
     -> HTML-to-AST (lxml tree -> ContentDocument blocks/inlines)
     -> ContentDocument with provenance
-    -> Serializers (markdown, text, search)
+    -> kaos_content.search (BM25 via kaos-nlp-core)
+    -> Serializers (markdown, text)
 ```
 
 Key modules:
@@ -56,6 +57,9 @@ System Chrome must be installed at `/usr/bin/google-chrome`. Without `channel="c
 - **Provenance cache**: Single `SourceRef` and `Provenance` created per document, reused across all nodes to avoid allocation overhead.
 - **Readability-first**: Raw HTML goes through readability extraction before AST conversion to strip navigation, ads, sidebars.
 - **Lazy imports**: Heavy dependencies (playwright, kaos-content serializers) are imported inside handlers, not at module level, keeping `--help` fast.
+- **Search lives in kaos-content**: `kaos_content.search.search_document()` is the canonical search. Never import search from kaos-pdf or duplicate it. All extraction modules share the same search.
+- **Middleware wired in HttpClient**: `HttpClient.fetch()` routes through `MiddlewareChain` (retry → rate_limit → robots → cache → raw httpx). Config flags control which middleware are active. Unit tests use `_NO_MIDDLEWARE` config to avoid mock interference.
+- **Browser context pooling**: Named contexts via `request.extra["context_id"]` persist cookies/storage across requests. Unnamed requests get isolated context-per-request. `close_context(id)` to clean up explicitly.
 
 ## HTML-to-AST
 
