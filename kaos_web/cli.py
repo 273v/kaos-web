@@ -46,6 +46,15 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_search.add_argument("--json", action="store_true", help="Structured JSON output")
 
+    # serve
+    p_serve = sub.add_parser("serve", help="Start MCP server")
+    p_serve.add_argument("--http", action="store_true", help="Use HTTP transport")
+    p_serve.add_argument("--host", default="127.0.0.1", help="HTTP host")
+    p_serve.add_argument("--port", type=int, default=8000, help="HTTP port")
+    p_serve.add_argument("--debug", action="store_true", help="Debug logging")
+    p_serve.add_argument("--browser", action="store_true", help="Enable browser interaction tools")
+    p_serve.add_argument("--crawl", action="store_true", help="Enable crawl/discovery tools")
+
     args = parser.parse_args(argv)
 
     if not args.command:
@@ -57,6 +66,7 @@ def main(argv: list[str] | None = None) -> None:
         "metadata": _cmd_metadata,
         "fetch": _cmd_fetch,
         "search": _cmd_search,
+        "serve": _cmd_serve,
     }
     handlers[args.command](args)
 
@@ -241,3 +251,27 @@ def _cmd_search(args: argparse.Namespace) -> None:
         for line in r.text.splitlines():
             print(f"    {line}")
         print()
+
+
+def _cmd_serve(args: argparse.Namespace) -> None:
+    """Start the MCP server."""
+    try:
+        from kaos_web.serve import main as serve_main
+    except ImportError:
+        print(
+            "Error: MCP server requires the 'mcp' extra.\n"
+            "Install with: pip install 'kaos-web[mcp]'",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    serve_argv: list[str] = []
+    if args.http:
+        serve_argv.extend(["--http", "--host", args.host, "--port", str(args.port)])
+    if args.debug:
+        serve_argv.append("--debug")
+    if args.browser:
+        serve_argv.append("--browser")
+    if args.crawl:
+        serve_argv.append("--crawl")
+    serve_main(serve_argv)

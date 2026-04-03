@@ -333,7 +333,10 @@ class GetPageMetadataTool(KaosTool):
             from kaos_web.extract import extract_metadata
 
             meta = extract_metadata(html, url=final_url)
-            return ToolResult.create_success(output=meta.model_dump(exclude_none=True))
+            meta_dict = meta.model_dump(exclude_none=True)
+            title = meta_dict.get("title", final_url)
+            summary = f"Metadata for {title}"
+            return ToolResult.create_success(output=meta_dict, summary=summary)
         except Exception as exc:
             return ToolResult.create_error(
                 f"Metadata extraction failed for {url}: {exc}. "
@@ -415,25 +418,28 @@ class SearchPageTool(KaosTool):
             doc = html_to_document(html, url=final_url)
             search_results = search_document(doc, query, top_k=top_k, level=level)
 
-            return ToolResult.create_success(
-                output={
-                    "url": final_url,
-                    "results": [
-                        {
-                            "text": r.text,
-                            "score": r.score,
-                            "block_ref": r.block_ref,
-                            "page": r.page,
-                            "section_ref": r.section_ref,
-                            "section_text": r.section_title,
-                        }
-                        for r in search_results.results
-                    ],
-                    "total_matches": search_results.total_matches,
-                    "has_more": search_results.has_more,
-                    "query": query,
-                }
+            result_data = {
+                "url": final_url,
+                "results": [
+                    {
+                        "text": r.text,
+                        "score": r.score,
+                        "block_ref": r.block_ref,
+                        "page": r.page,
+                        "section_ref": r.section_ref,
+                        "section_text": r.section_title,
+                    }
+                    for r in search_results.results
+                ],
+                "total_matches": search_results.total_matches,
+                "has_more": search_results.has_more,
+                "query": query,
+            }
+            more = " (has more)" if search_results.has_more else ""
+            summary = (
+                f"Found {search_results.total_matches} matches for '{query}' on {final_url}{more}"
             )
+            return ToolResult.create_success(output=result_data, summary=summary)
         except Exception as exc:
             return ToolResult.create_error(
                 f"Search failed for {url}: {exc}. Content extraction or search may have failed."
@@ -535,14 +541,14 @@ class GetPageLinksTool(KaosTool):
                     entry["title"] = lnk.title
                 by_position.setdefault(lnk.position, []).append(entry)
 
-            return ToolResult.create_success(
-                output={
-                    "url": final_url,
-                    "total": len(links),
-                    "by_position": by_position,
-                    "summary": {pos: len(items) for pos, items in by_position.items()},
-                }
-            )
+            result_data = {
+                "url": final_url,
+                "total": len(links),
+                "by_position": by_position,
+                "summary": {pos: len(items) for pos, items in by_position.items()},
+            }
+            summary = f"Found {len(links)} links on {final_url}"
+            return ToolResult.create_success(output=result_data, summary=summary)
         except Exception as exc:
             return ToolResult.create_error(
                 f"Link extraction failed for {url}: {exc}. The HTML may be malformed."
@@ -651,14 +657,14 @@ class GetPageImagesTool(KaosTool):
 
             type_counts = Counter(img.image_type for img in images)
 
-            return ToolResult.create_success(
-                output={
-                    "url": final_url,
-                    "total": len(results),
-                    "by_type": dict(type_counts),
-                    "images": results,
-                }
-            )
+            result_data = {
+                "url": final_url,
+                "total": len(results),
+                "by_type": dict(type_counts),
+                "images": results,
+            }
+            summary = f"Found {len(results)} images on {final_url}"
+            return ToolResult.create_success(output=result_data, summary=summary)
         except Exception as exc:
             return ToolResult.create_error(
                 f"Image extraction failed for {url}: {exc}. The HTML may be malformed."
