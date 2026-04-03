@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from lxml import etree  # type: ignore[unresolved-import]
+from lxml import etree  # type: ignore[unresolved-import]  # ty: ignore[unresolved-import]
 
 from kaos_web.models import WebRequest, WebResponse
 
