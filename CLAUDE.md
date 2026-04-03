@@ -98,6 +98,16 @@ The `html_to_document()` function walks an lxml element tree and produces `Conte
 - Inline nodes: Text, Strong, Emphasis, Code, Link, Image, Strikethrough, Subscript, Superscript, LineBreak
 - All nodes grounded to kaos-content model with provenance
 
+## MCP Serve
+
+`kaos-web-serve [--browser] [--crawl] [--http] [--host HOST] [--port PORT] [--debug]`
+
+- Core 7 extraction tools are always registered
+- `--browser` — Also register 18 browser interaction tools
+- `--crawl` — Also register 3 crawl/discovery tools
+- CLI: `kaos-web serve` delegates to `kaos_web.serve:main()`
+- Also available via: `kaos-mcp serve --module web`
+
 ## MCP Tools
 
 ### Extraction tools (7) — `tools.py`
