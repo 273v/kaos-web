@@ -51,7 +51,10 @@ def bench(
     size_kb = len(html.encode("utf-8")) / 1024
     throughput = (size_kb * count) / elapsed
     latency_ms = (elapsed / count) * 1000
-    print(f"  {name:30s} | {latency_ms:8.2f} ms | {throughput:8.0f} KB/s | {count / elapsed:8.1f} docs/s")
+    print(
+        f"  {name:30s} | {latency_ms:8.2f} ms"
+        f" | {throughput:8.0f} KB/s | {count / elapsed:8.1f} docs/s"
+    )
 
 
 def main() -> None:
@@ -62,7 +65,6 @@ def main() -> None:
 
     # kaos-web
     from kaos_content.serializers.markdown import serialize_markdown
-
     from kaos_web import html_to_document
 
     def kaos_web_fn(html: str) -> str:

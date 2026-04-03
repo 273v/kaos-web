@@ -489,8 +489,8 @@ class TestBrowserToolErrorPaths:
 
             result = await tool.execute({"context_id": "bad", "selector": "button"})
             assert result.isError
-            assert "bad" in result.content[0].text
-            assert "snapshot" in result.content[0].text.lower()
+            assert "bad" in result.require_text()
+            assert "snapshot" in result.require_text().lower()
 
     @pytest.mark.asyncio
     async def test_fill_no_context_returns_error(self):
@@ -514,7 +514,7 @@ class TestBrowserToolErrorPaths:
         tool = ScreenshotTool()
         result = await tool.execute({})
         assert result.isError
-        assert "context_id" in result.content[0].text
+        assert "context_id" in result.require_text()
 
     @pytest.mark.asyncio
     async def test_evaluate_missing_both_params_returns_error(self):
@@ -523,7 +523,7 @@ class TestBrowserToolErrorPaths:
         tool = EvaluateJSTool()
         result = await tool.execute({"expression": "1+1"})
         assert result.isError
-        assert "context_id" in result.content[0].text
+        assert "context_id" in result.require_text()
 
     @pytest.mark.asyncio
     async def test_navigate_returns_success_structure(self):
@@ -861,7 +861,7 @@ class TestCookieToolErrorPaths:
             }
         )
         assert result.isError
-        assert "domain" in result.content[0].text
+        assert "domain" in result.require_text()
 
     @pytest.mark.asyncio
     async def test_get_cookies_success_structure(self):
@@ -915,7 +915,7 @@ class TestNetworkToolErrorPaths:
 
             result = await tool.execute({"context_id": "s1", "request_id": 999})
             assert result.isError
-            assert "999" in result.content[0].text
+            assert "999" in result.require_text()
 
 
 class TestRegisterBrowserTools:

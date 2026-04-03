@@ -14,12 +14,13 @@ Updated weekly from 300M+ real requests.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import httpx
 
-DESKTOP_URL = "https://raw.githubusercontent.com/microlinkhq/top-user-agents/master/src/desktop.json"
+DESKTOP_URL = (
+    "https://raw.githubusercontent.com/microlinkhq/top-user-agents/master/src/desktop.json"
+)
 MOBILE_URL = "https://raw.githubusercontent.com/microlinkhq/top-user-agents/master/src/mobile.json"
 OUTPUT_PATH = Path(__file__).parent.parent / "kaos_web" / "data" / "user_agents.json"
 
@@ -46,7 +47,8 @@ def main() -> None:
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
     print(f"Written to {OUTPUT_PATH}")
-    print(f"Total: {len(desktop)} desktop + {len(mobile)} mobile = {len(desktop) + len(mobile)} UAs")
+    total = len(desktop) + len(mobile)
+    print(f"Total: {len(desktop)} desktop + {len(mobile)} mobile = {total} UAs")
 
 
 if __name__ == "__main__":

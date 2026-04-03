@@ -75,7 +75,7 @@ class TestGetPageTextThroughMCP:
 
         assert not result.isError
         assert len(result.content) > 0
-        text = result.content[0].text
+        text = result.require_text()
         assert "Main Article Heading" in text
 
     async def test_get_text_error_message(self, runtime: KaosRuntime) -> None:
@@ -86,8 +86,8 @@ class TestGetPageTextThroughMCP:
             result = await tool.execute({"url": "https://down.example.com"})
 
         assert result.isError
-        assert "Connection refused" in result.content[0].text
-        assert "Verify" in result.content[0].text
+        assert "Connection refused" in result.require_text()
+        assert "Verify" in result.require_text()
 
 
 class TestGetPageMarkdownThroughMCP:
@@ -101,7 +101,7 @@ class TestGetPageMarkdownThroughMCP:
             result = await tool.execute({"url": "https://example.com"})
 
         assert not result.isError
-        md = result.content[0].text
+        md = result.require_text()
         assert "# Main Article Heading" in md
         assert "**first paragraph**" in md
 
@@ -118,8 +118,8 @@ class TestGetPageMetadataThroughMCP:
 
         assert not result.isError
         assert result.structuredContent is not None
-        assert result.structuredContent["title"] == "Test Article OG Title"
-        assert result.structuredContent["author"] == "Jane Doe"
+        assert result.get_structured("title") == "Test Article OG Title"
+        assert result.get_structured("author") == "Jane Doe"
 
 
 class TestFetchPageThroughMCP:
@@ -133,7 +133,7 @@ class TestFetchPageThroughMCP:
             result = await tool.execute({"url": "https://example.com"}, context=None)
 
         assert result.isError
-        assert "kaos-web-get-markdown" in result.content[0].text
+        assert "kaos-web-get-markdown" in result.require_text()
 
     async def test_fetch_page_with_context(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)
@@ -147,9 +147,10 @@ class TestFetchPageThroughMCP:
 
         assert not result.isError
         assert result.structuredContent is not None
-        assert result.structuredContent["artifact_id"] is not None
-        assert result.structuredContent["block_count"] > 0
-        assert "body_uri" in result.structuredContent
+        sc = result.require_structured()
+        assert sc["artifact_id"] is not None
+        assert sc["block_count"] > 0
+        assert "body_uri" in sc
 
 
 class TestToolAdapterIntegration:

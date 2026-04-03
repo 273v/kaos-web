@@ -714,8 +714,8 @@ def _process_element(el: HtmlElement, url: str) -> list[Block]:
         if not children:
             return []
         # Skip whitespace-only paragraphs (only Text children, all whitespace)
-        if all(hasattr(c, "value") and isinstance(c, Text) for c in children):
-            text = "".join(c.value for c in children).strip()
+        if all(isinstance(c, Text) for c in children):
+            text = "".join(c.value for c in children if isinstance(c, Text)).strip()
             if not text:
                 return []
         return [_mk_paragraph(children, prov)]

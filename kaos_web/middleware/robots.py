@@ -79,14 +79,16 @@ class RobotsMiddleware:
                 parser.parse(response.html.splitlines())
             else:
                 # No robots.txt or error → allow everything
-                parser.allow_all = True
+                # allow_all is a documented RobotFileParser attribute that ty lacks stubs for
+                parser.allow_all = True  # type: ignore[unresolved-attribute]  # ty: ignore[unresolved-attribute]
         except Exception:
             # Network error fetching robots.txt → allow everything
             logger.debug("Failed to fetch %s, allowing all", robots_url)
-            parser.allow_all = True
+            parser.allow_all = True  # type: ignore[unresolved-attribute]  # ty: ignore[unresolved-attribute]
 
-        # Extract crawl-delay
-        crawl_delay = parser.crawl_delay(self.config.user_agent)
+        # Extract crawl-delay (stdlib returns str | None, convert to float)
+        raw_delay = parser.crawl_delay(self.config.user_agent)
+        crawl_delay: float | None = float(raw_delay) if isinstance(raw_delay, str) else raw_delay
 
         cached = _CachedRobots(parser, crawl_delay)
         self._cache[domain] = cached

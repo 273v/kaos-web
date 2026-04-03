@@ -53,14 +53,38 @@ dev = [
 ]
 
 [project.urls]
+Homepage = "https://273ventures.com"
+Documentation = "https://docs.273ventures.com"
 Repository = "https://github.com/273v/kaos-modules"
 
 [tool.hatch.version]
 path = "kaos_web/_version.py"
 
+[tool.hatch.build.targets.sdist]
+include = [
+  "/kaos_web",
+  "/README.md",
+  "/CLAUDE.md",
+  "/docs",
+  "/tests",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["kaos_web"]
+
 [tool.pytest.ini_options]
+minversion = "8.0"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--strict-config",
+  "--cov=kaos_web",
+  "--cov-branch",
+  "--cov-report=term-missing",
+]
 markers = [
   "integration: tests that hit real HTTP servers (require network)",
 ]
@@ -71,9 +95,32 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
+ignore = ["B008", "E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["kaos_web", "kaos_core", "kaos_content"]
+
+[tool.coverage.run]
+source = ["kaos_web"]
+branch = true
+omit = [
+  "*/tests/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+  "pragma: no cover",
+  "if TYPE_CHECKING:",
+  "@abstractmethod",
+]
+
+[tool.ty.src]
+include = ["kaos_web", "tests"]
+
+[tool.uv]
+package = true
 
 [tool.uv.sources]
 kaos-content = { path = "../kaos-content", editable = true }

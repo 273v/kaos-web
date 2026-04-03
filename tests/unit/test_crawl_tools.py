@@ -82,7 +82,7 @@ class TestDiscoverUrlsToolErrors:
         tool = DiscoverUrlsTool()
         result = await tool.execute({"url": ""})
         assert result.isError
-        assert "required" in result.content[0].text.lower()
+        assert "required" in result.require_text().lower()
 
     @pytest.mark.asyncio
     async def test_missing_url(self):
@@ -97,7 +97,7 @@ class TestBatchFetchToolErrors:
         tool = BatchFetchTool()
         result = await tool.execute({"urls": ""})
         assert result.isError
-        assert "required" in result.content[0].text.lower()
+        assert "required" in result.require_text().lower()
 
     @pytest.mark.asyncio
     async def test_missing_urls(self):
@@ -112,7 +112,7 @@ class TestCrawlSiteToolErrors:
         tool = CrawlSiteTool()
         result = await tool.execute({"url": ""})
         assert result.isError
-        assert "required" in result.content[0].text.lower()
+        assert "required" in result.require_text().lower()
 
 
 class TestRegisterCrawlTools:

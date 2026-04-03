@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Any
+from typing import Any, Literal, cast
 
 from kaos_core import KaosContext, KaosRuntime, KaosTool, ToolMetadata, ToolResult
 from kaos_core.types.annotations import ToolAnnotations
@@ -82,12 +82,21 @@ def _build_browser_config() -> Any:
 
     channel = _detect_browser_channel()
     headless = os.environ.get("KAOS_BROWSER_HEADLESS", "true").lower() != "false"
-    browser_type = os.environ.get("KAOS_BROWSER_TYPE", "chromium")
+
+    _VALID_BROWSER_TYPES = ("chromium", "firefox", "webkit")
+    raw_browser_type = os.environ.get("KAOS_BROWSER_TYPE", "chromium")
+    if raw_browser_type not in _VALID_BROWSER_TYPES:
+        msg = (
+            f"Invalid KAOS_BROWSER_TYPE='{raw_browser_type}'. "
+            f"Must be one of: {', '.join(_VALID_BROWSER_TYPES)}"
+        )
+        raise ValueError(msg)
+    browser_type = cast(Literal["chromium", "firefox", "webkit"], raw_browser_type)
 
     return BrowserClientConfig(
         channel=channel,
         headless=headless,
-        browser_type=browser_type,  # type: ignore[arg-type]
+        browser_type=browser_type,
     )
 
 

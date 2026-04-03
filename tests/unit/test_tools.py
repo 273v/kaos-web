@@ -59,7 +59,7 @@ class TestFetchPageTool:
         result = await tool.execute({"url": "https://example.com"}, context=None)
 
         assert result.isError is True, "Should error without runtime context"
-        assert "kaos-web-get-markdown" in (result.content[0].text or ""), (
+        assert "kaos-web-get-markdown" in (result.text or ""), (
             "Error should suggest the context-free alternative tool"
         )
 
@@ -74,7 +74,7 @@ class TestGetPageTextTool:
         result = await tool.execute({"url": "https://example.com/article"})
 
         assert result.isError is not True, f"Should succeed, got error: {result.content}"
-        text = result.content[0].text
+        text = result.require_text()
         assert text is not None, "Result should contain text"
         assert "Main Article Heading" in text, "Extracted text should contain the main heading"
         assert "Section One" in text, "Extracted text should contain section headings"
@@ -90,7 +90,7 @@ class TestGetPageMarkdownTool:
         result = await tool.execute({"url": "https://example.com/article"})
 
         assert result.isError is not True, f"Should succeed, got error: {result.content}"
-        md = result.content[0].text
+        md = result.require_text()
         assert md is not None, "Result should contain markdown text"
         # Markdown should contain heading markers
         assert "Main Article Heading" in md, "Markdown should contain the article heading"
