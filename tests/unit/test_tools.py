@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -24,7 +25,7 @@ FIXTURES = Path(__file__).parent.parent / "fixtures"
 ARTICLE_HTML = (FIXTURES / "article.html").read_text(encoding="utf-8")
 
 _has_kaos_pdf = bool(sys.modules.get("kaos_pdf")) or (
-    __import__("importlib").util.find_spec("kaos_pdf") is not None
+    importlib.util.find_spec("kaos_pdf") is not None
 )
 
 
@@ -34,7 +35,7 @@ class TestRegisterTools:
         runtime = KaosRuntime()
         count = register_web_tools(runtime)
 
-        assert count == 7, f"Expected 7 tools registered, got {count}"
+        assert count == 9, f"Expected 9 tools registered, got {count}"
 
         registered = runtime.tools.list_tools()
         expected_names = {
@@ -181,6 +182,7 @@ class TestGetPageLinksTool:
             result = await tool.execute({"url": "https://example.com"})
         assert not result.isError
         data = result.structuredContent
+        assert data is not None
         assert data["total"] >= 2
 
     @pytest.mark.asyncio
@@ -200,6 +202,7 @@ class TestGetPageLinksTool:
                 }
             )
         data = result.structuredContent
+        assert data is not None
         # All returned links should be navigation type
         for _pos, links in data["by_position"].items():
             for lnk in links:
@@ -267,6 +270,7 @@ class TestGetPageImagesTool:
             result = await tool.execute({"url": "https://example.com"})
         assert not result.isError
         data = result.structuredContent
+        assert data is not None
         assert data["total"] == 2
         assert "by_type" in data
 
@@ -285,6 +289,7 @@ class TestGetPageImagesTool:
             tool = GetPageImagesTool()
             result = await tool.execute({"url": "https://example.com", "image_type": "content"})
         data = result.structuredContent
+        assert data is not None
         for img in data["images"]:
             assert img["type"] == "content"
 
@@ -298,6 +303,7 @@ class TestGetPageImagesTool:
             tool = GetPageImagesTool()
             result = await tool.execute({"url": "https://example.com"})
         data = result.structuredContent
+        assert data is not None
         assert data["images"][0]["format"] == "webp"
 
 

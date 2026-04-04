@@ -671,6 +671,187 @@ class GetPageImagesTool(KaosTool):
             )
 
 
+class GetPageTablesTool(KaosTool):
+    """Extract HTML tables from a web page as structured tabular data."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-get-tables",
+            display_name="Get Page Tables",
+            description=(
+                "Extract all HTML tables from a web page as structured tabular data. "
+                "Returns each table with typed columns (text, integer, float, etc.) "
+                "and data as TSV. Tables can be queried with SQL via kaos-tabular-register."
+            ),
+            category=ToolCategory.DATA,
+            capability=ToolCapability.EXTRACT,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_WEB_ANNOTATIONS,
+            input_schema=[
+                ParameterSchema(
+                    name="url",
+                    type="string",
+                    description="URL of the web page to extract tables from.",
+                ),
+                ParameterSchema(
+                    name="use_browser",
+                    type="boolean",
+                    description="Use headless browser for JS-rendered pages.",
+                    required=False,
+                    default=False,
+                ),
+                ParameterSchema(
+                    name="format",
+                    type="string",
+                    description="Output format: 'tsv' (default, token-efficient), 'markdown', or 'json'.",
+                    required=False,
+                    default="tsv",
+                    constraints={"enum": ["tsv", "markdown", "json"]},
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        url = inputs["url"]
+        use_browser = inputs.get("use_browser", False)
+        fmt = inputs.get("format", "tsv")
+
+        try:
+            html, final_url = await _fetch_html(url, use_browser=use_browser)
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Failed to fetch {url}: {exc}. Try use_browser=true for JS-rendered pages."
+            )
+
+        try:
+            from kaos_content.bridges.content_to_tabular import extract_tables_as_tabular
+            from kaos_web.extract.html_to_ast import html_to_document
+
+            doc = html_to_document(html, url=final_url, extract_content=False)
+            tabular_doc = extract_tables_as_tabular(doc)
+
+            if not tabular_doc.tables:
+                return ToolResult.create_text(
+                    f"No tables found on {final_url}. "
+                    "The page may use CSS grid/flex layouts instead of <table> elements. "
+                    "Try kaos-web-get-markdown for the full page content."
+                )
+
+            from kaos_content.serializers.tabular import (
+                serialize_json_records,
+                serialize_markdown_table,
+                serialize_tsv,
+            )
+
+            formatters = {
+                "tsv": serialize_tsv,
+                "markdown": serialize_markdown_table,
+                "json": serialize_json_records,
+            }
+            formatter = formatters[fmt]
+
+            parts = []
+            for table in tabular_doc.tables:
+                header = f"## {table.name} ({table.row_count} rows, {len(table.columns)} columns)"
+                parts.append(header)
+                parts.append(formatter(table))
+
+            return ToolResult.create_success(
+                output="\n".join(parts),
+                summary=(
+                    f"Found {len(tabular_doc.tables)} table(s) on {final_url}. "
+                    + ", ".join(f"{t.name}: {t.row_count} rows" for t in tabular_doc.tables)
+                ),
+            )
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Table extraction failed for {url}: {exc}. "
+                "Try kaos-web-get-markdown for the full page content."
+            )
+
+
+class WebSearchTool(KaosTool):
+    """Search the web and return results with titles, URLs, and snippets."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-search",
+            display_name="Web Search",
+            description=(
+                "Search the web using Brave Search or SearXNG. "
+                "Returns titles, URLs, and snippets. Use the URLs with "
+                "kaos-web-fetch-page or kaos-web-get-markdown to retrieve full content. "
+                "Requires BRAVE_API_KEY or SEARXNG_URL environment variable."
+            ),
+            category=ToolCategory.TEXT,
+            capability=ToolCapability.QUERY,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_WEB_ANNOTATIONS,
+            input_schema=[
+                ParameterSchema(
+                    name="query",
+                    type="string",
+                    description="Search query.",
+                ),
+                ParameterSchema(
+                    name="max_results",
+                    type="integer",
+                    description="Maximum number of results. Default: 10.",
+                    required=False,
+                    default=10,
+                    constraints={"min": 1, "max": 20},
+                ),
+                ParameterSchema(
+                    name="backend",
+                    type="string",
+                    description="Search backend: 'brave' or 'searxng'. Default: auto-detect.",
+                    required=False,
+                    constraints={"enum": ["brave", "searxng"]},
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        query = inputs["query"]
+        max_results = inputs.get("max_results", 10)
+        backend = inputs.get("backend")
+
+        try:
+            from kaos_web.search.backends import search_web
+
+            results = await search_web(query, max_results=max_results, backend=backend)
+
+            if not results:
+                return ToolResult.create_text(f"No results found for: {query}")
+
+            lines = [f"**{len(results)} results for:** {query}\n"]
+            for r in results:
+                lines.append(f"{r.position}. **{r.title}**")
+                lines.append(f"   {r.url}")
+                if r.snippet:
+                    lines.append(f"   {r.snippet}")
+                lines.append("")
+
+            return ToolResult.create_success(
+                output="\n".join(lines),
+                summary=f"{len(results)} results for '{query}'",
+            )
+        except ValueError as exc:
+            return ToolResult.create_error(str(exc))
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Web search failed: {exc}. Check your BRAVE_API_KEY or SEARXNG_URL configuration."
+            )
+
+
 def register_web_tools(runtime: KaosRuntime) -> int:
     """Register all web tools with the runtime. Returns count."""
     tools: list[KaosTool] = [
@@ -681,6 +862,8 @@ def register_web_tools(runtime: KaosRuntime) -> int:
         SearchPageTool(),
         GetPageLinksTool(),
         GetPageImagesTool(),
+        GetPageTablesTool(),
+        WebSearchTool(),
     ]
     for tool in tools:
         runtime.tools.register_tool(tool)
