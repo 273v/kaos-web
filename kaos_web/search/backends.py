@@ -1,20 +1,26 @@
-"""Pluggable web search backends.
+"""Pluggable web search backends — all via httpx, no SDK dependencies.
 
 Supports:
-- **Brave Search API** — Independent index, ~1000 free queries/month, API key
-- **SearXNG** — Self-hosted meta-search, free, no auth, aggregates 70+ engines
-
-All backends use httpx (already a kaos-web dependency). No SDK packages needed.
+- **SerpAPI** — Google results, 250 free/month, API key (SERPAPI_API_KEY)
+- **DuckDuckGo** — Free, no auth, HTML scraping (rate-limited, no guarantees)
+- **Exa** — Neural/semantic search, 1000 free/month, API key (EXA_API_KEY)
+- **Brave** — Independent index, ~1000 free/month, API key (BRAVE_API_KEY)
 
 Configuration via environment variables:
-- ``KAOS_SEARCH_BACKEND``: ``"brave"`` or ``"searxng"`` (default: auto-detect)
-- ``BRAVE_API_KEY``: API key for Brave Search
-- ``SEARXNG_URL``: URL of SearXNG instance (e.g., ``http://localhost:8080``)
+- ``KAOS_SEARCH_BACKEND``: ``"serpapi"``, ``"duckduckgo"``, ``"exa"``, ``"brave"``
+- Backend-specific keys: ``SERPAPI_API_KEY``, ``EXA_API_KEY``, ``BRAVE_API_KEY``
+
+Usage::
+
+    from kaos_web.search import search_web
+
+    results = await search_web("SEC 10-K filings Tesla", max_results=10)
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,14 +34,23 @@ class SearchResult:
     title: str
     url: str
     snippet: str
-    source: str = ""  # Which backend returned this result
-    position: int = 0  # 1-based rank position
+    source: str = ""
+    position: int = 0
     extra: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
-# Backend protocol
+# Dispatcher
 # ---------------------------------------------------------------------------
+
+_BACKENDS = ("serpapi", "duckduckgo", "exa", "brave")
+
+# Env var names for auto-detection (checked in priority order)
+_KEY_MAP: dict[str, str] = {
+    "serpapi": "SERPAPI_API_KEY",
+    "exa": "EXA_API_KEY",
+    "brave": "BRAVE_API_KEY",
+}
 
 
 async def search_web(
@@ -44,50 +59,299 @@ async def search_web(
     max_results: int = 10,
     backend: str | None = None,
 ) -> list[SearchResult]:
-    """Execute a web search using the configured backend.
+    """Execute a web search.
 
     Args:
         query: Search query string.
-        max_results: Maximum number of results to return.
-        backend: Force a specific backend (``"brave"``, ``"searxng"``).
-            If None, auto-detects from environment variables.
+        max_results: Max results (1-20).
+        backend: Force a backend. If None, auto-detects from env vars
+            in order: SERPAPI_API_KEY → EXA_API_KEY → BRAVE_API_KEY → duckduckgo.
 
     Returns:
-        List of SearchResult objects.
+        List of SearchResult.
 
     Raises:
-        ValueError: If no backend is configured or available.
+        ValueError: If query is empty.
     """
     if not query or not query.strip():
         msg = "Search query must not be empty."
         raise ValueError(msg)
 
-    resolved = backend or os.environ.get("KAOS_SEARCH_BACKEND", "").lower()
+    resolved = (backend or os.environ.get("KAOS_SEARCH_BACKEND", "")).lower()
 
-    if resolved == "brave" or (not resolved and os.environ.get("BRAVE_API_KEY")):
+    if resolved:
+        if resolved not in _BACKENDS:
+            available = ", ".join(_BACKENDS)
+            msg = f"Unknown search backend: {resolved!r}. Available: {available}"
+            raise ValueError(msg)
+        return await _dispatch(resolved, query, max_results)
+
+    # Auto-detect: try backends with configured keys, fall back to DDG
+    for name, env_key in _KEY_MAP.items():
+        if os.environ.get(env_key):
+            return await _dispatch(name, query, max_results)
+
+    # DuckDuckGo as free fallback (no key needed)
+    return await _search_duckduckgo(query, max_results=max_results)
+
+
+async def _dispatch(backend: str, query: str, max_results: int) -> list[SearchResult]:
+    if backend == "serpapi":
+        return await _search_serpapi(query, max_results=max_results)
+    if backend == "duckduckgo":
+        return await _search_duckduckgo(query, max_results=max_results)
+    if backend == "exa":
+        return await _search_exa(query, max_results=max_results)
+    if backend == "brave":
         return await _search_brave(query, max_results=max_results)
-
-    if resolved == "searxng" or (not resolved and os.environ.get("SEARXNG_URL")):
-        return await _search_searxng(query, max_results=max_results)
-
-    # Try Brave first if key exists, then SearXNG
-    if os.environ.get("BRAVE_API_KEY"):
-        return await _search_brave(query, max_results=max_results)
-    if os.environ.get("SEARXNG_URL"):
-        return await _search_searxng(query, max_results=max_results)
-
-    msg = (
-        "No search backend configured. Set one of:\n"
-        "  BRAVE_API_KEY=your_key  (Brave Search API — https://brave.com/search/api/)\n"
-        "  SEARXNG_URL=http://localhost:8080  (self-hosted SearXNG instance)\n"
-        "Or pass backend='brave' or backend='searxng' explicitly."
-    )
+    msg = f"Unknown search backend: {backend!r}. Available: {', '.join(_BACKENDS)}"
     raise ValueError(msg)
 
 
-# ---------------------------------------------------------------------------
-# Brave Search API
-# ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# SerpAPI — Google results via REST API
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def _search_serpapi(
+    query: str,
+    *,
+    max_results: int = 10,
+) -> list[SearchResult]:
+    """Search via SerpAPI (Google results).
+
+    Env: SERPAPI_API_KEY
+    Endpoint: GET https://serpapi.com/search
+    Free tier: 250 searches/month
+    """
+    api_key = os.environ.get("SERPAPI_API_KEY", "")
+    if not api_key:
+        msg = "SERPAPI_API_KEY not set. Get a key at https://serpapi.com/manage-api-key"
+        raise ValueError(msg)
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.get(
+            "https://serpapi.com/search",
+            params={
+                "api_key": api_key,
+                "engine": "google",
+                "q": query,
+                "num": min(max_results, 100),
+                "output": "json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    if "error" in data:
+        msg = f"SerpAPI error: {data['error']}"
+        raise RuntimeError(msg)
+
+    results: list[SearchResult] = []
+
+    # Organic results
+    for item in data.get("organic_results", []):
+        results.append(
+            SearchResult(
+                title=item.get("title", ""),
+                url=item.get("link", ""),
+                snippet=item.get("snippet", ""),
+                source="serpapi",
+                position=item.get("position", len(results) + 1),
+                extra={
+                    k: v
+                    for k, v in item.items()
+                    if k not in ("title", "link", "snippet", "position") and v
+                },
+            )
+        )
+
+    # Answer box (if present, prepend as first result)
+    answer_box = data.get("answer_box")
+    if answer_box and answer_box.get("snippet"):
+        results.insert(
+            0,
+            SearchResult(
+                title=answer_box.get("title", "Answer"),
+                url=answer_box.get("link", ""),
+                snippet=answer_box.get("snippet", ""),
+                source="serpapi:answer_box",
+                position=0,
+            ),
+        )
+
+    return results[:max_results]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DuckDuckGo — Free, no auth, HTML scraping
+# ═══════════════════════════════════════════════════════════════════════════
+
+_DDG_URL = "https://html.duckduckgo.com/html/"
+_DDG_RESULT_RE = re.compile(
+    r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>'
+    r'.*?<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+    re.DOTALL,
+)
+_DDG_TITLE_CLEAN = re.compile(r"<[^>]+>")
+
+
+async def _search_duckduckgo(
+    query: str,
+    *,
+    max_results: int = 10,
+) -> list[SearchResult]:
+    """Search via DuckDuckGo HTML endpoint.
+
+    No auth needed. Rate-limited by IP. No guarantees on availability.
+    Parses HTML results from html.duckduckgo.com/html/.
+    """
+    async with httpx.AsyncClient(
+        timeout=15.0,
+        follow_redirects=True,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Referer": "https://html.duckduckgo.com/",
+        },
+    ) as client:
+        resp = await client.post(
+            _DDG_URL,
+            data={"q": query, "b": "", "kl": ""},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp.raise_for_status()
+        html = resp.text
+
+    results: list[SearchResult] = []
+
+    # Parse with lxml for robustness
+    try:
+        from lxml import etree
+
+        parser = etree.HTMLParser()
+        tree = etree.fromstring(html.encode(), parser)
+
+        # Each result is in a div.result
+        for i, result_div in enumerate(tree.xpath("//div[contains(@class, 'result')]")):
+            if i >= max_results:
+                break
+
+            # Title + URL
+            link_els = result_div.xpath(".//a[contains(@class, 'result__a')]")
+            if not link_els:
+                continue
+            link_el = link_els[0]
+            title = "".join(link_el.itertext()).strip()
+            href = link_el.get("href", "")
+
+            # Snippet
+            snippet_els = result_div.xpath(".//a[contains(@class, 'result__snippet')]")
+            snippet = ""
+            if snippet_els:
+                snippet = "".join(snippet_els[0].itertext()).strip()
+
+            if not href or not title:
+                continue
+
+            results.append(
+                SearchResult(
+                    title=title,
+                    url=href,
+                    snippet=snippet,
+                    source="duckduckgo",
+                    position=i + 1,
+                )
+            )
+    except ImportError:
+        # Fallback: regex parsing if lxml not available (shouldn't happen in kaos-web)
+        for i, m in enumerate(_DDG_RESULT_RE.finditer(html)):
+            if i >= max_results:
+                break
+            href, raw_title, raw_snippet = m.groups()
+            title = _DDG_TITLE_CLEAN.sub("", raw_title).strip()
+            snippet = _DDG_TITLE_CLEAN.sub("", raw_snippet).strip()
+            results.append(
+                SearchResult(
+                    title=title,
+                    url=href,
+                    snippet=snippet,
+                    source="duckduckgo",
+                    position=i + 1,
+                )
+            )
+
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Exa — Neural / semantic search
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def _search_exa(
+    query: str,
+    *,
+    max_results: int = 10,
+) -> list[SearchResult]:
+    """Search via Exa (neural/semantic search).
+
+    Env: EXA_API_KEY
+    Endpoint: POST https://api.exa.ai/search
+    Free tier: 1000 requests/month, 10 QPS
+    """
+    api_key = os.environ.get("EXA_API_KEY", "")
+    if not api_key:
+        msg = "EXA_API_KEY not set. Get a key at https://dashboard.exa.ai/api-keys"
+        raise ValueError(msg)
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            "https://api.exa.ai/search",
+            json={
+                "query": query,
+                "numResults": min(max_results, 100),
+                "type": "auto",
+                "contents": {
+                    "highlights": True,
+                },
+            },
+            headers={
+                "x-api-key": api_key,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    results: list[SearchResult] = []
+    for i, item in enumerate(data.get("results", [])):
+        # Build snippet from highlights or title
+        highlights = item.get("highlights", [])
+        snippet = highlights[0] if highlights else ""
+
+        results.append(
+            SearchResult(
+                title=item.get("title", ""),
+                url=item.get("url", ""),
+                snippet=snippet,
+                source="exa",
+                position=i + 1,
+                extra={
+                    k: v for k, v in item.items() if k not in ("title", "url", "highlights") and v
+                },
+            )
+        )
+
+    return results[:max_results]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Brave Search — Independent index
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 async def _search_brave(
@@ -95,17 +359,15 @@ async def _search_brave(
     *,
     max_results: int = 10,
 ) -> list[SearchResult]:
-    """Search using the Brave Search API.
+    """Search via Brave Search API.
 
-    Requires ``BRAVE_API_KEY`` environment variable.
-    Free tier: ~1000 queries/month. Rate limit: 50 QPS.
+    Env: BRAVE_API_KEY
+    Endpoint: GET https://api.search.brave.com/res/v1/web/search
+    Free tier: ~1000 queries/month
     """
     api_key = os.environ.get("BRAVE_API_KEY", "")
     if not api_key:
-        msg = (
-            "BRAVE_API_KEY environment variable not set. "
-            "Get a free API key at https://brave.com/search/api/"
-        )
+        msg = "BRAVE_API_KEY not set. Get a key at https://brave.com/search/api/"
         raise ValueError(msg)
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -130,71 +392,7 @@ async def _search_brave(
                 snippet=item.get("description", ""),
                 source="brave",
                 position=i + 1,
-                extra={
-                    k: v for k, v in item.items() if k not in ("title", "url", "description") and v
-                },
             )
         )
 
     return results[:max_results]
-
-
-# ---------------------------------------------------------------------------
-# SearXNG (self-hosted)
-# ---------------------------------------------------------------------------
-
-
-async def _search_searxng(
-    query: str,
-    *,
-    max_results: int = 10,
-) -> list[SearchResult]:
-    """Search using a SearXNG instance.
-
-    Requires ``SEARXNG_URL`` environment variable.
-    Self-hosted, free, aggregates 70+ search engines.
-    JSON format must be enabled in SearXNG settings.yaml.
-    """
-    base_url = os.environ.get("SEARXNG_URL", "")
-    if not base_url:
-        msg = (
-            "SEARXNG_URL environment variable not set. "
-            "Deploy SearXNG: docker run -p 8080:8080 searxng/searxng"
-        )
-        raise ValueError(msg)
-
-    search_url = f"{base_url.rstrip('/')}/search"
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            search_url,
-            params={
-                "q": query,
-                "format": "json",
-                "pageno": 1,
-            },
-            headers={"Accept": "application/json"},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-    results: list[SearchResult] = []
-    for i, item in enumerate(data.get("results", [])):
-        if i >= max_results:
-            break
-        results.append(
-            SearchResult(
-                title=item.get("title", ""),
-                url=item.get("url", ""),
-                snippet=item.get("content", ""),
-                source=f"searxng:{item.get('engine', 'unknown')}",
-                position=i + 1,
-                extra={
-                    k: v
-                    for k, v in item.items()
-                    if k not in ("title", "url", "content", "engine") and v
-                },
-            )
-        )
-
-    return results

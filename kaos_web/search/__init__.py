@@ -1,7 +1,13 @@
 """Web search backends for kaos-web.
 
-Pluggable search backends behind a common protocol. Each backend
-wraps a search API (Brave, SearXNG, etc.) and returns uniform results.
+Four pluggable backends behind a common interface:
+
+- **SerpAPI** — Google results, 250 free/month (SERPAPI_API_KEY)
+- **DuckDuckGo** — Free, no auth, HTML scraping fallback
+- **Exa** — Neural/semantic search, 1000 free/month (EXA_API_KEY)
+- **Brave** — Independent index, ~1000 free/month (BRAVE_API_KEY)
+
+Auto-detects backend from environment variables, falls back to DuckDuckGo.
 
 Usage::
 

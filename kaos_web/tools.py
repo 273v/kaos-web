@@ -783,10 +783,11 @@ class WebSearchTool(KaosTool):
             name="kaos-web-search",
             display_name="Web Search",
             description=(
-                "Search the web using Brave Search or SearXNG. "
+                "Search the web using SerpAPI, DuckDuckGo, Exa, or Brave. "
                 "Returns titles, URLs, and snippets. Use the URLs with "
                 "kaos-web-fetch-page or kaos-web-get-markdown to retrieve full content. "
-                "Requires BRAVE_API_KEY or SEARXNG_URL environment variable."
+                "Auto-detects backend from env vars (SERPAPI_API_KEY, EXA_API_KEY, BRAVE_API_KEY) "
+                "or falls back to DuckDuckGo (free, no key needed)."
             ),
             category=ToolCategory.TEXT,
             capability=ToolCapability.QUERY,
@@ -810,9 +811,9 @@ class WebSearchTool(KaosTool):
                 ParameterSchema(
                     name="backend",
                     type="string",
-                    description="Search backend: 'brave' or 'searxng'. Default: auto-detect.",
+                    description="Search backend. Default: auto-detect from env vars.",
                     required=False,
-                    constraints={"enum": ["brave", "searxng"]},
+                    constraints={"enum": ["serpapi", "duckduckgo", "exa", "brave"]},
                 ),
             ],
         )
