@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import pytest
 
-from kaos_web.browser_tools import _detect_browser_channel
 from kaos_web.clients.browser import BrowserClient
 from kaos_web.clients.config import BrowserClientConfig
 from kaos_web.models import WebRequest
+from kaos_web.settings import _detect_browser_channel
 
 pytestmark = pytest.mark.integration
 

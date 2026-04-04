@@ -1,0 +1,144 @@
+"""Typed settings for kaos-web.
+
+Centralises all environment variable reads into a single ``KaosWebSettings``
+model.  New-style env vars use the ``KAOS_WEB_`` prefix; legacy env var
+names (``KAOS_BROWSER_CHANNEL``, ``SERPAPI_API_KEY``, etc.) are supported
+via a ``model_validator`` fallback for backward compatibility.
+
+Usage::
+
+    from kaos_web.settings import KaosWebSettings
+
+    settings = KaosWebSettings()              # from env + defaults
+    config   = settings.to_browser_config()   # -> BrowserClientConfig
+"""
+
+from __future__ import annotations
+
+import os
+import platform
+import shutil
+from typing import Any, Literal
+
+from pydantic import SecretStr, model_validator
+from pydantic_settings import SettingsConfigDict
+
+from kaos_core.config.module_settings import ModuleSettings
+
+
+def _detect_browser_channel() -> str | None:
+    """Auto-detect the best browser channel for this platform.
+
+    Priority:
+    1. System Chrome if bundled Chromium is known-broken (Ubuntu 24.04+)
+    2. None (use Playwright's bundled Chromium — the default)
+    """
+    if platform.system() == "Linux" and shutil.which("google-chrome"):
+        return "chrome"
+    return None
+
+
+class KaosWebSettings(ModuleSettings):
+    """Web module settings — browser, search, and API key configuration.
+
+    Env vars:
+        ``KAOS_WEB_BROWSER_TYPE``, ``KAOS_WEB_BROWSER_HEADLESS``,
+        ``KAOS_WEB_BROWSER_CHANNEL``, ``KAOS_WEB_BROWSER_AUTO_DETECT_CHANNEL``,
+        ``KAOS_WEB_SEARCH_BACKEND``, ``KAOS_WEB_SERPAPI_API_KEY``,
+        ``KAOS_WEB_EXA_API_KEY``, ``KAOS_WEB_BRAVE_API_KEY``
+
+    Legacy env vars (backward compatible):
+        ``KAOS_BROWSER_TYPE``, ``KAOS_BROWSER_HEADLESS``, ``KAOS_BROWSER_CHANNEL``,
+        ``KAOS_SEARCH_BACKEND``, ``SERPAPI_API_KEY``, ``EXA_API_KEY``, ``BRAVE_API_KEY``
+    """
+
+    # Browser
+    browser_type: Literal["chromium", "firefox", "webkit"] = "chromium"
+    browser_headless: bool = True
+    browser_channel: str | None = None
+    browser_auto_detect_channel: bool = True
+
+    # Search
+    search_backend: str = ""
+    serpapi_api_key: SecretStr | None = None
+    exa_api_key: SecretStr | None = None
+    brave_api_key: SecretStr | None = None
+
+    model_config = SettingsConfigDict(
+        env_prefix="KAOS_WEB_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_env_fallback(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """Support legacy env var names for backward compatibility."""
+        _LEGACY_MAP: dict[str, str] = {
+            "browser_channel": "KAOS_BROWSER_CHANNEL",
+            "browser_type": "KAOS_BROWSER_TYPE",
+            "search_backend": "KAOS_SEARCH_BACKEND",
+            "serpapi_api_key": "SERPAPI_API_KEY",
+            "exa_api_key": "EXA_API_KEY",
+            "brave_api_key": "BRAVE_API_KEY",
+        }
+        for field, env_name in _LEGACY_MAP.items():
+            if not values.get(field):
+                legacy = os.environ.get(env_name)
+                if legacy:
+                    values[field] = legacy
+
+        # Special case: KAOS_BROWSER_HEADLESS is a boolean with string parsing
+        if "browser_headless" not in values or values.get("browser_headless") is None:
+            legacy_headless = os.environ.get("KAOS_BROWSER_HEADLESS")
+            if legacy_headless is not None:
+                values["browser_headless"] = legacy_headless.lower() != "false"
+
+        return values
+
+    def to_browser_config(self) -> Any:
+        """Build a ``BrowserClientConfig`` from these settings.
+
+        Applies browser channel auto-detection if ``browser_auto_detect_channel``
+        is ``True`` and no explicit channel is set.
+        """
+        from kaos_web.clients.config import BrowserClientConfig
+
+        channel = self.browser_channel
+        if channel == "auto":
+            channel = None
+        if channel is None and self.browser_auto_detect_channel:
+            channel = _detect_browser_channel()
+
+        return BrowserClientConfig(
+            browser_type=self.browser_type,
+            headless=self.browser_headless,
+            channel=channel,
+        )
+
+    def get_search_api_key(self, backend: str) -> str | None:
+        """Get the API key for a specific search backend.
+
+        Returns the secret value (plain string) or None.
+        """
+        key_map: dict[str, SecretStr | None] = {
+            "serpapi": self.serpapi_api_key,
+            "exa": self.exa_api_key,
+            "brave": self.brave_api_key,
+        }
+        secret = key_map.get(backend)
+        if secret is not None:
+            return secret.get_secret_value()
+        return None
+
+    def detect_search_backend(self) -> str:
+        """Auto-detect the best available search backend.
+
+        Returns the backend name based on configured API keys, or ``"duckduckgo"``
+        as the free fallback.
+        """
+        for backend in ("serpapi", "exa", "brave"):
+            if self.get_search_api_key(backend):
+                return backend
+        return "duckduckgo"

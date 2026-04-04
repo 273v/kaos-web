@@ -41,29 +41,36 @@ Key modules:
 - **kaos-mcp** (optional `[mcp]` extra) — MCP server bridge
 - **kaos-nlp-core** (optional `[nlp]` extra) — BM25 search within extracted content
 
-## Browser Setup
+## Configuration — KaosWebSettings
 
-Browser channel is **auto-detected** — no hardcoded config needed.
-
-### Auto-detection logic (`_detect_browser_channel()`)
-1. `KAOS_BROWSER_CHANNEL` env var (explicit override, e.g. `chrome`, `firefox`, `auto`)
-2. Linux + system Chrome available → `chrome` (bundled Chromium fails on Ubuntu 24.04+)
-3. Otherwise → `None` (use Playwright's bundled Chromium)
+All config is centralised in `kaos_web.settings.KaosWebSettings` (a `ModuleSettings` subclass).
 
 ### Environment variables
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `KAOS_BROWSER_CHANNEL` | auto-detect | Browser channel: `chrome`, `firefox`, `webkit`, `auto` |
-| `KAOS_BROWSER_HEADLESS` | `true` | Set `false` for visible browser |
-| `KAOS_BROWSER_TYPE` | `chromium` | Playwright engine: `chromium`, `firefox`, `webkit` |
+| Variable | Legacy alias | Default | Description |
+|----------|-------------|---------|-------------|
+| `KAOS_WEB_BROWSER_TYPE` | `KAOS_BROWSER_TYPE` | `chromium` | Playwright engine: `chromium`, `firefox`, `webkit` |
+| `KAOS_WEB_BROWSER_HEADLESS` | `KAOS_BROWSER_HEADLESS` | `true` | Set `false` for visible browser |
+| `KAOS_WEB_BROWSER_CHANNEL` | `KAOS_BROWSER_CHANNEL` | auto-detect | Browser channel: `chrome`, `firefox`, `webkit`, `auto` |
+| `KAOS_WEB_SEARCH_BACKEND` | `KAOS_SEARCH_BACKEND` | auto-detect | Search backend: `serpapi`, `duckduckgo`, `exa`, `brave` |
+| `KAOS_WEB_SERPAPI_API_KEY` | `SERPAPI_API_KEY` | — | SerpAPI API key (SecretStr) |
+| `KAOS_WEB_EXA_API_KEY` | `EXA_API_KEY` | — | Exa API key (SecretStr) |
+| `KAOS_WEB_BRAVE_API_KEY` | `BRAVE_API_KEY` | — | Brave Search API key (SecretStr) |
+
+New `KAOS_WEB_*` prefix takes priority. Legacy env vars are supported for backward compatibility.
+
+### Auto-detection logic
+Browser channel: `_detect_browser_channel()` in `kaos_web.settings` auto-detects system Chrome on Linux. Search backend: auto-detects from configured API keys (serpapi → exa → brave → duckduckgo).
 
 ### Python API
 ```python
-from kaos_web.browser_tools import configure_browser
-from kaos_web.clients.config import BrowserClientConfig
+from kaos_web.settings import KaosWebSettings
+
+settings = KaosWebSettings()              # from env + defaults
+config = settings.to_browser_config()     # -> BrowserClientConfig
 
 # Override before first tool call
-configure_browser(BrowserClientConfig(channel="firefox", headless=False))
+from kaos_web.browser_tools import configure_browser
+configure_browser(config)
 ```
 
 ### Direct client usage

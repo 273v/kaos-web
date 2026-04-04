@@ -582,30 +582,33 @@ class TestBrowserToolErrorPaths:
 
 class TestBrowserChannelDetection:
     def test_env_var_overrides(self, monkeypatch):
-        from kaos_web.browser_tools import _detect_browser_channel
+        """Legacy KAOS_BROWSER_CHANNEL env var sets channel via KaosWebSettings."""
+        from kaos_web.settings import KaosWebSettings
 
         monkeypatch.setenv("KAOS_BROWSER_CHANNEL", "firefox")
-        assert _detect_browser_channel() == "firefox"
+        s = KaosWebSettings(browser_auto_detect_channel=False)
+        assert s.browser_channel == "firefox"
 
     def test_env_var_auto_means_none(self, monkeypatch):
-        from kaos_web.browser_tools import _detect_browser_channel
+        """browser_channel='auto' maps to None in to_browser_config()."""
+        from kaos_web.settings import KaosWebSettings
 
         monkeypatch.setenv("KAOS_BROWSER_CHANNEL", "auto")
-        assert _detect_browser_channel() is None
+        s = KaosWebSettings(browser_auto_detect_channel=False)
+        config = s.to_browser_config()
+        assert config.channel is None
 
     def test_no_env_var_linux_with_chrome(self, monkeypatch):
-        from kaos_web.browser_tools import _detect_browser_channel
+        from kaos_web.settings import _detect_browser_channel
 
-        monkeypatch.delenv("KAOS_BROWSER_CHANNEL", raising=False)
-        monkeypatch.setattr("platform.system", lambda: "Linux")
-        monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/google-chrome")
+        monkeypatch.setattr("kaos_web.settings.platform.system", lambda: "Linux")
+        monkeypatch.setattr("kaos_web.settings.shutil.which", lambda cmd: "/usr/bin/google-chrome")
         assert _detect_browser_channel() == "chrome"
 
     def test_no_env_var_macos_no_chrome(self, monkeypatch):
-        from kaos_web.browser_tools import _detect_browser_channel
+        from kaos_web.settings import _detect_browser_channel
 
-        monkeypatch.delenv("KAOS_BROWSER_CHANNEL", raising=False)
-        monkeypatch.setattr("platform.system", lambda: "Darwin")
+        monkeypatch.setattr("kaos_web.settings.platform.system", lambda: "Darwin")
         assert _detect_browser_channel() is None
 
     def test_build_config_uses_detection(self, monkeypatch):

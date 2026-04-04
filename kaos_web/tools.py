@@ -855,6 +855,10 @@ class WebSearchTool(KaosTool):
 
 def register_web_tools(runtime: KaosRuntime) -> int:
     """Register all web tools with the runtime. Returns count."""
+    from kaos_web.settings import KaosWebSettings
+
+    runtime.module_settings["web"] = KaosWebSettings()
+
     tools: list[KaosTool] = [
         FetchPageTool(),
         GetPageTextTool(),

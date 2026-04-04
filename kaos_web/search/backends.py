@@ -1,14 +1,15 @@
 """Pluggable web search backends — all via httpx, no SDK dependencies.
 
 Supports:
-- **SerpAPI** — Google results, 250 free/month, API key (SERPAPI_API_KEY)
+- **SerpAPI** — Google results, 250 free/month, API key
 - **DuckDuckGo** — Free, no auth, HTML scraping (rate-limited, no guarantees)
-- **Exa** — Neural/semantic search, 1000 free/month, API key (EXA_API_KEY)
-- **Brave** — Independent index, ~1000 free/month, API key (BRAVE_API_KEY)
+- **Exa** — Neural/semantic search, 1000 free/month, API key
+- **Brave** — Independent index, ~1000 free/month, API key
 
-Configuration via environment variables:
-- ``KAOS_SEARCH_BACKEND``: ``"serpapi"``, ``"duckduckgo"``, ``"exa"``, ``"brave"``
-- Backend-specific keys: ``SERPAPI_API_KEY``, ``EXA_API_KEY``, ``BRAVE_API_KEY``
+Configuration via ``KaosWebSettings`` (see ``kaos_web.settings``):
+- New env vars: ``KAOS_WEB_SEARCH_BACKEND``, ``KAOS_WEB_SERPAPI_API_KEY``, etc.
+- Legacy env vars: ``KAOS_SEARCH_BACKEND``, ``SERPAPI_API_KEY``, ``EXA_API_KEY``,
+  ``BRAVE_API_KEY`` (backward compatible)
 
 Usage::
 
@@ -19,12 +20,14 @@ Usage::
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+if TYPE_CHECKING:
+    from kaos_web.settings import KaosWebSettings
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,12 +48,14 @@ class SearchResult:
 
 _BACKENDS = ("serpapi", "duckduckgo", "exa", "brave")
 
-# Env var names for auto-detection (checked in priority order)
-_KEY_MAP: dict[str, str] = {
-    "serpapi": "SERPAPI_API_KEY",
-    "exa": "EXA_API_KEY",
-    "brave": "BRAVE_API_KEY",
-}
+
+def _get_settings(settings: KaosWebSettings | None = None) -> KaosWebSettings:
+    """Get or create web settings (lazy import to avoid circular deps)."""
+    if settings is not None:
+        return settings
+    from kaos_web.settings import KaosWebSettings
+
+    return KaosWebSettings()
 
 
 async def search_web(
@@ -58,14 +63,17 @@ async def search_web(
     *,
     max_results: int = 10,
     backend: str | None = None,
+    settings: KaosWebSettings | None = None,
 ) -> list[SearchResult]:
     """Execute a web search.
 
     Args:
         query: Search query string.
         max_results: Max results (1-20).
-        backend: Force a backend. If None, auto-detects from env vars
-            in order: SERPAPI_API_KEY → EXA_API_KEY → BRAVE_API_KEY → duckduckgo.
+        backend: Force a backend. If None, auto-detects from settings/env vars
+            in order: SERPAPI → EXA → BRAVE → duckduckgo.
+        settings: Optional ``KaosWebSettings`` instance. If None, one is created
+            from environment variables.
 
     Returns:
         List of SearchResult.
@@ -77,33 +85,32 @@ async def search_web(
         msg = "Search query must not be empty."
         raise ValueError(msg)
 
-    resolved = (backend or os.environ.get("KAOS_SEARCH_BACKEND", "")).lower()
+    s = _get_settings(settings)
+    resolved = (backend or s.search_backend).lower()
 
     if resolved:
         if resolved not in _BACKENDS:
             available = ", ".join(_BACKENDS)
             msg = f"Unknown search backend: {resolved!r}. Available: {available}"
             raise ValueError(msg)
-        return await _dispatch(resolved, query, max_results)
+        return await _dispatch(resolved, query, max_results, s)
 
     # Auto-detect: try backends with configured keys, fall back to DDG
-    for name, env_key in _KEY_MAP.items():
-        if os.environ.get(env_key):
-            return await _dispatch(name, query, max_results)
-
-    # DuckDuckGo as free fallback (no key needed)
-    return await _search_duckduckgo(query, max_results=max_results)
+    detected = s.detect_search_backend()
+    return await _dispatch(detected, query, max_results, s)
 
 
-async def _dispatch(backend: str, query: str, max_results: int) -> list[SearchResult]:
+async def _dispatch(
+    backend: str, query: str, max_results: int, settings: KaosWebSettings
+) -> list[SearchResult]:
     if backend == "serpapi":
-        return await _search_serpapi(query, max_results=max_results)
+        return await _search_serpapi(query, max_results=max_results, settings=settings)
     if backend == "duckduckgo":
         return await _search_duckduckgo(query, max_results=max_results)
     if backend == "exa":
-        return await _search_exa(query, max_results=max_results)
+        return await _search_exa(query, max_results=max_results, settings=settings)
     if backend == "brave":
-        return await _search_brave(query, max_results=max_results)
+        return await _search_brave(query, max_results=max_results, settings=settings)
     msg = f"Unknown search backend: {backend!r}. Available: {', '.join(_BACKENDS)}"
     raise ValueError(msg)
 
@@ -117,14 +124,15 @@ async def _search_serpapi(
     query: str,
     *,
     max_results: int = 10,
+    settings: KaosWebSettings | None = None,
 ) -> list[SearchResult]:
     """Search via SerpAPI (Google results).
 
-    Env: SERPAPI_API_KEY
     Endpoint: GET https://serpapi.com/search
     Free tier: 250 searches/month
     """
-    api_key = os.environ.get("SERPAPI_API_KEY", "")
+    s = _get_settings(settings)
+    api_key = s.get_search_api_key("serpapi") or ""
     if not api_key:
         msg = "SERPAPI_API_KEY not set. Get a key at https://serpapi.com/manage-api-key"
         raise ValueError(msg)
@@ -229,7 +237,7 @@ async def _search_duckduckgo(
 
     # Parse with lxml for robustness
     try:
-        from lxml import etree
+        from lxml import etree  # ty: ignore[unresolved-import]
 
         parser = etree.HTMLParser()
         tree = etree.fromstring(html.encode(), parser)
@@ -301,14 +309,15 @@ async def _search_exa(
     query: str,
     *,
     max_results: int = 10,
+    settings: KaosWebSettings | None = None,
 ) -> list[SearchResult]:
     """Search via Exa (neural/semantic search).
 
-    Env: EXA_API_KEY
     Endpoint: POST https://api.exa.ai/search
     Free tier: 1000 requests/month, 10 QPS
     """
-    api_key = os.environ.get("EXA_API_KEY", "")
+    s = _get_settings(settings)
+    api_key = s.get_search_api_key("exa") or ""
     if not api_key:
         msg = "EXA_API_KEY not set. Get a key at https://dashboard.exa.ai/api-keys"
         raise ValueError(msg)
@@ -364,14 +373,15 @@ async def _search_brave(
     query: str,
     *,
     max_results: int = 10,
+    settings: KaosWebSettings | None = None,
 ) -> list[SearchResult]:
     """Search via Brave Search API.
 
-    Env: BRAVE_API_KEY
     Endpoint: GET https://api.search.brave.com/res/v1/web/search
     Free tier: ~1000 queries/month
     """
-    api_key = os.environ.get("BRAVE_API_KEY", "")
+    s = _get_settings(settings)
+    api_key = s.get_search_api_key("brave") or ""
     if not api_key:
         msg = "BRAVE_API_KEY not set. Get a key at https://brave.com/search/api/"
         raise ValueError(msg)

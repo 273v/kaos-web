@@ -11,15 +11,15 @@ for multi-step workflows (navigate → click → fill → screenshot → extract
 from __future__ import annotations
 
 import base64
-import logging
-from typing import Any, Literal, cast
+from typing import Any
 
 from kaos_core import KaosContext, KaosRuntime, KaosTool, ToolMetadata, ToolResult
+from kaos_core.logging import get_logger
 from kaos_core.types.annotations import ToolAnnotations
 from kaos_core.types.enums import ToolCapability, ToolCategory
 from kaos_core.types.parameters import ParameterSchema
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _MODULE = "kaos-web"
 _VERSION = "0.1.0"
@@ -46,58 +46,14 @@ _browser_client: Any = None
 _browser_config_override: Any = None  # Set via configure_browser() before first use
 
 
-def _detect_browser_channel() -> str | None:
-    """Auto-detect the best browser channel for this platform.
-
-    Priority:
-    1. KAOS_BROWSER_CHANNEL env var (explicit override)
-    2. System Chrome if bundled Chromium is known-broken (Ubuntu 24.04+)
-    3. None (use Playwright's bundled Chromium — the default)
-    """
-    import os
-    import platform
-    import shutil
-
-    # Explicit override always wins
-    env_channel = os.environ.get("KAOS_BROWSER_CHANNEL")
-    if env_channel:
-        return env_channel if env_channel != "auto" else None
-
-    # On Linux, Playwright's bundled Chromium often fails on newer distros
-    # (missing libs, sandbox issues). Prefer system Chrome if available.
-    if platform.system() == "Linux" and shutil.which("google-chrome"):
-        return "chrome"
-
-    return None
-
-
 def _build_browser_config() -> Any:
-    """Build BrowserClientConfig from environment and auto-detection."""
-    import os
-
-    from kaos_web.clients.config import BrowserClientConfig
-
+    """Build BrowserClientConfig from typed settings and auto-detection."""
     if _browser_config_override is not None:
         return _browser_config_override
 
-    channel = _detect_browser_channel()
-    headless = os.environ.get("KAOS_BROWSER_HEADLESS", "true").lower() != "false"
+    from kaos_web.settings import KaosWebSettings
 
-    _VALID_BROWSER_TYPES = ("chromium", "firefox", "webkit")
-    raw_browser_type = os.environ.get("KAOS_BROWSER_TYPE", "chromium")
-    if raw_browser_type not in _VALID_BROWSER_TYPES:
-        msg = (
-            f"Invalid KAOS_BROWSER_TYPE='{raw_browser_type}'. "
-            f"Must be one of: {', '.join(_VALID_BROWSER_TYPES)}"
-        )
-        raise ValueError(msg)
-    browser_type = cast(Literal["chromium", "firefox", "webkit"], raw_browser_type)
-
-    return BrowserClientConfig(
-        channel=channel,
-        headless=headless,
-        browser_type=browser_type,
-    )
+    return KaosWebSettings().to_browser_config()
 
 
 def configure_browser(config: Any) -> None:
