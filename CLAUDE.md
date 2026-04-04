@@ -247,6 +247,38 @@ pytest tests/ -v
 Integration tests (require network): `pytest tests/integration/ -v`
 Skip in CI: `pytest -m "not integration"`
 
+## Agentic Workflow Patterns
+
+### Quick page extraction (simple, fast)
+1. `kaos-web-get-markdown` or `kaos-web-get-text` — fetch and extract content
+2. If 403 → auto-retries with Playwright browser. No action needed.
+
+### Browser interaction (forms, login, JS-heavy sites)
+1. `kaos-web-browser-navigate` — open page in persistent context (set `context_id`)
+2. `kaos-web-browser-snapshot` — get accessibility tree to find interactive elements
+3. `kaos-web-browser-click` / `kaos-web-browser-fill` / `kaos-web-browser-type` — interact
+4. `kaos-web-browser-content` — extract updated page content after interaction
+5. `kaos-web-browser-close-context` — clean up when done
+
+### API endpoint discovery (find backend JSON APIs behind a web app)
+1. `kaos-web-browser-log-requests` — enable request logging FIRST (set `context_id`)
+2. `kaos-web-browser-navigate` — load the page
+3. Interact with the page (click, fill, navigate) to trigger API calls
+4. `kaos-web-browser-requests` with `resource_type: "fetch"` — list XHR/fetch API calls
+5. `kaos-web-browser-get-request` — get full request/response detail (headers, JSON body)
+
+### Site crawling (discover and extract all pages)
+1. `kaos-web-discover-urls` — fast URL inventory via sitemaps + page links
+2. `kaos-web-batch-fetch` — concurrent extraction of selected URLs
+3. Or: `kaos-web-crawl-site` — full BFS crawl with depth/page limits
+
+### Data extraction (tables, links, images, metadata)
+- `kaos-web-get-tables` — extract HTML `<table>` elements as structured TSV
+- `kaos-web-get-links` — extract all links classified by type (nav/content/social)
+- `kaos-web-get-images` — extract all images classified (content/decorative/icon)
+- `kaos-web-get-metadata` — JSON-LD, OpenGraph, meta tags
+- `kaos-web-search-page` — BM25 search within extracted page content
+
 ## Rules
 
 - **Never add AGPL/GPL dependencies.** This is a proprietary codebase.

@@ -76,8 +76,18 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Total: {n_tools} tools registered", file=sys.stderr)
 
     # Configure server
+    instructions = (
+        "kaos-web provides web content extraction and browser automation. "
+        "For simple page content, use kaos-web-get-markdown. "
+        "For sites that block HTTP requests, it auto-retries with a browser. "
+        "For API endpoint discovery: enable request logging first, then navigate, "
+        "then list requests filtered to resource_type='fetch' to find JSON APIs. "
+        "For interactive workflows: navigate with a context_id, then use snapshot "
+        "to find elements, click/fill/type to interact, and content to extract results."
+    )
     settings = KaosMCPSettings(
         name="kaos-web-server",
+        instructions=instructions,
         transport="streamable-http" if args.http else "stdio",
         host=args.host,
         port=args.port,
