@@ -259,6 +259,7 @@ class TestCrawlToolsE2E:
         )
         assert not result.isError
         data = result.structuredContent
+        assert data is not None
         assert data["total"] > 0
         assert len(data["urls"]) > 0
 
@@ -277,6 +278,7 @@ class TestCrawlToolsE2E:
         )
         assert not result.isError
         data = result.structuredContent
+        assert data is not None
         assert data["succeeded"] >= 1
 
     @pytest.mark.asyncio
@@ -296,5 +298,6 @@ class TestCrawlToolsE2E:
         )
         assert not result.isError
         data = result.structuredContent
+        assert data is not None
         assert data["total_extracted"] == 1
         assert len(data["pages"]) == 1

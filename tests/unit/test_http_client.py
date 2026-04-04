@@ -74,7 +74,7 @@ class TestConnectionPooling:
         )
         client = HttpClient(config)
         try:
-            pool = client._client._transport._pool
+            pool = client._client._transport._pool  # ty: ignore[unresolved-attribute]
             assert pool._max_connections == 50, (
                 f"Expected max_connections=50, got {pool._max_connections}"
             )

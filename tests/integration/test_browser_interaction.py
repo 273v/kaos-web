@@ -37,6 +37,7 @@ class TestBrowserNavigateAndTrack:
 
             assert resp.status_code == 200
             assert "nav1" in client.active_contexts
+            assert resp.title is not None
             assert "example" in resp.title.lower()
 
     async def test_unnamed_context_cleaned_up(self) -> None:

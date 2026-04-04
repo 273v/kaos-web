@@ -227,9 +227,9 @@ class TestFullPipelineIntegration:
         from kaos_web.extract import html_to_document
 
         try:
-            from kaos_pdf.search import search_document
+            from kaos_content.search import search_document
         except ImportError:
-            pytest.skip("kaos_pdf not installed")
+            pytest.skip("kaos_content[search] not available")
 
         config = BrowserClientConfig(channel="chrome")
         async with BrowserClient(config) as client:

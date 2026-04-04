@@ -81,6 +81,7 @@ class TestGetPageTextThroughMCP:
     async def test_get_text_error_message(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)
         tool = runtime.tools.get_tool("kaos-web-get-text")
+        assert tool is not None
 
         with patch("kaos_web.tools._fetch_html", side_effect=Exception("Connection refused")):
             result = await tool.execute({"url": "https://down.example.com"})
@@ -94,6 +95,7 @@ class TestGetPageMarkdownThroughMCP:
     async def test_get_markdown_via_execute(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)
         tool = runtime.tools.get_tool("kaos-web-get-markdown")
+        assert tool is not None
 
         with patch(
             "kaos_web.tools._fetch_html", return_value=(ARTICLE_HTML, "https://example.com")
@@ -110,6 +112,7 @@ class TestGetPageMetadataThroughMCP:
     async def test_metadata_via_execute(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)
         tool = runtime.tools.get_tool("kaos-web-get-metadata")
+        assert tool is not None
 
         with patch(
             "kaos_web.tools._fetch_html", return_value=(ARTICLE_HTML, "https://example.com")
@@ -126,6 +129,7 @@ class TestFetchPageThroughMCP:
     async def test_fetch_page_requires_context(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)
         tool = runtime.tools.get_tool("kaos-web-fetch-page")
+        assert tool is not None
 
         with patch(
             "kaos_web.tools._fetch_html", return_value=(ARTICLE_HTML, "https://example.com")
@@ -138,6 +142,7 @@ class TestFetchPageThroughMCP:
     async def test_fetch_page_with_context(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)
         tool = runtime.tools.get_tool("kaos-web-fetch-page")
+        assert tool is not None
         context = KaosContext.create(session_id="test", runtime=runtime)
 
         with patch(

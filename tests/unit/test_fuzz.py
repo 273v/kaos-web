@@ -96,8 +96,9 @@ class TestInvariants:
                     _check_inlines(child.children)
 
         for block in doc.body:
-            if hasattr(block, "children"):
-                _check_inlines(block.children)
+            children = getattr(block, "children", ())
+            if children:
+                _check_inlines(children)
 
     def test_images_have_src(self, html_fixture: tuple[str, str]) -> None:
         html, name = html_fixture
@@ -111,8 +112,9 @@ class TestInvariants:
                     _check_images(child.children)
 
         for block in doc.body:
-            if hasattr(block, "children"):
-                _check_images(block.children)
+            children = getattr(block, "children", ())
+            if children:
+                _check_images(children)
 
     def test_lists_have_items(self, html_fixture: tuple[str, str]) -> None:
         html, name = html_fixture

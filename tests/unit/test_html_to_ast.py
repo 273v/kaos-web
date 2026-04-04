@@ -63,6 +63,7 @@ class TestBasicExtraction:
         html = '<p><a href="https://example.com">Click here</a></p>'
         doc = html_to_document(html, extract_content=False)
         para = doc.body[0]
+        assert isinstance(para, Paragraph)
         links = [c for c in para.children if isinstance(c, Link)]
         assert len(links) == 1
         assert links[0].url == "https://example.com"
@@ -71,6 +72,7 @@ class TestBasicExtraction:
         html = '<p><img src="/photo.jpg" alt="A photo"></p>'
         doc = html_to_document(html, url="https://example.com", extract_content=False)
         para = doc.body[0]
+        assert isinstance(para, Paragraph)
         images = [c for c in para.children if isinstance(c, Image)]
         assert len(images) == 1
         assert images[0].src == "https://example.com/photo.jpg"
@@ -174,6 +176,7 @@ class TestURLHandling:
         html = '<p><a href="/about">About</a></p>'
         doc = html_to_document(html, url="https://example.com/page", extract_content=False)
         para = doc.body[0]
+        assert isinstance(para, Paragraph)
         links = [c for c in para.children if isinstance(c, Link)]
         assert links[0].url == "https://example.com/about"
 
@@ -183,6 +186,7 @@ class TestURLHandling:
         )
         doc = html_to_document(html, extract_content=False)
         para = doc.body[0]
+        assert isinstance(para, Paragraph)
         links = [c for c in para.children if isinstance(c, Link)]
         # Only the safe link should survive
         assert len(links) == 1
@@ -192,6 +196,7 @@ class TestURLHandling:
         html = '<p><img data-src="/real.jpg" src="/placeholder.gif" alt="Test"></p>'
         doc = html_to_document(html, url="https://example.com", extract_content=False)
         para = doc.body[0]
+        assert isinstance(para, Paragraph)
         images = [c for c in para.children if isinstance(c, Image)]
         assert len(images) == 1
         assert images[0].src == "https://example.com/real.jpg"
@@ -210,7 +215,10 @@ class TestProvenance:
     def test_provenance_mime_type(self):
         html = "<p>Text</p>"
         doc = html_to_document(html, url="https://x.com", extract_content=False)
-        assert doc.body[0].provenance.source.mime_type == "text/html"
+        block = doc.body[0]
+        assert block.provenance is not None
+        assert block.provenance.source is not None
+        assert block.provenance.source.mime_type == "text/html"
 
 
 class TestEdgeCases:
