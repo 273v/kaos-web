@@ -56,9 +56,23 @@ async def _fetch_html(
         except ImportError:
             pass  # Fall back to HTTP
 
-    async with HttpClient() as client:
-        resp = await client.fetch(WebRequest(url=url))
-        return resp.html, resp.url
+    try:
+        async with HttpClient() as client:
+            resp = await client.fetch(WebRequest(url=url))
+            return resp.html, resp.url
+    except Exception as http_exc:
+        # Auto-fallback to browser on 403/bot-blocking errors
+        status = getattr(http_exc, "status_code", None)
+        if status in (403, 406):
+            try:
+                from kaos_web.clients.browser import BrowserClient
+
+                async with BrowserClient() as browser:
+                    browser_resp = await browser.fetch(WebRequest(url=url))
+                    return browser_resp.html, browser_resp.url
+            except ImportError:
+                pass  # Playwright not installed
+        raise
 
 
 class FetchPageTool(KaosTool):
