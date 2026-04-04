@@ -58,6 +58,42 @@ All config is centralised in `kaos_web.settings.KaosWebSettings` (a `ModuleSetti
 
 New `KAOS_WEB_*` prefix takes priority. Legacy env vars are supported for backward compatibility.
 
+### Search backend tuning
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAOS_WEB_SEARCH_TIMEOUT` | `30.0` | Timeout (s) for search backend API calls |
+| `KAOS_WEB_SEARCH_DDG_TIMEOUT` | `15.0` | Timeout (s) for DuckDuckGo HTML scraping |
+| `KAOS_WEB_SEARCH_DDG_USER_AGENT` | Chrome UA | User-Agent for DDG scraping |
+
+### Discovery / sitemap / crawl
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAOS_WEB_DISCOVERY_ROBOTS_TIMEOUT` | `10.0` | Timeout for robots.txt during discovery |
+| `KAOS_WEB_DISCOVERY_PAGE_TIMEOUT` | `15.0` | Timeout for start page link extraction |
+| `KAOS_WEB_SITEMAP_MAX_DEPTH` | `3` | Max recursion for sitemap indexes |
+| `KAOS_WEB_SITEMAP_FETCH_TIMEOUT` | `15.0` | Timeout per sitemap fetch |
+| `KAOS_WEB_SITEMAP_ROBOTS_TIMEOUT` | `10.0` | Timeout for robots.txt in sitemap discovery |
+| `KAOS_WEB_SITEMAP_FALLBACK_TIMEOUT` | `10.0` | Timeout for well-known sitemap probes |
+| `KAOS_WEB_CRAWL_MAX_DEPTH` | `2` | Default max crawl depth |
+| `KAOS_WEB_CRAWL_MAX_PAGES` | `50` | Default max pages per crawl |
+| `KAOS_WEB_CRAWL_CONCURRENCY` | `5` | Concurrent requests during crawl |
+| `KAOS_WEB_CRAWL_PAGE_TIMEOUT` | `30.0` | Timeout per page during crawl |
+| `KAOS_WEB_CRAWL_ENABLE_CACHE` | `true` | HTTP cache during crawl |
+| `KAOS_WEB_CRAWL_OVER_DISCOVER_FACTOR` | `3` | Over-discover multiplier |
+
+### Middleware defaults
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAOS_WEB_MIDDLEWARE_RETRY_MAX_RETRIES` | `3` | Max retry attempts |
+| `KAOS_WEB_MIDDLEWARE_RETRY_INITIAL_DELAY` | `1.0` | Initial backoff delay (s) |
+| `KAOS_WEB_MIDDLEWARE_RETRY_MAX_DELAY` | `60.0` | Max backoff delay (s) |
+| `KAOS_WEB_MIDDLEWARE_RATE_LIMIT_RPS` | `10.0` | Requests per second |
+| `KAOS_WEB_MIDDLEWARE_ROBOTS_USER_AGENT` | `KAOS-Web` | User agent for robots.txt |
+| `KAOS_WEB_MIDDLEWARE_ROBOTS_CACHE_TTL` | `3600` | Robots.txt cache TTL (s) |
+| `KAOS_WEB_MIDDLEWARE_ROBOTS_FETCH_TIMEOUT` | `10.0` | Timeout for robots.txt fetch |
+
+KaosWebSettings provides `to_retry_config()`, `to_rate_limit_config()`, `to_robots_config()` builder methods for middleware config objects.
+
 ### Auto-detection logic
 Browser channel: `_detect_browser_channel()` in `kaos_web.settings` auto-detects system Chrome on Linux. Search backend: auto-detects from configured API keys (serpapi → exa → brave → duckduckgo).
 

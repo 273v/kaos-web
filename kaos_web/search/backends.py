@@ -106,7 +106,7 @@ async def _dispatch(
     if backend == "serpapi":
         return await _search_serpapi(query, max_results=max_results, settings=settings)
     if backend == "duckduckgo":
-        return await _search_duckduckgo(query, max_results=max_results)
+        return await _search_duckduckgo(query, max_results=max_results, settings=settings)
     if backend == "exa":
         return await _search_exa(query, max_results=max_results, settings=settings)
     if backend == "brave":
@@ -137,7 +137,7 @@ async def _search_serpapi(
         msg = "SERPAPI_API_KEY not set. Get a key at https://serpapi.com/manage-api-key"
         raise ValueError(msg)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=s.search_timeout) as client:
         resp = await client.get(
             "https://serpapi.com/search",
             params={
@@ -208,20 +208,19 @@ async def _search_duckduckgo(
     query: str,
     *,
     max_results: int = 10,
+    settings: KaosWebSettings | None = None,
 ) -> list[SearchResult]:
     """Search via DuckDuckGo HTML endpoint.
 
     No auth needed. Rate-limited by IP. No guarantees on availability.
     Parses HTML results from html.duckduckgo.com/html/.
     """
+    s = _get_settings(settings)
     async with httpx.AsyncClient(
-        timeout=15.0,
+        timeout=s.search_ddg_timeout,
         follow_redirects=True,
         headers={
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            ),
+            "User-Agent": s.search_ddg_user_agent,
             "Referer": "https://html.duckduckgo.com/",
         },
     ) as client:
@@ -322,7 +321,7 @@ async def _search_exa(
         msg = "EXA_API_KEY not set. Get a key at https://dashboard.exa.ai/api-keys"
         raise ValueError(msg)
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=s.search_timeout) as client:
         resp = await client.post(
             "https://api.exa.ai/search",
             json={
@@ -386,7 +385,7 @@ async def _search_brave(
         msg = "BRAVE_API_KEY not set. Get a key at https://brave.com/search/api/"
         raise ValueError(msg)
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=s.search_timeout) as client:
         resp = await client.get(
             "https://api.search.brave.com/res/v1/web/search",
             params={"q": query, "count": min(max_results, 20)},

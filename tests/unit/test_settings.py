@@ -155,3 +155,84 @@ class TestDetectSearchBackend:
         monkeypatch.setenv("BRAVE_API_KEY", "key2")
         s = KaosWebSettings()
         assert s.detect_search_backend() == "serpapi"
+
+
+class TestSearchBackendSettings:
+    def test_defaults(self) -> None:
+        s = KaosWebSettings()
+        assert s.search_timeout == 30.0
+        assert s.search_ddg_timeout == 15.0
+        assert "Mozilla" in s.search_ddg_user_agent
+
+    def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAOS_WEB_SEARCH_TIMEOUT", "60.0")
+        s = KaosWebSettings()
+        assert s.search_timeout == 60.0
+
+
+class TestDiscoverySettings:
+    def test_defaults(self) -> None:
+        s = KaosWebSettings()
+        assert s.discovery_robots_timeout == 10.0
+        assert s.discovery_page_timeout == 15.0
+
+    def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAOS_WEB_DISCOVERY_ROBOTS_TIMEOUT", "5.0")
+        s = KaosWebSettings()
+        assert s.discovery_robots_timeout == 5.0
+
+
+class TestSitemapSettings:
+    def test_defaults(self) -> None:
+        s = KaosWebSettings()
+        assert s.sitemap_max_depth == 3
+        assert s.sitemap_fetch_timeout == 15.0
+        assert s.sitemap_robots_timeout == 10.0
+        assert s.sitemap_fallback_timeout == 10.0
+
+
+class TestCrawlSettings:
+    def test_defaults(self) -> None:
+        s = KaosWebSettings()
+        assert s.crawl_max_depth == 2
+        assert s.crawl_max_pages == 50
+        assert s.crawl_concurrency == 5
+        assert s.crawl_page_timeout == 30.0
+        assert s.crawl_enable_cache is True
+        assert s.crawl_over_discover_factor == 3
+
+
+class TestMiddlewareSettings:
+    def test_defaults(self) -> None:
+        s = KaosWebSettings()
+        assert s.middleware_retry_max_retries == 3
+        assert s.middleware_retry_initial_delay == 1.0
+        assert s.middleware_retry_max_delay == 60.0
+        assert s.middleware_retry_exponential_base == 2.0
+        assert s.middleware_rate_limit_rps == 10.0
+        assert s.middleware_rate_limit_burst is None
+        assert s.middleware_robots_user_agent == "KAOS-Web"
+        assert s.middleware_robots_cache_ttl == 3600
+        assert s.middleware_robots_fetch_timeout == 10.0
+
+    def test_to_retry_config(self) -> None:
+        s = KaosWebSettings(middleware_retry_max_retries=5)
+        config = s.to_retry_config()
+        assert config.max_retries == 5
+        assert config.initial_delay == 1.0
+
+    def test_to_rate_limit_config(self) -> None:
+        s = KaosWebSettings(middleware_rate_limit_rps=5.0)
+        config = s.to_rate_limit_config()
+        assert config.requests_per_second == 5.0
+
+    def test_to_robots_config(self) -> None:
+        s = KaosWebSettings(middleware_robots_user_agent="TestBot")
+        config = s.to_robots_config()
+        assert config.user_agent == "TestBot"
+        assert config.fetch_timeout == 10.0
+
+    def test_to_robots_config_custom_timeout(self) -> None:
+        s = KaosWebSettings(middleware_robots_fetch_timeout=5.0)
+        config = s.to_robots_config()
+        assert config.fetch_timeout == 5.0

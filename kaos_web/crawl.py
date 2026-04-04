@@ -11,13 +11,16 @@ import asyncio
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 from kaos_core.logging import get_logger
 from kaos_web.clients.config import HttpClientConfig
 from kaos_web.clients.http import HttpClient
 from kaos_web.models import WebRequest, WebResponse
+
+if TYPE_CHECKING:
+    from kaos_web.settings import KaosWebSettings
 
 logger = get_logger(__name__)
 
@@ -69,6 +72,7 @@ async def crawl_site(
     exclude_patterns: list[str] | None = None,
     respect_robots: bool = True,
     client_config: HttpClientConfig | None = None,
+    settings: KaosWebSettings | None = None,
 ) -> CrawlResult:
     """Crawl a site with sitemap-first discovery.
 
@@ -93,11 +97,14 @@ async def crawl_site(
         CrawlResult with pages, errors, and statistics.
     """
     from kaos_web.discovery import _compile_patterns, _matches_patterns, discover_urls
+    from kaos_web.settings import KaosWebSettings
+
+    s = settings or KaosWebSettings()
 
     if not start_url.startswith(("http://", "https://")):
         start_url = f"https://{start_url}"
 
-    config = client_config or HttpClientConfig(enable_cache=True)
+    config = client_config or HttpClientConfig(enable_cache=s.crawl_enable_cache)
     result = CrawlResult()
     seen: set[str] = set()
     inc = _compile_patterns(include_patterns)
@@ -115,8 +122,9 @@ async def crawl_site(
             sitemap=sitemap,
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns,
-            max_urls=max_pages * 3,  # Over-discover for filtering
+            max_urls=max_pages * s.crawl_over_discover_factor,  # Over-discover for filtering
             respect_robots=respect_robots,
+            settings=s,
         )
         result.total_discovered = discovery.total
         result.sitemap_entries = discovery.sitemap_count
@@ -141,7 +149,7 @@ async def crawl_site(
         async def _crawl_one(url: str, depth: int) -> CrawlPage | None:
             async with semaphore:
                 try:
-                    resp = await client.fetch(WebRequest(url=url, timeout=30.0))
+                    resp = await client.fetch(WebRequest(url=url, timeout=s.crawl_page_timeout))
                 except Exception as exc:
                     result.errors.append(CrawlError(url=url, error=str(exc), depth=depth))
                     return None

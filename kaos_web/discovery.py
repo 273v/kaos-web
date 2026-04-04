@@ -9,12 +9,15 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 from kaos_core.logging import get_logger
 from kaos_web.models import WebRequest
 from kaos_web.sitemap import FetchFn
+
+if TYPE_CHECKING:
+    from kaos_web.settings import KaosWebSettings
 
 logger = get_logger(__name__)
 
@@ -84,6 +87,7 @@ async def discover_urls(
     exclude_patterns: list[str] | None = None,
     max_urls: int = 1000,
     respect_robots: bool = True,
+    settings: KaosWebSettings | None = None,
 ) -> DiscoveryResult:
     """Discover all URLs from a domain.
 
@@ -105,8 +109,10 @@ async def discover_urls(
     Returns:
         DiscoveryResult with deduplicated, filtered URLs.
     """
+    from kaos_web.settings import KaosWebSettings
     from kaos_web.sitemap import discover_sitemaps, parse_sitemap
 
+    s = settings or KaosWebSettings()
     result = DiscoveryResult()
     seen: set[str] = set()
 
@@ -123,7 +129,9 @@ async def discover_urls(
         try:
             from urllib.robotparser import RobotFileParser
 
-            resp = await fetch_fn(WebRequest(url=f"{base_url}/robots.txt", timeout=10.0))
+            resp = await fetch_fn(
+                WebRequest(url=f"{base_url}/robots.txt", timeout=s.discovery_robots_timeout)
+            )
             if resp.ok and resp.html:
                 robots_parser = RobotFileParser()
                 robots_parser.parse(resp.html.splitlines())
@@ -138,9 +146,9 @@ async def discover_urls(
     # Step 1-2: Sitemap discovery and parsing
     if sitemap != "skip":
         try:
-            sm_urls = await discover_sitemaps(base_domain, fetch_fn)
+            sm_urls = await discover_sitemaps(base_domain, fetch_fn, settings=s)
             for sm_url in sm_urls:
-                sm_result = await parse_sitemap(sm_url, fetch_fn)
+                sm_result = await parse_sitemap(sm_url, fetch_fn, settings=s)
                 result.errors.extend(sm_result.errors)
                 for entry in sm_result.entries:
                     if entry.url in seen:
@@ -173,7 +181,7 @@ async def discover_urls(
             from kaos_web.extract.links import extract_links
 
             start_url = url if url.startswith(("http://", "https://")) else f"https://{url}"
-            resp = await fetch_fn(WebRequest(url=start_url, timeout=15.0))
+            resp = await fetch_fn(WebRequest(url=start_url, timeout=s.discovery_page_timeout))
             if resp.ok and resp.html:
                 links = extract_links(resp.html, url=resp.url)
                 for link in links:

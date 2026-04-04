@@ -64,6 +64,58 @@ class KaosWebSettings(ModuleSettings):
     exa_api_key: SecretStr | None = None
     brave_api_key: SecretStr | None = None
 
+    # Search backend tuning
+    search_timeout: float = 30.0
+    """Default timeout (seconds) for search backend API calls."""
+    search_ddg_timeout: float = 15.0
+    """Timeout for DuckDuckGo HTML scraping (separate since it's slower)."""
+    search_ddg_user_agent: str = (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    )
+    """User-Agent string for DuckDuckGo HTML scraping."""
+
+    # Discovery
+    discovery_robots_timeout: float = 10.0
+    """Timeout for fetching robots.txt during discovery."""
+    discovery_page_timeout: float = 15.0
+    """Timeout for fetching the start page during link discovery."""
+
+    # Sitemap
+    sitemap_max_depth: int = 3
+    """Maximum recursion depth for sitemap index traversal."""
+    sitemap_fetch_timeout: float = 15.0
+    """Timeout for fetching individual sitemaps."""
+    sitemap_robots_timeout: float = 10.0
+    """Timeout for fetching robots.txt during sitemap discovery."""
+    sitemap_fallback_timeout: float = 10.0
+    """Timeout for probing well-known sitemap paths."""
+
+    # Crawl
+    crawl_max_depth: int = 2
+    """Default maximum link-following depth."""
+    crawl_max_pages: int = 50
+    """Default maximum pages to extract."""
+    crawl_concurrency: int = 5
+    """Default concurrent request limit."""
+    crawl_page_timeout: float = 30.0
+    """Timeout for fetching each page during crawl."""
+    crawl_enable_cache: bool = True
+    """Enable HTTP cache during crawl by default."""
+    crawl_over_discover_factor: int = 3
+    """Factor to multiply max_pages for over-discovery."""
+
+    # Middleware defaults
+    middleware_retry_max_retries: int = 3
+    middleware_retry_initial_delay: float = 1.0
+    middleware_retry_max_delay: float = 60.0
+    middleware_retry_exponential_base: float = 2.0
+    middleware_rate_limit_rps: float = 10.0
+    middleware_rate_limit_burst: int | None = None
+    middleware_robots_user_agent: str = "KAOS-Web"
+    middleware_robots_cache_ttl: int = 3600
+    middleware_robots_fetch_timeout: float = 10.0
+
     model_config = SettingsConfigDict(
         env_prefix="KAOS_WEB_",
         env_file=".env",
@@ -115,6 +167,36 @@ class KaosWebSettings(ModuleSettings):
             browser_type=self.browser_type,
             headless=self.browser_headless,
             channel=channel,
+        )
+
+    def to_retry_config(self) -> Any:
+        """Build a ``RetryConfig`` from middleware settings."""
+        from kaos_web.middleware.retry import RetryConfig
+
+        return RetryConfig(
+            max_retries=self.middleware_retry_max_retries,
+            initial_delay=self.middleware_retry_initial_delay,
+            max_delay=self.middleware_retry_max_delay,
+            exponential_base=self.middleware_retry_exponential_base,
+        )
+
+    def to_rate_limit_config(self) -> Any:
+        """Build a ``RateLimitConfig`` from middleware settings."""
+        from kaos_web.middleware.rate_limit import RateLimitConfig
+
+        return RateLimitConfig(
+            requests_per_second=self.middleware_rate_limit_rps,
+            burst_size=self.middleware_rate_limit_burst,
+        )
+
+    def to_robots_config(self) -> Any:
+        """Build a ``RobotsConfig`` from middleware settings."""
+        from kaos_web.middleware.robots import RobotsConfig
+
+        return RobotsConfig(
+            user_agent=self.middleware_robots_user_agent,
+            cache_ttl=self.middleware_robots_cache_ttl,
+            fetch_timeout=self.middleware_robots_fetch_timeout,
         )
 
     def get_search_api_key(self, backend: str) -> str | None:

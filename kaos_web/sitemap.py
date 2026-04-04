@@ -13,13 +13,16 @@ import gzip
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
 
 from lxml import etree  # type: ignore[unresolved-import]  # ty: ignore[unresolved-import]
 
 from kaos_core.logging import get_logger
 from kaos_web.models import WebRequest, WebResponse
+
+if TYPE_CHECKING:
+    from kaos_web.settings import KaosWebSettings
 
 logger = get_logger(__name__)
 
@@ -166,6 +169,7 @@ async def parse_sitemap(
     *,
     _depth: int = 0,
     _visited: set[str] | None = None,
+    settings: KaosWebSettings | None = None,
 ) -> SitemapResult:
     """Fetch and parse a sitemap URL (XML, text, or gzip).
 
@@ -174,10 +178,14 @@ async def parse_sitemap(
         fetch_fn: Async callable(WebRequest) -> WebResponse.
         _depth: Internal recursion depth counter.
         _visited: Internal cycle detection set.
+        settings: Optional ``KaosWebSettings`` for timeout/depth overrides.
 
     Returns:
         SitemapResult with entries, source URLs, and any errors.
     """
+    from kaos_web.settings import KaosWebSettings as _Settings
+
+    s = settings or _Settings()
 
     if _visited is None:
         _visited = set()
@@ -192,13 +200,14 @@ async def parse_sitemap(
     _visited.add(url)
 
     # Depth limit
-    if _depth > _MAX_SITEMAP_DEPTH:
-        result.errors.append(f"Max sitemap depth ({_MAX_SITEMAP_DEPTH}) exceeded at {url}")
+    max_depth = s.sitemap_max_depth
+    if _depth > max_depth:
+        result.errors.append(f"Max sitemap depth ({max_depth}) exceeded at {url}")
         return result
 
     # Fetch
     try:
-        resp = await fetch_fn(WebRequest(url=url, timeout=15.0))
+        resp = await fetch_fn(WebRequest(url=url, timeout=s.sitemap_fetch_timeout))
     except Exception as exc:
         result.errors.append(f"Failed to fetch {url}: {exc}")
         return result
@@ -224,7 +233,7 @@ async def parse_sitemap(
         # Recurse into sub-sitemaps
         for sub_url in sub_sitemaps:
             sub_result = await parse_sitemap(
-                sub_url, fetch_fn, _depth=_depth + 1, _visited=_visited
+                sub_url, fetch_fn, _depth=_depth + 1, _visited=_visited, settings=s
             )
             result.entries.extend(sub_result.entries)
             result.sitemap_urls.extend(sub_result.sitemap_urls)
@@ -238,6 +247,8 @@ async def parse_sitemap(
 async def discover_sitemaps(
     domain: str,
     fetch_fn: FetchFn,
+    *,
+    settings: KaosWebSettings | None = None,
 ) -> list[str]:
     """Discover sitemap URLs for a domain via robots.txt + well-known paths.
 
@@ -248,11 +259,16 @@ async def discover_sitemaps(
     Args:
         domain: Domain name or base URL (e.g. "example.com" or "https://example.com").
         fetch_fn: Async callable(WebRequest) -> WebResponse.
+        settings: Optional ``KaosWebSettings`` for timeout overrides.
 
     Returns:
         List of sitemap URLs found.
     """
     from urllib.robotparser import RobotFileParser
+
+    from kaos_web.settings import KaosWebSettings as _Settings
+
+    s = settings or _Settings()
 
     # Normalize domain to base URL
     if not domain.startswith(("http://", "https://")):
@@ -266,7 +282,7 @@ async def discover_sitemaps(
     # 1. Try robots.txt
     robots_url = f"{base_url}/robots.txt"
     try:
-        resp = await fetch_fn(WebRequest(url=robots_url, timeout=10.0))
+        resp = await fetch_fn(WebRequest(url=robots_url, timeout=s.sitemap_robots_timeout))
         if resp.ok and resp.html:
             parser = RobotFileParser()
             parser.parse(resp.html.splitlines())
@@ -282,7 +298,7 @@ async def discover_sitemaps(
         for path in ("/sitemap.xml", "/sitemap_index.xml"):
             candidate = urljoin(base_url, path)
             try:
-                resp = await fetch_fn(WebRequest(url=candidate, timeout=10.0))
+                resp = await fetch_fn(WebRequest(url=candidate, timeout=s.sitemap_fallback_timeout))
                 if resp.ok and resp.html and resp.html.strip():
                     sitemap_urls.append(candidate)
                     break  # First one found is sufficient

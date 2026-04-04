@@ -24,6 +24,7 @@ class RobotsConfig(BaseModel):
     enabled: bool = True
     user_agent: str = "KAOS-Web"
     cache_ttl: int = 3600
+    fetch_timeout: float = 10.0
 
 
 class _CachedRobots:
@@ -73,7 +74,7 @@ class RobotsMiddleware:
         parser = RobotFileParser(robots_url)
         try:
             # Fetch robots.txt through the handler (respects middleware below us)
-            request = WebRequest(url=robots_url, timeout=10.0)
+            request = WebRequest(url=robots_url, timeout=self.config.fetch_timeout)
             response = await handler(request)
             if response.ok and response.html:
                 parser.parse(response.html.splitlines())
