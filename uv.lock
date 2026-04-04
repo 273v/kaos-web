@@ -417,7 +417,7 @@ markdown = [
 requires-dist = [
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.0.0" },
     { name = "kaos-core", editable = "../kaos-core" },
-    { name = "kaos-nlp-core", marker = "extra == 'nlp'", specifier = ">=0.1.0" },
+    { name = "kaos-nlp-core", marker = "extra == 'nlp'", editable = "../kaos-nlp-core" },
     { name = "lxml", marker = "extra == 'html'", specifier = ">=5.0.0" },
     { name = "markdown-it-py", extras = ["plugins"], marker = "extra == 'markdown'", specifier = ">=3.0.0" },
     { name = "numpy", marker = "extra == 'images'", specifier = ">=2.0.0" },
