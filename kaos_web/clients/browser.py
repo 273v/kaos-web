@@ -15,14 +15,14 @@ Features:
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Never, Self
 
+from kaos_core.logging import get_logger
 from kaos_web.clients.config import BrowserClientConfig
 from kaos_web.errors import WebBrowserError, WebNetworkError, WebTimeoutError
 from kaos_web.models import WebRequest, WebResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class BrowserClient:

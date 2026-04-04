@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 
 from pydantic import BaseModel, ConfigDict
 
+from kaos_core.logging import get_logger
 from kaos_web.errors import WebError, WebRateLimitError
 from kaos_web.middleware.base import Handler
 from kaos_web.models import WebRequest, WebResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class RetryConfig(BaseModel):

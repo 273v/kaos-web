@@ -6,17 +6,17 @@ sitemaps and page links, ``skip`` ignores sitemaps entirely, ``only`` uses only 
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 from urllib.parse import urlparse
 
+from kaos_core.logging import get_logger
 from kaos_web.models import WebRequest
 from kaos_web.sitemap import FetchFn
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)

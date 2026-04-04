@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import ssl
 from typing import Self
 
 import httpx
 
+from kaos_core.logging import get_logger
 from kaos_web.clients.config import HttpClientConfig
 from kaos_web.errors import (
     WebClientError,
@@ -20,7 +20,7 @@ from kaos_web.errors import (
 )
 from kaos_web.models import WebRequest, WebResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class HttpClient:

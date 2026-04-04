@@ -7,15 +7,15 @@ Concurrency controlled via asyncio.Semaphore.
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from dataclasses import dataclass, field
 
+from kaos_core.logging import get_logger
 from kaos_web.clients.config import HttpClientConfig
 from kaos_web.clients.http import HttpClient
 from kaos_web.models import WebRequest, WebResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)

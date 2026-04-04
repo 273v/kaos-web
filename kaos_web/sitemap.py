@@ -10,7 +10,6 @@ Uses lxml (already a dependency) and stdlib gzip. No third-party sitemap library
 from __future__ import annotations
 
 import gzip
-import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -19,9 +18,10 @@ from urllib.parse import urljoin, urlparse
 
 from lxml import etree  # type: ignore[unresolved-import]  # ty: ignore[unresolved-import]
 
+from kaos_core.logging import get_logger
 from kaos_web.models import WebRequest, WebResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Type alias for the async fetch function
 FetchFn = Callable[[WebRequest], Coroutine[Any, Any, WebResponse]]

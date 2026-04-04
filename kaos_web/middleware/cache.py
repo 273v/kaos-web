@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -18,10 +17,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from kaos_core.logging import get_logger
 from kaos_web.middleware.base import Handler
 from kaos_web.models import WebRequest, WebResponse
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # RFC 7231 Section 6.1: status codes that are cacheable by default
 _CACHEABLE_STATUS_CODES = frozenset({200, 203, 204, 206, 300, 301, 404, 405, 410, 414, 501})
