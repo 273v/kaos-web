@@ -234,9 +234,10 @@ async def _search_duckduckgo(
         parser = etree.HTMLParser()
         tree = etree.fromstring(html.encode(), parser)
 
-        # Each result is in a div.result
-        for i, result_div in enumerate(tree.xpath("//div[contains(@class, 'result')]")):
-            if i >= max_results:
+        # Each result is in a div.result — deduplicate by URL
+        seen_urls: set[str] = set()
+        for result_div in tree.xpath("//div[contains(@class, 'result')]"):
+            if len(results) >= max_results:
                 break
 
             # Title + URL
@@ -246,6 +247,11 @@ async def _search_duckduckgo(
             link_el = link_els[0]
             title = "".join(link_el.itertext()).strip()
             href = link_el.get("href", "")
+
+            # Skip duplicates
+            if href in seen_urls:
+                continue
+            seen_urls.add(href)
 
             # Snippet
             snippet_els = result_div.xpath(".//a[contains(@class, 'result__snippet')]")
@@ -262,7 +268,7 @@ async def _search_duckduckgo(
                     url=href,
                     snippet=snippet,
                     source="duckduckgo",
-                    position=i + 1,
+                    position=len(results) + 1,
                 )
             )
     except ImportError:
@@ -279,7 +285,7 @@ async def _search_duckduckgo(
                     url=href,
                     snippet=snippet,
                     source="duckduckgo",
-                    position=i + 1,
+                    position=len(results) + 1,
                 )
             )
 
@@ -328,7 +334,7 @@ async def _search_exa(
         data = resp.json()
 
     results: list[SearchResult] = []
-    for i, item in enumerate(data.get("results", [])):
+    for _i, item in enumerate(data.get("results", [])):
         # Build snippet from highlights or title
         highlights = item.get("highlights", [])
         snippet = highlights[0] if highlights else ""
@@ -339,7 +345,7 @@ async def _search_exa(
                 url=item.get("url", ""),
                 snippet=snippet,
                 source="exa",
-                position=i + 1,
+                position=len(results) + 1,
                 extra={
                     k: v for k, v in item.items() if k not in ("title", "url", "highlights") and v
                 },
@@ -384,14 +390,14 @@ async def _search_brave(
         data = resp.json()
 
     results: list[SearchResult] = []
-    for i, item in enumerate(data.get("web", {}).get("results", [])):
+    for _i, item in enumerate(data.get("web", {}).get("results", [])):
         results.append(
             SearchResult(
                 title=item.get("title", ""),
                 url=item.get("url", ""),
                 snippet=item.get("description", ""),
                 source="brave",
-                position=i + 1,
+                position=len(results) + 1,
             )
         )
 
