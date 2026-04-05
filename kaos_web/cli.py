@@ -18,6 +18,12 @@ def main(argv: list[str] | None = None) -> None:
     p_extract.add_argument("source", help="URL or path to HTML file")
     p_extract.add_argument("--format", choices=["markdown", "text", "json"], default="markdown")
     p_extract.add_argument("--no-readability", action="store_true", help="Skip readability")
+    p_extract.add_argument(
+        "--content-scope",
+        type=float,
+        default=0.5,
+        help="Extraction breadth 0.0 (strict) to 1.0 (permissive). Default 0.5.",
+    )
     p_extract.add_argument("--output", "-o", type=Path, help="Output file")
     p_extract.add_argument("--json", action="store_true", help="Structured JSON output")
 
@@ -109,7 +115,12 @@ def _cmd_extract(args: argparse.Namespace) -> None:
     from kaos_web.extract import html_to_document
 
     html, url = _get_html(args.source)
-    doc = html_to_document(html, url=url, extract_content=not args.no_readability)
+    doc = html_to_document(
+        html,
+        url=url,
+        extract_content=not args.no_readability,
+        content_scope=args.content_scope,
+    )
 
     if args.json:
         _json_out(

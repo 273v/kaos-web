@@ -438,7 +438,10 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
         return None
 
     content_scope = max(0.0, min(1.0, content_scope))
-    threshold = 1.0 - content_scope
+    # Clamp threshold: sigmoid output is always in (0, 1), so threshold=1.0
+    # would filter everything. Cap at 0.95 so strict mode still selects
+    # the highest-confidence content rather than falling back to full body.
+    threshold = min(1.0 - content_scope, 0.95)
 
     try:
         doc = lxml_html.document_fromstring(html)
