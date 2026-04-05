@@ -26,7 +26,7 @@ Key modules:
 - `extract/metadata.py` — JSON-LD, OpenGraph, and meta tag extraction
 - `middleware/` — Composable chain: retry, rate_limit, robots, cache
 - `tools.py` — 5 extraction MCP tools registered with KaosRuntime
-- `browser_tools.py` — 18 browser interaction MCP tools (navigate, click, fill, type, press, select, screenshot, evaluate, snapshot, content, cookies, set-cookie, save-auth, log-requests, requests, get-request, list-contexts, close-context)
+- `browser_tools.py` — 19 browser interaction MCP tools (navigate, click, fill, type, press, select, screenshot, evaluate, snapshot, content, cookies, set-cookie, save-auth, log-requests, requests, get-request, captured-responses, list-contexts, close-context)
 - `sitemap.py` — Sitemap parser (XML/text/gzip, index recursion, robots.txt discovery)
 - `discovery.py` — URL discovery pipeline (sitemaps + page links, pattern filtering)
 - `batch.py` — Concurrent URL fetching with asyncio.Semaphore
@@ -134,6 +134,7 @@ async with BrowserClient(BrowserClientConfig(channel="chrome")) as client:
 - **Lazy imports**: Heavy dependencies (playwright, kaos-content serializers) are imported inside handlers, not at module level, keeping `--help` fast.
 - **Search lives in kaos-content**: `kaos_content.search.search_document()` is the canonical search. Never import search from kaos-pdf or duplicate it. All extraction modules share the same search.
 - **Middleware wired in HttpClient**: `HttpClient.fetch()` routes through `MiddlewareChain` (retry → rate_limit → robots → cache → raw httpx). Config flags control which middleware are active. Unit tests use `_NO_MIDDLEWARE` config to avoid mock interference.
+- **Response body capture**: `enable_request_logging(context_id, capture_bodies=True)` captures response bodies for fetch/xhr requests with text-like content types (JSON, HTML, XML, text, CSV). Bodies stored in `_response_bodies[context_id][request_id]`. 1MB default size limit. Logging config stored in `_logging_config` — handlers are automatically re-attached when `fetch()` replaces a page in a named context. Logs accumulate across navigations.
 - **Browser context pooling**: Named contexts via `request.extra["context_id"]` persist pages and cookies across requests. Unnamed requests get isolated context-per-request. `close_context(id)` to clean up explicitly.
 - **Browser page tracking**: Named contexts store active pages in `_pages` dict, enabling multi-step interaction (navigate → click → fill → screenshot). `_require_page()` raises agent-friendly errors with active context list.
 - **Operation-aware errors**: `_raise_browser_error(exc, url, operation)` includes the operation type (click, fill, type, etc.) in timeout messages so agents can self-correct.
@@ -151,7 +152,7 @@ The `html_to_document()` function walks an lxml element tree and produces `Conte
 `kaos-web-serve [--browser] [--crawl] [--http] [--host HOST] [--port PORT] [--debug]`
 
 - Core 7 extraction tools are always registered
-- `--browser` — Also register 18 browser interaction tools
+- `--browser` — Also register 19 browser interaction tools
 - `--crawl` — Also register 3 crawl/discovery tools
 - CLI: `kaos-web serve` delegates to `kaos_web.serve:main()`
 - Also available via: `kaos-mcp serve --module web`
@@ -173,7 +174,7 @@ FetchPage, GetText, GetMarkdown support `raw=true` to skip readability and retur
 | GetPageLinksTool | `kaos-web-get-links` | Extract all links with classification (nav/content/social/download) |
 | GetPageImagesTool | `kaos-web-get-images` | Extract all images with classification (content/decorative/icon/tracking) |
 
-### Browser interaction tools (18) — `browser_tools.py`
+### Browser interaction tools (19) — `browser_tools.py`
 
 Write tools use `readOnlyHint=False`, `destructiveHint=False`, `openWorldHint=True`.
 Read tools use `readOnlyHint=True`, `openWorldHint=True`.
@@ -193,9 +194,10 @@ Read tools use `readOnlyHint=True`, `openWorldHint=True`.
 | GetCookiesTool | `kaos-web-browser-cookies` | List cookies for context |
 | SetCookieTool | `kaos-web-browser-set-cookie` | Set a cookie (name, value, domain/url) |
 | SaveAuthStateTool | `kaos-web-browser-save-auth` | Save context state to JSON file |
-| EnableRequestLoggingTool | `kaos-web-browser-log-requests` | Start recording network requests |
-| ListRequestsTool | `kaos-web-browser-requests` | List recorded network requests with filter |
-| GetRequestDetailTool | `kaos-web-browser-get-request` | Full request/response detail by ID |
+| EnableRequestLoggingTool | `kaos-web-browser-log-requests` | Start recording network requests, optionally capture response bodies |
+| ListRequestsTool | `kaos-web-browser-requests` | List recorded network requests with filter, shows `has_body` indicator |
+| GetRequestDetailTool | `kaos-web-browser-get-request` | Full request/response detail by ID, includes decoded body if captured |
+| ListCapturedResponsesTool | `kaos-web-browser-captured-responses` | List responses with captured bodies, optionally store as session artifacts |
 | ListContextsTool | `kaos-web-browser-list-contexts` | List active browser contexts |
 | CloseContextTool | `kaos-web-browser-close-context` | Close context and free resources |
 
@@ -266,11 +268,13 @@ Skip in CI: `pytest -m "not integration"`
 5. `kaos-web-browser-close-context` — clean up when done
 
 ### API endpoint discovery (find backend JSON APIs behind a web app)
-1. `kaos-web-browser-log-requests` — enable request logging FIRST (set `context_id`)
-2. `kaos-web-browser-navigate` — load the page
-3. Interact with the page (click, fill, navigate) to trigger API calls
-4. `kaos-web-browser-requests` with `resource_type: "fetch"` — list XHR/fetch API calls
-5. `kaos-web-browser-get-request` — get full request/response detail (headers, JSON body)
+1. `kaos-web-browser-navigate` — open the page in a persistent context
+2. `kaos-web-browser-log-requests` with `capture_bodies: true` — enable request logging with body capture
+3. `kaos-web-browser-navigate` — navigate to the target page (logging survives page replacement)
+4. Interact with the page (click, fill) to trigger additional API calls
+5. `kaos-web-browser-requests` with `resource_type: "fetch"` — list API calls (`has_body` shows which have bodies)
+6. `kaos-web-browser-get-request` — get full detail with decoded JSON body
+7. `kaos-web-browser-captured-responses` with `store_artifacts: true` — persist JSON responses as session artifacts
 
 ### Site crawling (discover and extract all pages)
 1. `kaos-web-discover-urls` — fast URL inventory via sitemaps + page links

@@ -194,6 +194,14 @@ class BrowserClient:
             page = await context.new_page()
             page_stored = False
 
+            # Re-attach logging handlers if logging was enabled for this context
+            if (
+                context_id
+                and hasattr(self, "_logging_config")
+                and context_id in self._logging_config
+            ):
+                self._attach_logging_handlers(context_id, page)
+
             try:
                 # Navigate
                 wait_until = request.extra.get("wait_until", self._config.default_wait_until)
@@ -534,47 +542,19 @@ class BrowserClient:
 
     # ── Network monitoring ──
 
-    async def enable_request_logging(
-        self,
-        context_id: str,
-        *,
-        capture_bodies: bool = False,
-        resource_types: frozenset[str] | None = None,
-        max_body_size: int = _DEFAULT_MAX_BODY_SIZE,
-    ) -> None:
-        """Start recording network requests for a named context.
+    def _attach_logging_handlers(self, context_id: str, page: Any) -> None:
+        """Attach request/response logging handlers to a page.
 
-        Must be called before navigation to capture all requests.
-        Results are stored in ``_request_logs[context_id]``.
-
-        Args:
-            context_id: Named browser context.
-            capture_bodies: Also capture response bodies for matching requests.
-            resource_types: Resource types to capture bodies for (default: fetch, xhr).
-            max_body_size: Maximum body size in bytes (default: 1 MB).
+        Uses the existing ``_request_logs[context_id]`` list and
+        ``_response_bodies[context_id]`` dict (if body capture is enabled).
+        Called by :meth:`enable_request_logging` and by :meth:`fetch` when
+        a page is replaced in a context that already has logging enabled.
         """
-        if context_id not in self._contexts:
-            raise WebBrowserError(
-                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
-                url="",
-                retryable=False,
-            )
-        page = self._require_page(context_id)
-
-        # Initialize log storage
-        if not hasattr(self, "_request_logs"):
-            self._request_logs: dict[str, list[dict]] = {}
-        self._request_logs[context_id] = []
-
         log = self._request_logs[context_id]
-
-        # Initialize body storage when capture is enabled
-        if capture_bodies:
-            if not hasattr(self, "_response_bodies"):
-                self._response_bodies: dict[str, dict[int, dict[str, Any]]] = {}
-            self._response_bodies[context_id] = {}
-
-        capture_resource_types = resource_types or _DEFAULT_CAPTURE_RESOURCE_TYPES
+        config = self._logging_config[context_id]
+        capture_bodies: bool = config["capture_bodies"]
+        capture_resource_types: frozenset[str] = config["resource_types"]
+        max_body_size: int = config["max_body_size"]
         capture_ct_prefixes = _DEFAULT_CAPTURE_CONTENT_TYPES
 
         def _on_request(request: Any) -> None:
@@ -665,6 +645,58 @@ class BrowserClient:
         page.on("request", _on_request)
         page.on("response", _on_response)
 
+    async def enable_request_logging(
+        self,
+        context_id: str,
+        *,
+        capture_bodies: bool = False,
+        resource_types: frozenset[str] | None = None,
+        max_body_size: int = _DEFAULT_MAX_BODY_SIZE,
+    ) -> None:
+        """Start recording network requests for a named context.
+
+        Logging survives page replacement — when :meth:`fetch` creates a
+        new page for this context, handlers are automatically re-attached
+        and logs accumulate across navigations.
+
+        Args:
+            context_id: Named browser context.
+            capture_bodies: Also capture response bodies for matching requests.
+            resource_types: Resource types to capture bodies for (default: fetch, xhr).
+            max_body_size: Maximum body size in bytes (default: 1 MB).
+        """
+        if context_id not in self._contexts:
+            raise WebBrowserError(
+                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
+                url="",
+                retryable=False,
+            )
+        page = self._require_page(context_id)
+
+        resolved_resource_types = resource_types or _DEFAULT_CAPTURE_RESOURCE_TYPES
+
+        # Store config so fetch() can re-attach handlers on page replacement
+        if not hasattr(self, "_logging_config"):
+            self._logging_config: dict[str, dict[str, Any]] = {}
+        self._logging_config[context_id] = {
+            "capture_bodies": capture_bodies,
+            "resource_types": resolved_resource_types,
+            "max_body_size": max_body_size,
+        }
+
+        # Initialize log storage
+        if not hasattr(self, "_request_logs"):
+            self._request_logs: dict[str, list[dict]] = {}
+        self._request_logs[context_id] = []
+
+        # Initialize body storage when capture is enabled
+        if capture_bodies:
+            if not hasattr(self, "_response_bodies"):
+                self._response_bodies: dict[str, dict[int, dict[str, Any]]] = {}
+            self._response_bodies[context_id] = {}
+
+        self._attach_logging_handlers(context_id, page)
+
     async def get_request_log(self, context_id: str) -> list[dict]:
         """Get recorded network requests for a context."""
         if not hasattr(self, "_request_logs"):
@@ -746,6 +778,8 @@ class BrowserClient:
             self._request_logs.pop(context_id, None)
         if hasattr(self, "_response_bodies"):
             self._response_bodies.pop(context_id, None)
+        if hasattr(self, "_logging_config"):
+            self._logging_config.pop(context_id, None)
 
     async def close(self) -> None:
         """Release browser resources including all named contexts and pages."""
@@ -759,6 +793,8 @@ class BrowserClient:
             self._request_logs.clear()
         if hasattr(self, "_response_bodies"):
             self._response_bodies.clear()
+        if hasattr(self, "_logging_config"):
+            self._logging_config.clear()
         if self._browser:
             await self._browser.close()
             self._browser = None

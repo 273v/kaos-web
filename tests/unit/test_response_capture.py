@@ -516,19 +516,145 @@ class TestResponseCleanup:
         """close_context removes response bodies for that context."""
         client, _page = _setup_client_with_context()
         client._response_bodies = {"s1": {0: {"body": b"data"}}}
+        client._logging_config = {"s1": {"capture_bodies": True}}
         await client.close_context("s1")
         assert "s1" not in client._response_bodies
+        assert "s1" not in client._logging_config
 
     @pytest.mark.asyncio
     async def test_close_clears_all_bodies(self):
-        """close() clears all response bodies."""
+        """close() clears all response bodies and logging config."""
         client = BrowserClient()
         client._response_bodies = {
             "s1": {0: {"body": b"a"}},
             "s2": {0: {"body": b"b"}},
         }
+        client._logging_config = {"s1": {}, "s2": {}}
         await client.close()
         assert client._response_bodies == {}
+        assert client._logging_config == {}
+
+
+# ---------------------------------------------------------------------------
+# Tests — Page replacement re-attachment
+# ---------------------------------------------------------------------------
+
+
+class TestLoggingHookReattachment:
+    """Verify logging hooks survive page replacement in fetch()."""
+
+    @pytest.mark.asyncio
+    async def test_logging_config_stored(self):
+        """enable_request_logging stores config for re-attachment."""
+        client, _page = _setup_client_with_context()
+        await client.enable_request_logging("s1", capture_bodies=True)
+        assert hasattr(client, "_logging_config")
+        assert "s1" in client._logging_config
+        cfg = client._logging_config["s1"]
+        assert cfg["capture_bodies"] is True
+        assert "fetch" in cfg["resource_types"]
+
+    @pytest.mark.asyncio
+    async def test_fetch_reattaches_handlers(self):
+        """fetch() re-attaches logging handlers when replacing a page."""
+        client, page = _setup_client_with_context()
+
+        # Enable logging — handlers attached to first page
+        await client.enable_request_logging("s1", capture_bodies=True)
+        assert page.on.call_count == 2  # request + response
+
+        # Simulate fetch() creating a new page
+        new_page = _mock_page("https://example.com/people")
+        new_ctx = client._contexts["s1"]
+        new_ctx.new_page = AsyncMock(return_value=new_page)
+
+        # Mock goto response
+        goto_response = AsyncMock()
+        goto_response.status = 200
+        goto_response.headers = {"content-type": "text/html"}
+        new_page.goto = AsyncMock(return_value=goto_response)
+        new_page.content = AsyncMock(return_value="<html></html>")
+        new_page.title = AsyncMock(return_value="People")
+
+        from kaos_web.models import WebRequest
+
+        await client.fetch(WebRequest(url="https://example.com/people", extra={"context_id": "s1"}))
+
+        # New page should have handlers re-attached
+        assert new_page.on.call_count == 2  # request + response on new page
+
+    @pytest.mark.asyncio
+    async def test_logs_accumulate_across_navigations(self):
+        """Logs from both pages accumulate in the same list."""
+        client, page = _setup_client_with_context()
+        await client.enable_request_logging("s1")
+
+        # Simulate a request on the first page
+        request_handler = page.on.call_args_list[0][0][1]
+        mock_req = MagicMock()
+        mock_req.url = "https://example.com/page1"
+        mock_req.method = "GET"
+        mock_req.resource_type = "document"
+        mock_req.headers = {}
+        mock_req.post_data = None
+        mock_req.is_navigation_request = MagicMock(return_value=True)
+        request_handler(mock_req)
+
+        assert len(client._request_logs["s1"]) == 1
+
+        # Simulate fetch() replacing the page
+        new_page = _mock_page("https://example.com/page2")
+        new_ctx = client._contexts["s1"]
+        new_ctx.new_page = AsyncMock(return_value=new_page)
+        goto_response = AsyncMock()
+        goto_response.status = 200
+        goto_response.headers = {"content-type": "text/html"}
+        new_page.goto = AsyncMock(return_value=goto_response)
+        new_page.content = AsyncMock(return_value="<html></html>")
+        new_page.title = AsyncMock(return_value="Page 2")
+
+        from kaos_web.models import WebRequest
+
+        await client.fetch(WebRequest(url="https://example.com/page2", extra={"context_id": "s1"}))
+
+        # Simulate a request on the new page
+        new_request_handler = new_page.on.call_args_list[0][0][1]
+        mock_req2 = MagicMock()
+        mock_req2.url = "https://example.com/api/data"
+        mock_req2.method = "GET"
+        mock_req2.resource_type = "fetch"
+        mock_req2.headers = {}
+        mock_req2.post_data = None
+        mock_req2.is_navigation_request = MagicMock(return_value=False)
+        new_request_handler(mock_req2)
+
+        # Both requests should be in the same log
+        assert len(client._request_logs["s1"]) == 2
+        assert client._request_logs["s1"][0]["url"] == "https://example.com/page1"
+        assert client._request_logs["s1"][1]["url"] == "https://example.com/api/data"
+
+    @pytest.mark.asyncio
+    async def test_fetch_without_logging_does_not_attach(self):
+        """fetch() does not attach handlers when logging was not enabled."""
+        client, _page = _setup_client_with_context()
+
+        # No enable_request_logging call
+        new_page = _mock_page("https://example.com/page")
+        new_ctx = client._contexts["s1"]
+        new_ctx.new_page = AsyncMock(return_value=new_page)
+        goto_response = AsyncMock()
+        goto_response.status = 200
+        goto_response.headers = {"content-type": "text/html"}
+        new_page.goto = AsyncMock(return_value=goto_response)
+        new_page.content = AsyncMock(return_value="<html></html>")
+        new_page.title = AsyncMock(return_value="Page")
+
+        from kaos_web.models import WebRequest
+
+        await client.fetch(WebRequest(url="https://example.com/page", extra={"context_id": "s1"}))
+
+        # No handlers should be attached
+        new_page.on.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -579,6 +705,7 @@ class TestEnableRequestLoggingToolCapture:
                     "capture_bodies": True,
                 }
             )
+            assert result.structuredContent is not None
             msg = result.structuredContent["message"]
             assert "Body capture active" in msg
             assert "captured-responses" in msg
@@ -617,6 +744,7 @@ class TestListRequestsToolHasBody:
 
             result = await tool.execute({"context_id": "s1"})
             assert not result.isError
+            assert result.structuredContent is not None
             output = result.structuredContent
             assert output["requests"][0]["has_body"] is True
             assert output["requests"][0]["body_size"] == 1234
@@ -652,6 +780,7 @@ class TestGetRequestDetailToolBody:
 
             result = await tool.execute({"context_id": "s1", "request_id": 0})
             assert not result.isError
+            assert result.structuredContent is not None
             output = result.structuredContent
             assert output["body"] == '{"people": []}'
             assert "body_encoding" not in output
@@ -684,6 +813,7 @@ class TestGetRequestDetailToolBody:
 
             result = await tool.execute({"context_id": "s1", "request_id": 0})
             assert not result.isError
+            assert result.structuredContent is not None
             output = result.structuredContent
             assert output["body_encoding"] == "base64"
 
@@ -746,6 +876,7 @@ class TestListCapturedResponsesTool:
 
             result = await tool.execute({"context_id": "s1"})
             assert not result.isError
+            assert result.structuredContent is not None
             msg = result.structuredContent["message"]
             assert "No captured response bodies" in msg
             assert "capture_bodies=true" in msg
@@ -776,6 +907,7 @@ class TestListCapturedResponsesTool:
 
             result = await tool.execute({"context_id": "s1"})
             assert not result.isError
+            assert result.structuredContent is not None
             output = result.structuredContent
             assert output["total_captured"] == 1
             assert output["responses"][0]["url"] == "https://api.example.com/people"
@@ -810,6 +942,7 @@ class TestListCapturedResponsesTool:
                 context=None,
             )
             assert not result.isError
+            assert result.structuredContent is not None
             output = result.structuredContent
             assert output["total_captured"] == 1
             assert "artifacts_created" not in output
@@ -877,6 +1010,7 @@ class TestListCapturedResponsesTool:
             assert call_kwargs["mime_type"] == "application/json"
             assert call_kwargs["session_id"] == "test-session"
 
+            assert result.structuredContent is not None
             output = result.structuredContent
             assert output["artifacts_created"] == 1
             assert output["artifacts"][0]["artifact_id"] == "art-123"
