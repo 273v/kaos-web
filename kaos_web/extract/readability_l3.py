@@ -438,10 +438,6 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
         return None
 
     content_scope = max(0.0, min(1.0, content_scope))
-    # Clamp threshold: sigmoid output is always in (0, 1), so threshold=1.0
-    # would filter everything. Cap at 0.95 so strict mode still selects
-    # the highest-confidence content rather than falling back to full body.
-    threshold = min(1.0 - content_scope, 0.95)
 
     try:
         doc = lxml_html.document_fromstring(html)
@@ -489,11 +485,18 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
     # For each high-scoring leaf element, propagate its contribution to parent
     # and grandparent containers. This selects the container that wraps the most
     # content by volume, not the element with the highest individual score.
+    #
+    # Container selection is scope-INDEPENDENT — we always identify the same
+    # content region. content_scope only affects sibling breadth (Step 5).
     container_scores: dict[int, float] = {}
     container_map: dict[int, HtmlElement] = {}
 
+    # Use a fixed content threshold (0.5) for container accumulation so that
+    # the core content region is identified consistently regardless of scope.
+    content_threshold = 0.5
+
     for el, score in scored:
-        if score < threshold:
+        if score < content_threshold:
             continue
 
         # Weight by text length so large paragraphs contribute more than
@@ -529,13 +532,50 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
     if best_el is None:
         return body if _inner_text_length(body) > 50 else None
 
-    # Step 5: Collect qualifying siblings of the best element.
+    # Step 5: Scope-dependent sibling inclusion.
+    #
+    # content_scope controls how much content AROUND the best region to include:
+    #   0.0 (strict)    — best container only, no siblings
+    #   0.3             — siblings must score > 40% of best (very selective)
+    #   0.5 (default)   — siblings must score > 20% of best
+    #   0.8             — siblings must score > 5% of best (generous)
+    #   1.0 (permissive)— walk up to parent, return entire parent element
+
+    # At maximum scope, return the parent directly (broadest extraction).
+    if content_scope >= 0.95:
+        parent = best_el.getparent()
+        return parent if parent is not None and parent.tag != "body" else best_el
+
+    # At minimum scope, return just the best container (no siblings).
+    if content_scope <= 0.05:
+        return best_el
+
+    # Middle range: collect siblings based on their content quality.
+    # Score each sibling by aggregating per-node scores of its descendants,
+    # then apply a scope-dependent threshold relative to the best container.
     parent = best_el.getparent()
     if parent is None:
         return best_el
 
-    # Sibling inclusion threshold: 20% of best score, minimum 10
-    sib_threshold = max(10.0, best_aggregate * 0.2)
+    # Build per-element score map from the scored candidates.
+    node_scores: dict[int, float] = {id(el): s for el, s in scored}
+
+    def _subtree_content_score(el: HtmlElement) -> float:
+        """Sum of (score * log1p(text_len)) for high-scoring descendants."""
+        total = 0.0
+        for desc in el.iter():
+            if not isinstance(desc.tag, str):
+                continue
+            nid = id(desc)
+            s = node_scores.get(nid, 0.0)
+            if s >= 0.5:
+                total += s * math.log1p(_inner_text_length(desc))
+        return total * (1.0 - _link_density(el))
+
+    # Factor interpolates from 0.5 (strict) to 0.02 (permissive).
+    factor = 0.5 - content_scope * 0.48
+    sib_threshold = max(5.0, best_aggregate * factor)
+
     siblings: list[HtmlElement] = []
     for sib in parent:
         if sib is best_el:
@@ -543,13 +583,11 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
             continue
         if not isinstance(sib.tag, str):
             continue
-        sib_cid = id(sib)
-        sib_score = container_scores.get(sib_cid, 0.0)
+        sib_score = _subtree_content_score(sib)
         # Boost siblings with matching class
         if sib.get("class") and sib.get("class") == best_el.get("class"):
             sib_score += best_aggregate * 0.2
-        sib_adjusted = sib_score * (1.0 - _link_density(sib))
-        if sib_adjusted >= sib_threshold:
+        if sib_score >= sib_threshold:
             siblings.append(sib)
 
     if len(siblings) == 1:

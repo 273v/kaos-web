@@ -70,6 +70,69 @@ class TestContentScopeBoundaries:
         assert nav_items < 3, "Strict mode should not include full nav bar"
 
 
+class TestContentScopeActuallyVaries:
+    """Verify content_scope produces different output on multi-section pages."""
+
+    def test_team_directory_varies_at_three_levels(self):
+        """team_directory_cards.html has multiple content regions."""
+        html = (READABILITY_FIXTURES / "team_directory_cards.html").read_text()
+        strict = extract_content_l3(html, content_scope=0.0)
+        default = extract_content_l3(html, content_scope=0.5)
+        permissive = extract_content_l3(html, content_scope=1.0)
+        assert strict is not None and default is not None and permissive is not None
+
+        s = len(strict.text_content() or "")
+        d = len(default.text_content() or "")
+        p = len(permissive.text_content() or "")
+
+        # Strict < default < permissive
+        assert s < d < p, f"Expected monotonic increase: strict={s}, default={d}, permissive={p}"
+
+    def test_directory_listing_strict_vs_permissive(self):
+        """directory_listing.html should differ between strict and permissive."""
+        html = (READABILITY_FIXTURES / "directory_listing.html").read_text()
+        strict = extract_content_l3(html, content_scope=0.0)
+        permissive = extract_content_l3(html, content_scope=1.0)
+        assert strict is not None and permissive is not None
+
+        s = len(strict.text_content() or "")
+        p = len(permissive.text_content() or "")
+        assert s < p, f"Expected permissive > strict: strict={s}, permissive={p}"
+
+    def test_search_results_strict_vs_permissive(self):
+        """search_results_page.html should differ between strict and permissive."""
+        html = (READABILITY_FIXTURES / "search_results_page.html").read_text()
+        strict = extract_content_l3(html, content_scope=0.0)
+        permissive = extract_content_l3(html, content_scope=1.0)
+        assert strict is not None and permissive is not None
+
+        s = len(strict.text_content() or "")
+        p = len(permissive.text_content() or "")
+        assert s < p, f"Expected permissive > strict: strict={s}, permissive={p}"
+
+    def test_scope_monotonic_on_all_fixtures(self):
+        """Across all fixtures, strict <= default <= permissive."""
+        fixtures = [
+            FIXTURES / "article.html",
+            READABILITY_FIXTURES / "directory_listing.html",
+            READABILITY_FIXTURES / "search_results_page.html",
+            READABILITY_FIXTURES / "team_directory_cards.html",
+        ]
+        for path in fixtures:
+            if not path.exists():
+                continue
+            html = path.read_text()
+            s = extract_content_l3(html, content_scope=0.0)
+            d = extract_content_l3(html, content_scope=0.5)
+            p = extract_content_l3(html, content_scope=1.0)
+            s_len = len(s.text_content() or "") if s is not None else 0
+            d_len = len(d.text_content() or "") if d is not None else 0
+            p_len = len(p.text_content() or "") if p is not None else 0
+            assert s_len <= d_len <= p_len, (
+                f"{path.name}: not monotonic: strict={s_len}, default={d_len}, permissive={p_len}"
+            )
+
+
 class TestL3ExtractionQuality:
     """Verify L3 extracts the right content from diverse fixtures."""
 
