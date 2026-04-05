@@ -1255,6 +1255,12 @@ def html_to_document(
         except Exception:
             root = None
 
+        # If L3 returned nothing and scope was strict, retry with default scope
+        # before falling back to the heuristic (which ignores content_scope).
+        if root is None and content_scope < 0.4:
+            with contextlib.suppress(Exception):
+                root = extract_content_l3(html_content, content_scope=0.5)
+
         if root is None:
             root = readability_extract(html_content)
 

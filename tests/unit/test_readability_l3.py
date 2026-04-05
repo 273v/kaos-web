@@ -110,6 +110,29 @@ class TestContentScopeActuallyVaries:
         p = len(permissive.text_content() or "")
         assert s < p, f"Expected permissive > strict: strict={s}, permissive={p}"
 
+    def test_multi_section_landing_varies_by_scope(self):
+        """multi_section_landing.html should broaden as scope increases."""
+        html = (READABILITY_FIXTURES / "multi_section_landing.html").read_text()
+        strict = extract_content_l3(html, content_scope=0.0)
+        default = extract_content_l3(html, content_scope=0.5)
+        permissive = extract_content_l3(html, content_scope=1.0)
+        assert strict is not None and default is not None and permissive is not None
+
+        strict_text = strict.text_content() or ""
+        default_text = default.text_content() or ""
+        permissive_text = permissive.text_content() or ""
+
+        assert "FTC updates non-compete enforcement priorities" in strict_text
+        assert "Regulatory Insights" not in strict_text
+        assert "Regulatory Insights" in default_text
+        assert "Popular Resources" not in default_text
+        assert "Popular Resources" in permissive_text
+
+        s = len(strict_text)
+        d = len(default_text)
+        p = len(permissive_text)
+        assert s < d < p, f"Expected monotonic increase: strict={s}, default={d}, permissive={p}"
+
     def test_scope_monotonic_on_all_fixtures(self):
         """Across all fixtures, strict <= default <= permissive."""
         fixtures = [
@@ -117,6 +140,7 @@ class TestContentScopeActuallyVaries:
             READABILITY_FIXTURES / "directory_listing.html",
             READABILITY_FIXTURES / "search_results_page.html",
             READABILITY_FIXTURES / "team_directory_cards.html",
+            READABILITY_FIXTURES / "multi_section_landing.html",
         ]
         for path in fixtures:
             if not path.exists():
@@ -197,16 +221,24 @@ class TestHtmlToDocumentIntegration:
         assert len(doc.body) > 0
 
     def test_content_scope_passed_to_l3(self):
+        """content_scope must survive through html_to_document into the AST."""
+        from kaos_content.serializers.text import serialize_text
         from kaos_web.extract import html_to_document
 
-        html = (FIXTURES / "article.html").read_text()
-        doc_strict = html_to_document(html, url="https://example.com/article", content_scope=0.1)
-        doc_permissive = html_to_document(
-            html, url="https://example.com/article", content_scope=0.9
-        )
-        # Both should produce content
+        # Use multi_section_landing which is known to vary by scope
+        html = (READABILITY_FIXTURES / "multi_section_landing.html").read_text()
+        doc_strict = html_to_document(html, url="https://example.com/ms", content_scope=0.0)
+        doc_permissive = html_to_document(html, url="https://example.com/ms", content_scope=1.0)
+
         assert len(doc_strict.body) > 0
         assert len(doc_permissive.body) > 0
+
+        strict_text = serialize_text(doc_strict)
+        permissive_text = serialize_text(doc_permissive)
+        assert len(strict_text) < len(permissive_text), (
+            f"html_to_document must honor content_scope: strict={len(strict_text)}, "
+            f"permissive={len(permissive_text)}"
+        )
 
     def test_extract_content_false_ignores_scope(self):
         from kaos_web.extract import html_to_document
