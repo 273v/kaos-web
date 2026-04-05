@@ -25,6 +25,23 @@ from kaos_web.models import WebRequest, WebResponse
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Response body capture defaults
+# ---------------------------------------------------------------------------
+_DEFAULT_CAPTURE_RESOURCE_TYPES = frozenset({"fetch", "xhr"})
+_DEFAULT_CAPTURE_CONTENT_TYPES = frozenset(
+    {
+        "application/json",
+        "text/html",
+        "text/plain",
+        "text/xml",
+        "application/xml",
+        "text/csv",
+        "application/ld+json",
+    }
+)
+_DEFAULT_MAX_BODY_SIZE = 1_048_576  # 1 MB
+
 
 class BrowserClient:
     """Async browser client wrapping Playwright.
@@ -517,11 +534,24 @@ class BrowserClient:
 
     # ── Network monitoring ──
 
-    async def enable_request_logging(self, context_id: str) -> None:
+    async def enable_request_logging(
+        self,
+        context_id: str,
+        *,
+        capture_bodies: bool = False,
+        resource_types: frozenset[str] | None = None,
+        max_body_size: int = _DEFAULT_MAX_BODY_SIZE,
+    ) -> None:
         """Start recording network requests for a named context.
 
         Must be called before navigation to capture all requests.
         Results are stored in ``_request_logs[context_id]``.
+
+        Args:
+            context_id: Named browser context.
+            capture_bodies: Also capture response bodies for matching requests.
+            resource_types: Resource types to capture bodies for (default: fetch, xhr).
+            max_body_size: Maximum body size in bytes (default: 1 MB).
         """
         if context_id not in self._contexts:
             raise WebBrowserError(
@@ -538,6 +568,15 @@ class BrowserClient:
 
         log = self._request_logs[context_id]
 
+        # Initialize body storage when capture is enabled
+        if capture_bodies:
+            if not hasattr(self, "_response_bodies"):
+                self._response_bodies: dict[str, dict[int, dict[str, Any]]] = {}
+            self._response_bodies[context_id] = {}
+
+        capture_resource_types = resource_types or _DEFAULT_CAPTURE_RESOURCE_TYPES
+        capture_ct_prefixes = _DEFAULT_CAPTURE_CONTENT_TYPES
+
         def _on_request(request: Any) -> None:
             log.append(
                 {
@@ -551,14 +590,77 @@ class BrowserClient:
                 }
             )
 
-        def _on_response(response: Any) -> None:
-            # Match response to request by URL
-            for entry in reversed(log):
-                if entry["url"] == response.url and "status" not in entry:
-                    entry["status"] = response.status
-                    entry["status_text"] = response.status_text
-                    entry["response_headers"] = dict(response.headers)
-                    break
+        if capture_bodies:
+            bodies = self._response_bodies[context_id]
+
+            async def _on_response(response: Any) -> None:
+                # Phase 1: metadata matching (same as sync handler)
+                matched_entry: dict[str, Any] | None = None
+                for entry in reversed(log):
+                    if entry["url"] == response.url and "status" not in entry:
+                        entry["status"] = response.status
+                        entry["status_text"] = response.status_text
+                        entry["response_headers"] = dict(response.headers)
+                        matched_entry = entry
+                        break
+
+                if matched_entry is None:
+                    return
+
+                # Phase 2: sync filters — decide whether to capture body
+                if 300 <= response.status < 400:
+                    return  # redirects have no body
+
+                rt = response.request.resource_type
+                if rt not in capture_resource_types:
+                    return
+
+                ct = response.headers.get("content-type", "")
+                ct_base = ct.lower().split(";")[0].strip()
+                if not any(ct_base.startswith(prefix) for prefix in capture_ct_prefixes):
+                    return
+
+                # Check Content-Length header before async body fetch
+                cl_str = response.headers.get("content-length", "")
+                if cl_str.isdigit() and int(cl_str) > max_body_size:
+                    matched_entry["has_body"] = False
+                    matched_entry["body_reason"] = "too_large"
+                    matched_entry["body_content_length"] = int(cl_str)
+                    return
+
+                # Phase 3: async body fetch
+                try:
+                    body_bytes = await response.body()
+                except Exception:
+                    matched_entry["has_body"] = False
+                    matched_entry["body_reason"] = "fetch_failed"
+                    return
+
+                truncated = False
+                if len(body_bytes) > max_body_size:
+                    body_bytes = body_bytes[:max_body_size]
+                    truncated = True
+
+                bodies[matched_entry["id"]] = {
+                    "body": body_bytes,
+                    "content_type": ct,
+                    "size": len(body_bytes),
+                    "truncated": truncated,
+                }
+                matched_entry["has_body"] = True
+                matched_entry["body_size"] = len(body_bytes)
+                matched_entry["body_truncated"] = truncated
+
+        else:
+
+            def _on_response(response: Any) -> None:  # type: ignore[misc]
+                # Match response to request by URL
+                for entry in reversed(log):
+                    if entry["url"] == response.url and "status" not in entry:
+                        entry["status"] = response.status
+                        entry["status_text"] = response.status_text
+                        entry["response_headers"] = dict(response.headers)
+                        break
 
         page.on("request", _on_request)
         page.on("response", _on_response)
@@ -577,6 +679,59 @@ class BrowserClient:
                 return entry
         return None
 
+    async def get_response_body(self, context_id: str, request_id: int) -> dict[str, Any] | None:
+        """Get the captured response body for a specific request.
+
+        Returns:
+            Dict with ``body`` (bytes), ``content_type``, ``size``, ``truncated``,
+            or ``None`` if no body was captured for this request.
+        """
+        if not hasattr(self, "_response_bodies"):
+            return None
+        ctx_bodies = self._response_bodies.get(context_id, {})
+        return ctx_bodies.get(request_id)
+
+    async def get_captured_responses(
+        self,
+        context_id: str,
+        *,
+        resource_type: str | None = None,
+        content_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List responses that have captured bodies, with metadata.
+
+        Returns summary dicts (no body bytes) for filtering and discovery.
+        Use :meth:`get_response_body` to retrieve the actual body.
+        """
+        log = await self.get_request_log(context_id)
+        if not hasattr(self, "_response_bodies"):
+            return []
+        ctx_bodies = self._response_bodies.get(context_id, {})
+
+        results: list[dict[str, Any]] = []
+        for entry in log:
+            if entry["id"] not in ctx_bodies:
+                continue
+            body_info = ctx_bodies[entry["id"]]
+            if resource_type and entry.get("resource_type") != resource_type:
+                continue
+            ct = body_info.get("content_type", "")
+            if content_type and content_type.lower() not in ct.lower():
+                continue
+            results.append(
+                {
+                    "id": entry["id"],
+                    "url": entry["url"],
+                    "method": entry["method"],
+                    "resource_type": entry.get("resource_type"),
+                    "status": entry.get("status"),
+                    "content_type": ct,
+                    "body_size": body_info["size"],
+                    "truncated": body_info["truncated"],
+                }
+            )
+        return results
+
     # ── Lifecycle ──
 
     async def close_context(self, context_id: str) -> None:
@@ -589,6 +744,8 @@ class BrowserClient:
             await context.close()
         if hasattr(self, "_request_logs"):
             self._request_logs.pop(context_id, None)
+        if hasattr(self, "_response_bodies"):
+            self._response_bodies.pop(context_id, None)
 
     async def close(self) -> None:
         """Release browser resources including all named contexts and pages."""
@@ -600,6 +757,8 @@ class BrowserClient:
         self._contexts.clear()
         if hasattr(self, "_request_logs"):
             self._request_logs.clear()
+        if hasattr(self, "_response_bodies"):
+            self._response_bodies.clear()
         if self._browser:
             await self._browser.close()
             self._browser = None

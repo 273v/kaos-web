@@ -1159,7 +1159,9 @@ class EnableRequestLoggingTool(KaosTool):
             description=(
                 "Start recording network requests made by the browser page. "
                 "Call this before navigating or interacting to capture all requests. "
-                "Retrieve recorded requests with 'kaos-web-browser-requests'."
+                "Retrieve recorded requests with 'kaos-web-browser-requests'. "
+                "Set capture_bodies=true to also capture response bodies for "
+                "fetch/xhr requests (e.g., JSON API calls made by SPA pages)."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.EXTRACT,
@@ -1168,6 +1170,43 @@ class EnableRequestLoggingTool(KaosTool):
             annotations=_BROWSER_WRITE_ANNOTATIONS,
             input_schema=[
                 _context_id_param(),
+                ParameterSchema(
+                    name="capture_bodies",
+                    type="boolean",
+                    description=(
+                        "Capture response bodies for matching requests. "
+                        "Bodies are stored in memory and retrievable via "
+                        "'kaos-web-browser-get-request' or listed with "
+                        "'kaos-web-browser-captured-responses'. "
+                        "Only captures fetch/xhr requests with text-like "
+                        "content types (JSON, HTML, XML, text, CSV) under "
+                        "the size limit."
+                    ),
+                    required=False,
+                    default=False,
+                ),
+                ParameterSchema(
+                    name="resource_types",
+                    type="string",
+                    description=(
+                        "Comma-separated resource types to capture bodies for. "
+                        "Only used when capture_bodies=true. "
+                        "Options: document, stylesheet, image, script, font, "
+                        "xhr, fetch, etc."
+                    ),
+                    required=False,
+                    default="fetch,xhr",
+                ),
+                ParameterSchema(
+                    name="max_body_size",
+                    type="integer",
+                    description=(
+                        "Maximum response body size in bytes to capture. "
+                        "Responses larger than this are skipped."
+                    ),
+                    required=False,
+                    default=1048576,
+                ),
             ],
         )
 
@@ -1175,21 +1214,34 @@ class EnableRequestLoggingTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         context_id = inputs["context_id"]
+        capture_bodies = inputs.get("capture_bodies", False)
+        resource_types_str = inputs.get("resource_types", "fetch,xhr")
+        resource_types = frozenset(rt.strip() for rt in resource_types_str.split(","))
+        max_body_size = inputs.get("max_body_size", 1048576)
 
         try:
             client = await _get_browser_client()
-            await client.enable_request_logging(context_id)
-
-            return ToolResult.create_success(
-                output={
-                    "context_id": context_id,
-                    "message": (
-                        f"Request logging enabled for context '{context_id}'. "
-                        "Navigate or interact to capture requests, then use "
-                        "'kaos-web-browser-requests' to retrieve them."
-                    ),
-                }
+            await client.enable_request_logging(
+                context_id,
+                capture_bodies=capture_bodies,
+                resource_types=resource_types,
+                max_body_size=max_body_size,
             )
+
+            msg = f"Request logging enabled for context '{context_id}'."
+            if capture_bodies:
+                msg += f" Body capture active for: {', '.join(sorted(resource_types))}."
+            msg += (
+                " Navigate or interact to capture requests, then use "
+                "'kaos-web-browser-requests' to retrieve them."
+            )
+            if capture_bodies:
+                msg += (
+                    " Use 'kaos-web-browser-captured-responses' to list "
+                    "responses with captured bodies."
+                )
+
+            return ToolResult.create_success(output={"context_id": context_id, "message": msg})
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to enable logging for context '{context_id}': {exc}. "
@@ -1250,6 +1302,8 @@ class ListRequestsTool(KaosTool):
                     "url": e["url"][:200],
                     "resource_type": e.get("resource_type"),
                     "status": e.get("status"),
+                    "has_body": e.get("has_body", False),
+                    "body_size": e.get("body_size"),
                 }
                 for e in log
             ]
@@ -1279,7 +1333,8 @@ class GetRequestDetailTool(KaosTool):
             display_name="Get Request Detail",
             description=(
                 "Get full details of a specific network request by ID, "
-                "including headers, post data, and response headers. "
+                "including headers, post data, response headers, and "
+                "optionally the response body (if captured). "
                 "Use 'kaos-web-browser-requests' first to find the request ID."
             ),
             category=ToolCategory.INTEGRATION,
@@ -1294,6 +1349,17 @@ class GetRequestDetailTool(KaosTool):
                     type="integer",
                     description="Request ID from 'kaos-web-browser-requests'.",
                 ),
+                ParameterSchema(
+                    name="include_body",
+                    type="boolean",
+                    description=(
+                        "Include the captured response body in the result. "
+                        "JSON/text content types are returned as decoded strings. "
+                        "Binary content is base64-encoded."
+                    ),
+                    required=False,
+                    default=True,
+                ),
             ],
         )
 
@@ -1302,6 +1368,7 @@ class GetRequestDetailTool(KaosTool):
     ) -> ToolResult:
         context_id = inputs["context_id"]
         request_id = inputs["request_id"]
+        include_body = inputs.get("include_body", True)
 
         try:
             client = await _get_browser_client()
@@ -1314,11 +1381,191 @@ class GetRequestDetailTool(KaosTool):
                     "to list available request IDs."
                 )
 
+            # Optionally include captured response body
+            if include_body and detail.get("has_body"):
+                body_info = await client.get_response_body(context_id, request_id)
+                if body_info is not None:
+                    ct = body_info.get("content_type", "").lower()
+                    body_bytes: bytes = body_info["body"]
+                    # Decode text-like content types as UTF-8 strings
+                    if any(
+                        ct.startswith(t)
+                        for t in (
+                            "application/json",
+                            "text/",
+                            "application/xml",
+                            "application/ld+json",
+                        )
+                    ):
+                        try:
+                            detail["body"] = body_bytes.decode("utf-8")
+                        except UnicodeDecodeError:
+                            detail["body"] = base64.b64encode(body_bytes).decode("ascii")
+                            detail["body_encoding"] = "base64"
+                    else:
+                        detail["body"] = base64.b64encode(body_bytes).decode("ascii")
+                        detail["body_encoding"] = "base64"
+
             return ToolResult.create_success(output=detail)
 
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to get request {request_id} in context '{context_id}': {exc}."
+            )
+
+
+class ListCapturedResponsesTool(KaosTool):
+    """List captured response bodies from browser network traffic."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-browser-captured-responses",
+            display_name="List Captured Responses",
+            description=(
+                "List network responses that have captured bodies. "
+                "Enable body capture first with 'kaos-web-browser-log-requests' "
+                "(capture_bodies=true). Filter by resource_type or content_type. "
+                "Use request_id with 'kaos-web-browser-get-request' to retrieve "
+                "the full body. "
+                "Set store_artifacts=true to persist JSON responses as session "
+                "artifacts discoverable via kaos://session/{session_id}/artifacts."
+            ),
+            category=ToolCategory.INTEGRATION,
+            capability=ToolCapability.QUERY,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_BROWSER_READ_ANNOTATIONS,
+            input_schema=[
+                _context_id_param(),
+                ParameterSchema(
+                    name="resource_type",
+                    type="string",
+                    description="Filter by resource type (e.g., 'fetch', 'xhr', 'document').",
+                    required=False,
+                ),
+                ParameterSchema(
+                    name="content_type",
+                    type="string",
+                    description="Filter by content type substring (e.g., 'json', 'html').",
+                    required=False,
+                ),
+                ParameterSchema(
+                    name="store_artifacts",
+                    type="boolean",
+                    description=(
+                        "Store captured JSON responses as session artifacts. "
+                        "Each response becomes a separate artifact accessible via "
+                        "kaos://session/{session_id}/artifacts. Requires a runtime "
+                        "context (MCP server mode)."
+                    ),
+                    required=False,
+                    default=False,
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        context_id = inputs["context_id"]
+        resource_type = inputs.get("resource_type")
+        content_type = inputs.get("content_type")
+        store_artifacts = inputs.get("store_artifacts", False)
+
+        try:
+            client = await _get_browser_client()
+            responses = await client.get_captured_responses(
+                context_id,
+                resource_type=resource_type,
+                content_type=content_type,
+            )
+
+            if not responses:
+                return ToolResult.create_success(
+                    output={
+                        "context_id": context_id,
+                        "total_captured": 0,
+                        "responses": [],
+                        "message": (
+                            "No captured response bodies found. "
+                            "Ensure 'kaos-web-browser-log-requests' was called with "
+                            "capture_bodies=true before navigation."
+                        ),
+                    }
+                )
+
+            # Optionally store JSON responses as artifacts
+            artifacts_created: list[dict[str, Any]] = []
+            if store_artifacts and context is not None and context.runtime is not None:
+                from urllib.parse import urlparse
+
+                from kaos_content.artifacts import unique_document_name
+                from kaos_core.types.enums import ArtifactRole
+
+                for resp in responses:
+                    ct = resp.get("content_type", "")
+                    if "json" not in ct.lower():
+                        continue
+                    body_info = await client.get_response_body(context_id, resp["id"])
+                    if body_info is None:
+                        continue
+                    body_bytes: bytes = body_info["body"]
+
+                    # Build artifact name from URL
+                    parsed = urlparse(resp["url"])
+                    path_fragment = parsed.path.strip("/").replace("/", "-")[:40]
+                    domain = parsed.hostname or "unknown"
+                    name = unique_document_name(f"api-response-{domain}-{path_fragment}")
+
+                    vfs_path = f"responses/{name}.json"
+                    ctx_path = context.get_vfs_path(vfs_path)
+                    await ctx_path.write_bytes(body_bytes)
+
+                    manifest = await context.runtime.artifacts.create_from_path(
+                        vfs_path,
+                        context_id=context.session_id,
+                        session_id=context.session_id,
+                        name=name,
+                        description=f"API response from {resp['url'][:100]}",
+                        mime_type="application/json",
+                        role=ArtifactRole.BODY,
+                        provenance={
+                            "source_url": resp["url"],
+                            "tool": "kaos-web-browser-captured-responses",
+                            "request_id": resp["id"],
+                            "resource_type": resp.get("resource_type"),
+                        },
+                        metadata={
+                            "status": resp.get("status"),
+                            "size_bytes": body_info["size"],
+                            "truncated": body_info["truncated"],
+                        },
+                    )
+                    artifacts_created.append(
+                        {
+                            "artifact_id": manifest.artifact_id,
+                            "body_uri": manifest.body_uri,
+                            "name": name,
+                            "source_url": resp["url"][:200],
+                            "size_bytes": body_info["size"],
+                        }
+                    )
+
+            output: dict[str, Any] = {
+                "context_id": context_id,
+                "total_captured": len(responses),
+                "responses": responses,
+            }
+            if artifacts_created:
+                output["artifacts_created"] = len(artifacts_created)
+                output["artifacts"] = artifacts_created
+
+            return ToolResult.create_success(output=output)
+
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Failed to list captured responses for context '{context_id}': {exc}."
             )
 
 
@@ -1442,6 +1689,7 @@ def register_browser_tools(runtime: KaosRuntime) -> int:
         EnableRequestLoggingTool(),
         ListRequestsTool(),
         GetRequestDetailTool(),
+        ListCapturedResponsesTool(),
         # Context management
         ListContextsTool(),
         CloseContextTool(),

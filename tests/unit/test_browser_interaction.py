@@ -469,7 +469,7 @@ class TestBrowserToolMetadata:
             assert tool.metadata.annotations.destructiveHint is False
 
     def test_tool_count(self, all_tools):
-        assert len(all_tools) == 18
+        assert len(all_tools) == 19
 
 
 class TestBrowserToolErrorPaths:
@@ -832,6 +832,7 @@ class TestNetworkToolMetadata:
         from kaos_web.browser_tools import (
             EnableRequestLoggingTool,
             GetRequestDetailTool,
+            ListCapturedResponsesTool,
             ListRequestsTool,
         )
 
@@ -839,6 +840,7 @@ class TestNetworkToolMetadata:
             EnableRequestLoggingTool(),
             ListRequestsTool(),
             GetRequestDetailTool(),
+            ListCapturedResponsesTool(),
         ]
 
     def test_all_have_annotations(self, network_tools):
@@ -928,5 +930,5 @@ class TestRegisterBrowserTools:
         runtime = MagicMock()
         runtime.tools = MagicMock()
         count = register_browser_tools(runtime)
-        assert count == 18
-        assert runtime.tools.register_tool.call_count == 18
+        assert count == 19
+        assert runtime.tools.register_tool.call_count == 19
