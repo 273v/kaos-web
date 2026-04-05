@@ -174,10 +174,7 @@ class NodeRecord:
         """Return a feature vector with disabled features zeroed out."""
         if enabled_features is None:
             return self.vector()
-        return [
-            self.features[name] if name in enabled_features else 0.0
-            for name in FEATURE_ORDER
-        ]
+        return [self.features[name] if name in enabled_features else 0.0 for name in FEATURE_ORDER]
 
 
 @dataclass(frozen=True)
@@ -304,7 +301,9 @@ def _node_signature(el: HtmlElement) -> str:
     return f"{el.tag}|{class_value}"
 
 
-def _build_records(page_name: str, root: HtmlElement, labels: dict[str, int]) -> tuple[NodeRecord, ...]:
+def _build_records(
+    page_name: str, root: HtmlElement, labels: dict[str, int]
+) -> tuple[NodeRecord, ...]:
     candidates = _candidate_elements(root)
     total_candidates = len(candidates)
     densities_by_id: dict[str, float] = {}
@@ -360,12 +359,25 @@ def _build_records(page_name: str, root: HtmlElement, labels: dict[str, int]) ->
         )
         ancestors = [ancestor for ancestor in el.iterancestors() if isinstance(ancestor.tag, str)]
         ancestor_class_values = [_class_id_text(ancestor) for ancestor in ancestors]
-        ancestor_positive_bias = 1.0 if any(_POSITIVE_RE.search(value) for value in ancestor_class_values) else 0.0
-        ancestor_negative_bias = 1.0 if any(_NEGATIVE_RE.search(value) for value in ancestor_class_values) else 0.0
-        under_content_landmark = 1.0 if any(ancestor.tag in {"main", "article", "section"} for ancestor in ancestors) else 0.0
-        under_boilerplate_landmark = 1.0 if any(
-            ancestor.tag in {"aside", "nav", "header", "footer", "form"} for ancestor in ancestors
-        ) else 0.0
+        ancestor_positive_bias = (
+            1.0 if any(_POSITIVE_RE.search(value) for value in ancestor_class_values) else 0.0
+        )
+        ancestor_negative_bias = (
+            1.0 if any(_NEGATIVE_RE.search(value) for value in ancestor_class_values) else 0.0
+        )
+        under_content_landmark = (
+            1.0
+            if any(ancestor.tag in {"main", "article", "section"} for ancestor in ancestors)
+            else 0.0
+        )
+        under_boilerplate_landmark = (
+            1.0
+            if any(
+                ancestor.tag in {"aside", "nav", "header", "footer", "form"}
+                for ancestor in ancestors
+            )
+            else 0.0
+        )
         class_weight = _class_weight(el) / 25.0
         tag_weight = _tag_weight(el) / 5.0
         tag = el.tag
@@ -402,7 +414,9 @@ def _build_records(page_name: str, root: HtmlElement, labels: dict[str, int]) ->
             "ancestor_positive_bias": ancestor_positive_bias,
             "ancestor_negative_bias": ancestor_negative_bias,
             "is_article_like": 1.0 if tag in {"article", "main", "section"} else 0.0,
-            "is_paragraph_like": 1.0 if tag in {"p", "pre", "blockquote", "td", "h1", "h2", "h3"} else 0.0,
+            "is_paragraph_like": 1.0
+            if tag in {"p", "pre", "blockquote", "td", "h1", "h2", "h3"}
+            else 0.0,
             "is_list_like": 1.0 if tag in {"ul", "ol", "table"} else 0.0,
             "is_boilerplate_tag": 1.0 if tag in {"nav", "aside", "header", "footer"} else 0.0,
             "is_form_tag": 1.0 if tag == "form" else 0.0,
@@ -511,7 +525,9 @@ def _transform_divs_level1(root: HtmlElement) -> None:
             div.tag = "p"
 
 
-def _score_candidates_level1(root: HtmlElement, min_paragraph_length: int) -> dict[HtmlElement, float]:
+def _score_candidates_level1(
+    root: HtmlElement, min_paragraph_length: int
+) -> dict[HtmlElement, float]:
     candidates: dict[HtmlElement, float] = {}
     for el in root.iter():
         if not isinstance(el.tag, str) or el.tag not in _SCORE_TAGS:
@@ -525,11 +541,14 @@ def _score_candidates_level1(root: HtmlElement, min_paragraph_length: int) -> di
         score = 1.0 + min(text.count(","), 8) + min(math.floor(len(text) / 100), 3)
 
         if parent is not None:
-            candidates[parent] = candidates.get(parent, _class_weight(parent) + _tag_weight(parent)) + score
+            candidates[parent] = (
+                candidates.get(parent, _class_weight(parent) + _tag_weight(parent)) + score
+            )
         if grandparent is not None:
-            candidates[grandparent] = candidates.get(
-                grandparent, _class_weight(grandparent) + _tag_weight(grandparent)
-            ) + score * 0.5
+            candidates[grandparent] = (
+                candidates.get(grandparent, _class_weight(grandparent) + _tag_weight(grandparent))
+                + score * 0.5
+            )
 
     return candidates
 
@@ -595,7 +614,9 @@ def level1_scores(page: LabeledPage, scope: float) -> tuple[dict[str, float], st
                 selected_ids.add(node_id)
 
     top_id = best.get(_NODE_ID_ATTR)
-    scores = {record.node_id: (1.0 if record.node_id in selected_ids else 0.0) for record in page.records}
+    scores = {
+        record.node_id: (1.0 if record.node_id in selected_ids else 0.0) for record in page.records
+    }
     return scores, top_id
 
 
@@ -709,7 +730,10 @@ class LogisticRegressionModel:
             grad_w = [0.0] * feature_count
             grad_b = 0.0
             for row, label in zip(normalized, labels, strict=True):
-                prediction = _sigmoid(self.bias + sum(weight * value for weight, value in zip(self.weights, row, strict=True)))
+                prediction = _sigmoid(
+                    self.bias
+                    + sum(weight * value for weight, value in zip(self.weights, row, strict=True))
+                )
                 error = prediction - label
                 sample_weight = pos_weight if label == 1 else neg_weight
                 grad_b += error * sample_weight
@@ -731,7 +755,10 @@ class LogisticRegressionModel:
 
     def predict_proba(self, vector: list[float]) -> float:
         normalized = self._normalize(vector)
-        return _sigmoid(self.bias + sum(weight * value for weight, value in zip(self.weights, normalized, strict=True)))
+        return _sigmoid(
+            self.bias
+            + sum(weight * value for weight, value in zip(self.weights, normalized, strict=True))
+        )
 
 
 def level3_scores(
@@ -760,7 +787,9 @@ def level3_scores(
     return scores, top_id
 
 
-def _binary_metrics(records: list[NodeRecord], scores: dict[str, float], threshold: float) -> BinaryMetrics:
+def _binary_metrics(
+    records: list[NodeRecord], scores: dict[str, float], threshold: float
+) -> BinaryMetrics:
     tp = fp = fn = tn = 0
     for record in records:
         predicted = 1 if scores[record.node_id] >= threshold else 0
@@ -816,9 +845,15 @@ def run_leave_one_page_out(
             iterations=level3_iterations,
         )
 
-        model_scores["level1"].append((list(test_page.records), level1_page_scores, test_page.name, level1_top))
-        model_scores["level2"].append((list(test_page.records), level2_page_scores, test_page.name, level2_top))
-        model_scores["level3"].append((list(test_page.records), level3_page_scores, test_page.name, level3_top))
+        model_scores["level1"].append(
+            (list(test_page.records), level1_page_scores, test_page.name, level1_top)
+        )
+        model_scores["level2"].append(
+            (list(test_page.records), level2_page_scores, test_page.name, level2_top)
+        )
+        model_scores["level3"].append(
+            (list(test_page.records), level3_page_scores, test_page.name, level3_top)
+        )
 
     summaries: dict[str, ExperimentSummary] = {}
     for name, folds in model_scores.items():
@@ -835,7 +870,9 @@ def run_leave_one_page_out(
             page_metrics = _binary_metrics(records, scores, threshold)
             per_page_f1[page_name] = page_metrics.f1
             if top_node_id is not None:
-                top_record = next((record for record in records if record.node_id == top_node_id), None)
+                top_record = next(
+                    (record for record in records if record.node_id == top_node_id), None
+                )
                 if top_record is not None and top_record.label == 1:
                     top_hits += 1
 

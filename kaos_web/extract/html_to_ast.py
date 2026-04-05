@@ -48,6 +48,7 @@ from kaos_content.model.inlines import (
 from kaos_content.model.metadata import DocumentMetadata
 from kaos_content.model.table import Cell, Row, TableSection
 from kaos_web.extract.readability import extract_content as readability_extract
+from kaos_web.extract.readability_l3 import extract_content_l3
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1225,14 +1226,18 @@ def html_to_document(
     *,
     url: str = "",
     extract_content: bool = True,
+    content_scope: float = 0.5,
 ) -> ContentDocument:
     """Convert HTML to a ContentDocument AST.
 
     Args:
         html_content: Raw HTML string.
         url: Source URL for provenance and relative URL resolution.
-        extract_content: If True, run readability to extract main content first.
+        extract_content: If True, run content extraction first.
             If False, convert the entire HTML body.
+        content_scope: Extraction breadth from 0.0 (strict, article-only)
+            to 1.0 (permissive, include more surrounding content).
+            Default 0.5. Only applies when ``extract_content=True``.
 
     Returns:
         ContentDocument with Block/Inline AST nodes and provenance.
@@ -1244,9 +1249,16 @@ def html_to_document(
     full_doc: HtmlElement | None = None  # Parsed once, reused if needed
 
     if extract_content:
-        root = readability_extract(html_content)
+        # Try Level 3 learned model first, fall back to heuristic readability.
+        try:
+            root = extract_content_l3(html_content, content_scope=content_scope)
+        except Exception:
+            root = None
 
-        # Guard: if readability returned a suspiciously small fragment,
+        if root is None:
+            root = readability_extract(html_content)
+
+        # Guard: if extraction returned a suspiciously small fragment,
         # fall back to semantic container extraction.
         if root is not None:
             readability_words = len((root.text_content() or "").split())
@@ -1258,7 +1270,7 @@ def html_to_document(
                 if full_doc is not None and full_doc.body is not None:
                     body_words = len((full_doc.body.text_content() or "").split())
                     if body_words > _MIN_READABILITY_WORDS * 4:
-                        # Readability returned too little — try semantic containers.
+                        # Extraction returned too little — try semantic containers.
                         semantic = _find_semantic_container(full_doc.body)
                         root = semantic if semantic is not None else full_doc.body
 

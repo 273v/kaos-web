@@ -25,6 +25,18 @@ _WEB_ANNOTATIONS = ToolAnnotations(
     openWorldHint=True,
 )
 
+# Shared parameter schema for content extraction scope.
+_CONTENT_SCOPE_PARAM = ParameterSchema(
+    name="content_scope",
+    type="number",
+    description=(
+        "Content extraction breadth from 0.0 (strict, article-only) to 1.0 "
+        "(permissive, include more). Default 0.5. Ignored when raw=true."
+    ),
+    required=False,
+    default=0.5,
+)
+
 # Shared parameter schemas for browser-mode tools.
 _BROWSER_PARAMS: list[ParameterSchema] = [
     ParameterSchema(
@@ -175,6 +187,7 @@ class FetchPageTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                _CONTENT_SCOPE_PARAM,
                 *_BROWSER_PARAMS,
             ],
         )
@@ -185,6 +198,7 @@ class FetchPageTool(KaosTool):
         url = inputs["url"]
         use_browser = inputs.get("use_browser", False)
         raw = inputs.get("raw", False)
+        content_scope = inputs.get("content_scope", 0.5)
 
         if context is None or context.runtime is None:
             return ToolResult.create_error(
@@ -206,7 +220,9 @@ class FetchPageTool(KaosTool):
             from kaos_content.views import DocumentView
             from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url, extract_content=not raw)
+            doc = html_to_document(
+                html, url=final_url, extract_content=not raw, content_scope=content_scope
+            )
             if not doc.body:
                 return ToolResult.create_error(
                     f"No content extracted from {url}. "
@@ -278,6 +294,7 @@ class GetPageTextTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                _CONTENT_SCOPE_PARAM,
                 *_BROWSER_PARAMS,
             ],
         )
@@ -287,6 +304,7 @@ class GetPageTextTool(KaosTool):
     ) -> ToolResult:
         url = inputs["url"]
         raw = inputs.get("raw", False)
+        content_scope = inputs.get("content_scope", 0.5)
         try:
             html, final_url = await _fetch_html(
                 url, inputs.get("use_browser", False), **_browser_inputs(inputs)
@@ -300,7 +318,9 @@ class GetPageTextTool(KaosTool):
         try:
             from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url, extract_content=not raw)
+            doc = html_to_document(
+                html, url=final_url, extract_content=not raw, content_scope=content_scope
+            )
 
             # Store as artifact when runtime context is available
             if context is not None and context.runtime is not None:
@@ -374,6 +394,7 @@ class GetPageMarkdownTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                _CONTENT_SCOPE_PARAM,
                 *_BROWSER_PARAMS,
             ],
         )
@@ -383,6 +404,7 @@ class GetPageMarkdownTool(KaosTool):
     ) -> ToolResult:
         url = inputs["url"]
         raw = inputs.get("raw", False)
+        content_scope = inputs.get("content_scope", 0.5)
         try:
             html, final_url = await _fetch_html(
                 url, inputs.get("use_browser", False), **_browser_inputs(inputs)
@@ -396,7 +418,9 @@ class GetPageMarkdownTool(KaosTool):
         try:
             from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url, extract_content=not raw)
+            doc = html_to_document(
+                html, url=final_url, extract_content=not raw, content_scope=content_scope
+            )
 
             # Store as artifact when runtime context is available
             if context is not None and context.runtime is not None:
@@ -530,6 +554,7 @@ class SearchPageTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                _CONTENT_SCOPE_PARAM,
                 *_BROWSER_PARAMS,
             ],
         )
@@ -541,6 +566,7 @@ class SearchPageTool(KaosTool):
         query = inputs["query"]
         top_k = inputs.get("top_k", 10)
         level = inputs.get("level", "paragraph")
+        content_scope = inputs.get("content_scope", 0.5)
 
         if not query.strip():
             return ToolResult.create_error(
@@ -561,7 +587,7 @@ class SearchPageTool(KaosTool):
             from kaos_content.search import search_document
             from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url)
+            doc = html_to_document(html, url=final_url, content_scope=content_scope)
             search_results = search_document(doc, query, top_k=top_k, level=level)
 
             result_data = {
