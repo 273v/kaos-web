@@ -1,0 +1,132 @@
+{
+  "pages": [
+    {
+      "name": "article_fixture",
+      "fixture": "../article.html",
+      "positive_regions": [
+        "//article"
+      ],
+      "negative_regions": [
+        "//nav",
+        "//aside",
+        "//footer"
+      ]
+    },
+    {
+      "name": "books_product",
+      "fixture": "../books_toscrape.html",
+      "positive_regions": [
+        "//*[@id='content_inner']/article"
+      ],
+      "negative_regions": [
+        "//header",
+        "//*[contains(@class, 'breadcrumb')]"
+      ]
+    },
+    {
+      "name": "cornell_statute",
+      "fixture": "../cornell_law.html",
+      "positive_regions": [
+        "//*[@id='page_title']",
+        "//*[@id='tab_default_1']"
+      ],
+      "negative_regions": [
+        "//*[@id='liisurveymodal']",
+        "//header",
+        "//*[@id='breadcrumb']",
+        "//main//form",
+        "//*[@id='prevnext']",
+        "//*[@id='page-bottom']",
+        "//main/aside",
+        "//footer"
+      ]
+    },
+    {
+      "name": "httpbin_article",
+      "fixture": "../httpbin.html",
+      "positive_regions": [
+        "/html/body/div"
+      ],
+      "negative_regions": []
+    },
+    {
+      "name": "directory_listing",
+      "fixture": "directory_listing.html",
+      "positive_regions": [
+        "//*[@id='directory-results']"
+      ],
+      "negative_regions": [
+        "//*[@id='site-header']",
+        "//*[@id='directory-search']",
+        "//*[@id='site-footer']"
+      ]
+    },
+    {
+      "name": "multi_section_landing",
+      "fixture": "multi_section_landing.html",
+      "positive_regions": [
+        "//*[@id='overview']",
+        "//*[@id='insights']"
+      ],
+      "negative_regions": [
+        "//*[@id='masthead']",
+        "//*[@id='utility-nav']",
+        "//*[@id='resource-rail']",
+        "//*[@id='portal-footer']"
+      ]
+    },
+    {
+      "name": "search_results_page",
+      "fixture": "search_results_page.html",
+      "positive_regions": [
+        "//*[@id='search-results']"
+      ],
+      "negative_regions": [
+        "//*[@id='search-header']",
+        "//*[@id='search-box']",
+        "//*[@id='search-filters']",
+        "//*[@id='search-pagination']",
+        "//*[@id='search-footer']"
+      ]
+    },
+    {
+      "name": "docket_report",
+      "fixture": "docket_report.html",
+      "positive_regions": [
+        "//*[@id='case-summary']",
+        "//*[@id='docket-entries']"
+      ],
+      "negative_regions": [
+        "//*[@id='docket-header']",
+        "//*[@id='party-sidebar']",
+        "//*[@id='receipt']"
+      ]
+    },
+    {
+      "name": "category_listing",
+      "fixture": "category_listing.html",
+      "positive_regions": [
+        "//*[@id='product-grid']"
+      ],
+      "negative_regions": [
+        "//*[@id='category-header']",
+        "//*[@id='left-filters']",
+        "//*[@id='category-pagination']",
+        "//*[@id='category-footer']"
+      ]
+    },
+    {
+      "name": "team_directory_cards",
+      "fixture": "team_directory_cards.html",
+      "positive_regions": [
+        "//*[@id='team-cards']"
+      ],
+      "negative_regions": [
+        "//*[@id='team-header']",
+        "//*[@id='hero-copy']",
+        "//*[@id='team-filters']",
+        "//*[@id='team-footer']"
+      ]
+    }
+  ]
+}

@@ -150,6 +150,17 @@ class BrowserNavigateTool(KaosTool):
                     description="CSS selector to wait for after navigation.",
                     required=False,
                 ),
+                ParameterSchema(
+                    name="dismiss_overlays",
+                    type="boolean",
+                    description=(
+                        "Auto-dismiss known cookie consent banners (OneTrust, CookieBot, "
+                        "TrustArc, etc.) after navigation. Useful when overlays block "
+                        "page interaction."
+                    ),
+                    required=False,
+                    default=False,
+                ),
             ],
         )
 
@@ -160,6 +171,7 @@ class BrowserNavigateTool(KaosTool):
         context_id = inputs.get("context_id", "default")
         wait_until = inputs.get("wait_until", "load")
         wait_for_selector = inputs.get("wait_for_selector")
+        dismiss_overlays = inputs.get("dismiss_overlays", False)
 
         try:
             from kaos_web.models import WebRequest
@@ -168,6 +180,8 @@ class BrowserNavigateTool(KaosTool):
             extra: dict[str, Any] = {"context_id": context_id, "wait_until": wait_until}
             if wait_for_selector:
                 extra["wait_for_selector"] = wait_for_selector
+            if dismiss_overlays:
+                extra["dismiss_overlays"] = True
 
             resp = await client.fetch(WebRequest(url=url, extra=extra))
 
@@ -577,6 +591,45 @@ class ScreenshotTool(KaosTool):
                 source = url
 
             mime = f"image/{fmt}"
+
+            # Store as artifact when runtime context is available
+            if context is not None and context.runtime is not None:
+                from kaos_content.artifacts import unique_document_name
+                from kaos_core.types.enums import ArtifactRole
+
+                name = unique_document_name(source or "screenshot")
+                vfs_path = f"images/{name}.{fmt}"
+                ctx_path = context.get_vfs_path(vfs_path)
+                await ctx_path.write_bytes(img_bytes)
+                manifest = await context.runtime.artifacts.create_from_path(
+                    vfs_path,
+                    context_id=context.session_id,
+                    session_id=context.session_id,
+                    name=name,
+                    description=f"Screenshot of {source}",
+                    mime_type=mime,
+                    role=ArtifactRole.BODY,
+                    provenance={
+                        "source": source,
+                        "tool": "kaos-web-browser-screenshot",
+                    },
+                    metadata={
+                        "format": fmt,
+                        "full_page": full_page,
+                        "size_bytes": len(img_bytes),
+                    },
+                )
+                return manifest.to_tool_result(
+                    summary=f"Screenshot of {source} ({len(img_bytes)} bytes, {fmt})",
+                    structured_content={
+                        "artifact_id": manifest.artifact_id,
+                        "body_uri": manifest.body_uri,
+                        "format": fmt,
+                        "size_bytes": len(img_bytes),
+                    },
+                )
+
+            # Inline fallback (no runtime context)
             b64 = base64.b64encode(img_bytes).decode("ascii")
 
             return ToolResult(
@@ -789,6 +842,38 @@ class GetPageContentTool(KaosTool):
 
             doc = html_to_document(html, url=current_url)
 
+            # Store as artifact when runtime context is available
+            if context is not None and context.runtime is not None:
+                from kaos_content.artifacts import (
+                    document_to_summary,
+                    store_document,
+                    unique_document_name,
+                )
+
+                manifest = await store_document(
+                    doc,
+                    context.runtime,
+                    context,
+                    name=unique_document_name(doc.metadata.title or current_url),
+                    description=f"Browser content from {current_url}",
+                    metadata={
+                        "source_url": current_url,
+                        "context_id": context_id,
+                        "block_count": len(doc.body),
+                    },
+                )
+                summary = document_to_summary(doc, max_length=500)
+                return manifest.to_tool_result(
+                    summary=summary,
+                    structured_content={
+                        "artifact_id": manifest.artifact_id,
+                        "title": doc.metadata.title,
+                        "url": current_url,
+                        "body_uri": manifest.body_uri,
+                    },
+                )
+
+            # Inline fallback (no runtime context)
             if output_format == "text":
                 from kaos_content.serializers.text import serialize_text
 

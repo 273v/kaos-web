@@ -15,6 +15,7 @@ Features:
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any, Never, Self
 
 from kaos_core.logging import get_logger
@@ -151,6 +152,17 @@ class BrowserClient:
         By default, creates an isolated browser context per request.
         Use ``request.extra["context_id"]`` for a named persistent context
         (cookies, storage, and the page persist across requests with the same ID).
+
+        Page lifecycle is managed via a ``page_stored`` flag:
+        - On success with ``context_id``: page is stored in ``self._pages``
+        - On success without ``context_id``: page is closed
+        - On any failure: the inner ``finally`` block closes the page
+
+        Supported ``request.extra`` keys:
+        - ``context_id``: Named context for persistent sessions
+        - ``wait_until``: Navigation wait strategy
+        - ``wait_for_selector``: CSS selector to wait for after navigation
+        - ``dismiss_overlays``: Auto-dismiss known cookie consent banners
         """
         browser = await self._ensure_browser()
         context_id = request.extra.get("context_id")
@@ -163,64 +175,74 @@ class BrowserClient:
                 await old_page.close()
 
             page = await context.new_page()
-
-            # Navigate
-            wait_until = request.extra.get("wait_until", self._config.default_wait_until)
-            timeout = int(request.timeout * 1000)  # ms
+            page_stored = False
 
             try:
-                response = await page.goto(
-                    request.url,
-                    wait_until=wait_until,
-                    timeout=timeout,
-                )
-            except Exception as exc:
-                if context_id:
-                    # Clean up page on navigation failure
-                    await page.close()
-                    self._pages.pop(context_id, None)
-                _raise_browser_error(exc, request.url, "navigation")
+                # Navigate
+                wait_until = request.extra.get("wait_until", self._config.default_wait_until)
+                timeout = int(request.timeout * 1000)  # ms
 
-            # Wait for selector if specified
-            selector = request.extra.get("wait_for_selector")
-            if selector:
                 try:
-                    await page.wait_for_selector(selector, timeout=timeout)
+                    response = await page.goto(
+                        request.url,
+                        wait_until=wait_until,
+                        timeout=timeout,
+                    )
                 except Exception as exc:
-                    _raise_browser_error(exc, request.url, "wait_for_selector")
+                    _raise_browser_error(exc, request.url, "navigation")
 
-            # Extract content
-            html = await page.content()
-            title = await page.title()
+                # Dismiss known cookie consent banners before content extraction.
+                # Must happen before wait_for_selector — overlays can block content.
+                if request.extra.get("dismiss_overlays", False):
+                    try:
+                        from kaos_web.browser_page_prep import dismiss_cookie_banners
 
-            # Screenshot if requested
-            screenshot: bytes | None = None
-            if request.screenshot:
-                screenshot = await page.screenshot(full_page=True)
+                        await dismiss_cookie_banners(page)
+                    except Exception:
+                        pass  # Never let banner dismissal break content extraction
 
-            # Status code from navigation response
-            status_code = response.status if response else 200
+                # Wait for selector if specified
+                selector = request.extra.get("wait_for_selector")
+                if selector:
+                    try:
+                        await page.wait_for_selector(selector, timeout=timeout)
+                    except Exception as exc:
+                        _raise_browser_error(exc, request.url, "wait_for_selector")
 
-            # Headers from navigation response
-            headers: dict[str, str] = {}
-            if response:
-                headers = dict(response.headers)
+                # Extract content
+                html = await page.content()
+                title = await page.title()
 
-            # For named contexts, keep the page alive for interaction
-            if context_id:
-                self._pages[context_id] = page
-            else:
-                await page.close()
+                # Screenshot if requested
+                screenshot: bytes | None = None
+                if request.screenshot:
+                    screenshot = await page.screenshot(full_page=True)
 
-            return WebResponse(
-                url=page.url if context_id else request.url,
-                status_code=status_code,
-                content_type=headers.get("content-type", "text/html"),
-                html=html,
-                headers=headers,
-                title=title,
-                screenshot=screenshot,
-            )
+                # Response metadata
+                status_code = response.status if response else 200
+                headers: dict[str, str] = dict(response.headers) if response else {}
+
+                # For named contexts, keep the page alive for interaction
+                if context_id:
+                    self._pages[context_id] = page
+                    page_stored = True
+
+                return WebResponse(
+                    url=page.url if context_id else request.url,
+                    status_code=status_code,
+                    content_type=headers.get("content-type", "text/html"),
+                    html=html,
+                    headers=headers,
+                    title=title,
+                    screenshot=screenshot,
+                )
+
+            finally:
+                # Centralized page cleanup: if the page was not stored in a
+                # named context (success or failure), close it to prevent leaks.
+                if not page_stored:
+                    with contextlib.suppress(Exception):
+                        await page.close()
 
         finally:
             # Only close unnamed (per-request) contexts

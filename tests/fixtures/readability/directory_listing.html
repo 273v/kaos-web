@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Example Firm Directory</title>
+</head>
+<body>
+    <header id="site-header">
+        <nav id="primary-nav">
+            <a href="/">Home</a>
+            <a href="/people">People</a>
+            <a href="/services">Services</a>
+            <a href="/contact">Contact</a>
+        </nav>
+    </header>
+
+    <main id="directory-page">
+        <form id="directory-search" class="content search-panel">
+            <h1>Find a Lawyer</h1>
+            <label for="office">Office</label>
+            <select id="office">
+                <option>All offices</option>
+                <option>Detroit</option>
+                <option>Chicago</option>
+                <option>Grand Rapids</option>
+            </select>
+            <label for="practice">Practice</label>
+            <input id="practice" type="text" value="finance" />
+            <button type="submit">Apply Filters</button>
+            <p>
+                Search by name, office, practice, industry, or admissions. Use the
+                filters below to narrow the list before opening an attorney profile.
+            </p>
+            <p>
+                Our professionals advise on finance, litigation, labor, tax, and
+                emerging technology matters across the Midwest and national markets.
+            </p>
+        </form>
+
+        <section id="directory-results" class="directory-results">
+            <article class="person-card">
+                <h2><a href="/people/jane-doe">Jane Doe</a></h2>
+                <p>Partner, Detroit</p>
+                <p>
+                    Jane advises on mergers, private equity, and corporate governance
+                    matters for middle-market and multinational clients.
+                </p>
+            </article>
+            <article class="person-card">
+                <h2><a href="/people/john-smith">John Smith</a></h2>
+                <p>Associate, Chicago</p>
+                <p>
+                    John represents employers in class actions, wage disputes, and
+                    workplace investigations throughout the region.
+                </p>
+            </article>
+            <article class="person-card">
+                <h2><a href="/people/alex-lee">Alex Lee</a></h2>
+                <p>Counsel, Grand Rapids</p>
+                <p>
+                    Alex focuses on commercial finance, restructurings, and lender-side
+                    diligence for asset-backed transactions.
+                </p>
+            </article>
+        </section>
+    </main>
+
+    <footer id="site-footer">
+        <nav>
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+        </nav>
+    </footer>
+</body>
+</html>

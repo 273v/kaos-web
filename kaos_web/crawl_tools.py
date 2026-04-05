@@ -220,8 +220,18 @@ class BatchFetchTool(KaosTool):
 
             result = await batch_fetch(urls, concurrency=concurrency)
 
+            has_context = context is not None and context.runtime is not None
             pages = []
             for resp in result.responses:
+                # Store as artifact when runtime context is available
+                if has_context and resp.ok and resp.html and context is not None:
+                    try:
+                        page_data = await _store_response_artifact(resp, context)
+                        pages.append(page_data)
+                        continue
+                    except Exception:
+                        pass  # Fall through to inline extraction
+
                 page_data = await _extract_response(resp, output_format)
                 pages.append(page_data)
 
@@ -231,6 +241,7 @@ class BatchFetchTool(KaosTool):
                     "total": result.total,
                     "succeeded": result.succeeded,
                     "failed": result.failed,
+                    "artifact_backed": has_context,
                     "elapsed_ms": round(result.elapsed_ms, 1),
                     "errors": [{"url": e.url, "error": e.error} for e in result.errors],
                 }
@@ -356,8 +367,18 @@ class CrawlSiteTool(KaosTool):
                 exclude_patterns=exc,
             )
 
+            has_context = context is not None and context.runtime is not None
             pages = []
             for page in result.pages:
+                # Store as markdown artifact when runtime context is available
+                if has_context and page.content_markdown and context is not None:
+                    try:
+                        page_data = await _store_crawl_page_artifact(page, context)
+                        pages.append(page_data)
+                        continue
+                    except Exception:
+                        pass  # Fall through to inline extraction
+
                 if output_format == "summary":
                     word_count = len(page.content_text.split()) if page.content_text else 0
                     pages.append(
@@ -396,6 +417,7 @@ class CrawlSiteTool(KaosTool):
                     "total_discovered": result.total_discovered,
                     "total_crawled": result.total_crawled,
                     "total_extracted": result.total_extracted,
+                    "artifact_backed": has_context,
                     "sitemap_entries": result.sitemap_entries,
                     "elapsed_ms": round(result.elapsed_ms, 1),
                     "errors": [{"url": e.url, "error": e.error} for e in result.errors[:10]],
@@ -461,3 +483,77 @@ async def _extract_response(resp: WebResponse, output_format: str) -> dict[str, 
         page_data["error"] = f"Extraction failed: {exc}"
 
     return page_data
+
+
+async def _store_response_artifact(resp: WebResponse, context: KaosContext) -> dict[str, Any]:
+    """Parse a WebResponse into a ContentDocument and store as a session artifact.
+
+    Returns a dict with artifact metadata suitable for inclusion in
+    BatchFetchTool / CrawlSiteTool structured output.
+    """
+    from kaos_content.artifacts import store_document, unique_document_name
+    from kaos_web.extract import html_to_document
+
+    doc = html_to_document(resp.html, url=resp.url)
+    if not doc.body:
+        msg = "No content extracted"
+        raise ValueError(msg)
+
+    manifest = await store_document(
+        doc,
+        context.runtime,
+        context,
+        name=unique_document_name(doc.metadata.title or resp.url),
+        description=f"Batch fetch: {resp.url}",
+        metadata={"source_url": resp.url, "block_count": len(doc.body)},
+    )
+    return {
+        "url": resp.url,
+        "artifact_id": manifest.artifact_id,
+        "title": doc.metadata.title,
+        "body_uri": manifest.body_uri,
+        "size": manifest.size,
+    }
+
+
+async def _store_crawl_page_artifact(page: Any, context: KaosContext) -> dict[str, Any]:
+    """Store a crawled page's markdown content as a session artifact.
+
+    CrawlPage objects carry pre-serialized markdown (not a ContentDocument),
+    so we store the markdown text directly via VFS + create_from_path.
+    """
+    from kaos_content.artifacts import unique_document_name
+    from kaos_core.types.enums import ArtifactRole
+
+    name = unique_document_name(page.title or page.url)
+    vfs_path = f"documents/{name}.md"
+    ctx_path = context.get_vfs_path(vfs_path)
+    await ctx_path.write_bytes(page.content_markdown.encode("utf-8"))
+
+    manifest = await context.runtime.artifacts.create_from_path(
+        vfs_path,
+        context_id=context.session_id,
+        session_id=context.session_id,
+        name=name,
+        description=f"Crawled: {page.url}",
+        mime_type="text/markdown",
+        role=ArtifactRole.BODY,
+        provenance={
+            "source_url": page.url,
+            "tool": "kaos-web-crawl-site",
+            "depth": page.depth,
+        },
+        metadata={
+            "source_url": page.url,
+            "title": page.title,
+            "depth": page.depth,
+        },
+    )
+    return {
+        "url": page.url,
+        "artifact_id": manifest.artifact_id,
+        "title": page.title,
+        "body_uri": manifest.body_uri,
+        "size": manifest.size,
+        "depth": page.depth,
+    }

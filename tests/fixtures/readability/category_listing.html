@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Books Category Listing</title>
+</head>
+<body>
+    <header id="category-header">
+        <nav>
+            <a href="/">Home</a>
+            <a href="/books">Books</a>
+            <a href="/sale">Sale</a>
+        </nav>
+    </header>
+
+    <main id="category-layout">
+        <aside id="left-filters">
+            <h2>Categories</h2>
+            <ul>
+                <li><a href="/books/fiction">Fiction</a></li>
+                <li><a href="/books/history">History</a></li>
+                <li><a href="/books/science">Science</a></li>
+            </ul>
+        </aside>
+
+        <section id="product-grid">
+            <h1>Poetry</h1>
+            <article class="book-card">
+                <h2><a href="/books/light-in-the-attic">A Light in the Attic</a></h2>
+                <p>Price: £51.77</p>
+                <p>
+                    Shel Silverstein’s classic collection of poems and drawings
+                    in a special anniversary edition.
+                </p>
+            </article>
+            <article class="book-card">
+                <h2><a href="/books/tipping-the-velvet">Tipping the Velvet</a></h2>
+                <p>Price: £53.74</p>
+                <p>
+                    A historical novel following Nan King through Victorian
+                    theater, class, and reinvention.
+                </p>
+            </article>
+            <article class="book-card">
+                <h2><a href="/books/sharp-objects">Sharp Objects</a></h2>
+                <p>Price: £47.82</p>
+                <p>
+                    A reporter returns to her hometown to cover violent crimes
+                    while confronting family history.
+                </p>
+            </article>
+        </section>
+
+        <nav id="category-pagination">
+            <a href="?page=1">1</a>
+            <a href="?page=2">2</a>
+            <a href="?page=next">Next</a>
+        </nav>
+    </main>
+
+    <footer id="category-footer">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+    </footer>
+</body>
+</html>

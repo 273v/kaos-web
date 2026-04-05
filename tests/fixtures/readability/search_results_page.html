@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Client Alert Search</title>
+</head>
+<body>
+    <header id="search-header">
+        <nav>
+            <a href="/home">Home</a>
+            <a href="/insights">Insights</a>
+            <a href="/team">Team</a>
+        </nav>
+    </header>
+
+    <main id="search-layout">
+        <form id="search-box" class="content finder-panel">
+            <h1>Search Client Alerts</h1>
+            <label for="q">Keyword</label>
+            <input id="q" type="text" value="privacy" />
+            <label for="industry">Industry</label>
+            <select id="industry">
+                <option>All industries</option>
+                <option>Healthcare</option>
+                <option>Financial services</option>
+            </select>
+            <button type="submit">Search</button>
+            <p>
+                Use filters to locate alerts, webinars, and short explainers across
+                privacy, employment, investigations, and consumer protection topics.
+            </p>
+        </form>
+
+        <aside id="search-filters">
+            <h2>Filter Results</h2>
+            <ul>
+                <li><a href="?type=alert">Alerts</a></li>
+                <li><a href="?type=webinar">Webinars</a></li>
+                <li><a href="?type=podcast">Podcasts</a></li>
+            </ul>
+        </aside>
+
+        <section id="search-results" class="search-results">
+            <article class="result-card">
+                <h2><a href="/alerts/privacy-transfer-risk">Cross-border privacy transfer risk after new agency guidance</a></h2>
+                <p>
+                    Regulators emphasized transfer-impact assessments, vendor diligence,
+                    and contractual remediation steps for multinational organizations.
+                </p>
+            </article>
+            <article class="result-card">
+                <h2><a href="/alerts/privacy-state-enforcement">State privacy enforcement trends in health and consumer data</a></h2>
+                <p>
+                    Enforcement activity continues to focus on notice accuracy, sensitive
+                    data controls, and retention practices that outlive the business need.
+                </p>
+            </article>
+            <article class="result-card">
+                <h2><a href="/alerts/privacy-ai-governance">AI governance checklists for privacy and product teams</a></h2>
+                <p>
+                    Product launches now require tighter documentation around training
+                    data provenance, model outputs, and escalation paths for complaints.
+                </p>
+            </article>
+        </section>
+
+        <nav id="search-pagination">
+            <a href="?page=1">1</a>
+            <a href="?page=2">2</a>
+            <a href="?page=3">3</a>
+            <a href="?page=next">Next</a>
+        </nav>
+    </main>
+
+    <footer id="search-footer">
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+    </footer>
+</body>
+</html>

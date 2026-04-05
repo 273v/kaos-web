@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Advisory Team Directory</title>
+</head>
+<body>
+    <header id="team-header">
+        <nav>
+            <a href="/about">About</a>
+            <a href="/team">Team</a>
+            <a href="/industries">Industries</a>
+        </nav>
+    </header>
+
+    <main id="team-layout">
+        <section id="hero-copy">
+            <h1>Meet the Team</h1>
+            <p>
+                Our lawyers advise on litigation, finance, privacy, labor, and
+                regulatory matters across offices in Chicago, Detroit, and New York.
+            </p>
+        </section>
+
+        <form id="team-filters">
+            <label for="office-filter">Office</label>
+            <select id="office-filter">
+                <option>All offices</option>
+                <option>Chicago</option>
+                <option>Detroit</option>
+                <option>New York</option>
+            </select>
+            <label for="practice-filter">Practice</label>
+            <input id="practice-filter" type="text" value="privacy" />
+            <button type="submit">Filter</button>
+        </form>
+
+        <section id="team-cards">
+            <article class="team-card">
+                <h2><a href="/team/maria-james">Maria James</a></h2>
+                <p>Partner, New York</p>
+                <p>
+                    Maria leads cross-border privacy investigations and advises
+                    clients on incident response, vendor diligence, and AI governance.
+                </p>
+            </article>
+            <article class="team-card">
+                <h2><a href="/team/liam-porter">Liam Porter</a></h2>
+                <p>Counsel, Chicago</p>
+                <p>
+                    Liam focuses on class actions, product counseling, and consumer
+                    protection disputes in state and federal courts.
+                </p>
+            </article>
+            <article class="team-card">
+                <h2><a href="/team/sofia-nguyen">Sofia Nguyen</a></h2>
+                <p>Associate, Detroit</p>
+                <p>
+                    Sofia supports commercial finance, restructuring, and secured
+                    lending transactions for middle-market lenders.
+                </p>
+            </article>
+        </section>
+    </main>
+
+    <footer id="team-footer">
+        <a href="/careers">Careers</a>
+        <a href="/contact">Contact</a>
+    </footer>
+</body>
+</html>

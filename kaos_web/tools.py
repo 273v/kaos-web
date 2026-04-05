@@ -25,17 +25,79 @@ _WEB_ANNOTATIONS = ToolAnnotations(
     openWorldHint=True,
 )
 
+# Shared parameter schemas for browser-mode tools.
+_BROWSER_PARAMS: list[ParameterSchema] = [
+    ParameterSchema(
+        name="dismiss_overlays",
+        type="boolean",
+        description=(
+            "Auto-dismiss known cookie consent banners (OneTrust, CookieBot, "
+            "TrustArc, etc.) before extracting content. Only applies when "
+            "use_browser=true. Set false to skip."
+        ),
+        required=False,
+        default=True,
+    ),
+    ParameterSchema(
+        name="wait_for_selector",
+        type="string",
+        description=(
+            "CSS selector to wait for before extracting content. Only applies "
+            "when use_browser=true. Useful for JS-rendered pages where specific "
+            "content must appear (e.g. '#results', '.article-body')."
+        ),
+        required=False,
+    ),
+]
+
+
+def _browser_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Extract browser-related kwargs from tool inputs for ``_fetch_html``."""
+    kw: dict[str, Any] = {}
+    if inputs.get("dismiss_overlays") is not None:
+        kw["dismiss_overlays"] = inputs["dismiss_overlays"]
+    if inputs.get("wait_for_selector"):
+        kw["wait_for_selector"] = inputs["wait_for_selector"]
+    return kw
+
 
 async def _fetch_html(
-    url: str, use_browser: bool = False, context_id: str | None = None
+    url: str,
+    use_browser: bool = False,
+    context_id: str | None = None,
+    *,
+    dismiss_overlays: bool = True,
+    wait_for_selector: str | None = None,
 ) -> tuple[str, str]:
     """Fetch HTML from a URL. Returns (html, final_url).
 
     If ``context_id`` is provided with ``use_browser=True``, the browser page
     is kept alive for subsequent interaction via browser tools.
+
+    Args:
+        url: URL to fetch.
+        use_browser: Use Playwright browser rendering.
+        context_id: Named browser context for persistent sessions.
+        dismiss_overlays: Auto-dismiss known cookie consent banners
+            (OneTrust, CookieBot, etc.) before extraction. Only applies
+            when using browser rendering. Defaults to True.
+        wait_for_selector: CSS selector to wait for before extracting
+            content. Only applies when using browser rendering.
     """
     from kaos_web.clients.http import HttpClient
     from kaos_web.models import WebRequest
+
+    def _browser_extra(
+        cid: str | None = None,
+    ) -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        if cid:
+            extra["context_id"] = cid
+        if dismiss_overlays:
+            extra["dismiss_overlays"] = True
+        if wait_for_selector:
+            extra["wait_for_selector"] = wait_for_selector
+        return extra
 
     if use_browser:
         try:
@@ -44,14 +106,13 @@ async def _fetch_html(
                 from kaos_web.browser_tools import _get_browser_client
 
                 client = await _get_browser_client()
-                extra: dict[str, Any] = {"context_id": context_id}
-                resp = await client.fetch(WebRequest(url=url, extra=extra))
+                resp = await client.fetch(WebRequest(url=url, extra=_browser_extra(context_id)))
                 return resp.html, resp.url
             else:
                 from kaos_web.clients.browser import BrowserClient
 
                 async with BrowserClient() as client:
-                    resp = await client.fetch(WebRequest(url=url))
+                    resp = await client.fetch(WebRequest(url=url, extra=_browser_extra()))
                     return resp.html, resp.url
         except ImportError:
             pass  # Fall back to HTTP
@@ -68,7 +129,7 @@ async def _fetch_html(
                 from kaos_web.clients.browser import BrowserClient
 
                 async with BrowserClient() as browser:
-                    browser_resp = await browser.fetch(WebRequest(url=url))
+                    browser_resp = await browser.fetch(WebRequest(url=url, extra=_browser_extra()))
                     return browser_resp.html, browser_resp.url
             except ImportError:
                 pass  # Playwright not installed
@@ -114,6 +175,7 @@ class FetchPageTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                *_BROWSER_PARAMS,
             ],
         )
 
@@ -132,7 +194,7 @@ class FetchPageTool(KaosTool):
             )
 
         try:
-            html, final_url = await _fetch_html(url, use_browser)
+            html, final_url = await _fetch_html(url, use_browser, **_browser_inputs(inputs))
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. "
@@ -216,6 +278,7 @@ class GetPageTextTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                *_BROWSER_PARAMS,
             ],
         )
 
@@ -225,7 +288,9 @@ class GetPageTextTool(KaosTool):
         url = inputs["url"]
         raw = inputs.get("raw", False)
         try:
-            html, final_url = await _fetch_html(url, inputs.get("use_browser", False))
+            html, final_url = await _fetch_html(
+                url, inputs.get("use_browser", False), **_browser_inputs(inputs)
+            )
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. "
@@ -233,10 +298,40 @@ class GetPageTextTool(KaosTool):
             )
 
         try:
-            from kaos_content.serializers.text import serialize_text
             from kaos_web.extract import html_to_document
 
             doc = html_to_document(html, url=final_url, extract_content=not raw)
+
+            # Store as artifact when runtime context is available
+            if context is not None and context.runtime is not None:
+                from kaos_content.artifacts import (
+                    document_to_summary,
+                    store_document,
+                    unique_document_name,
+                )
+
+                manifest = await store_document(
+                    doc,
+                    context.runtime,
+                    context,
+                    name=unique_document_name(doc.metadata.title or final_url),
+                    description=f"Text extraction from {final_url}",
+                    metadata={"source_url": final_url, "block_count": len(doc.body)},
+                )
+                summary = document_to_summary(doc, max_length=500)
+                return manifest.to_tool_result(
+                    summary=summary,
+                    structured_content={
+                        "artifact_id": manifest.artifact_id,
+                        "title": doc.metadata.title,
+                        "url": final_url,
+                        "body_uri": manifest.body_uri,
+                    },
+                )
+
+            # Inline fallback (no runtime context)
+            from kaos_content.serializers.text import serialize_text
+
             text = serialize_text(doc)
             return ToolResult.create_success(text)
         except Exception as exc:
@@ -279,6 +374,7 @@ class GetPageMarkdownTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                *_BROWSER_PARAMS,
             ],
         )
 
@@ -288,7 +384,9 @@ class GetPageMarkdownTool(KaosTool):
         url = inputs["url"]
         raw = inputs.get("raw", False)
         try:
-            html, final_url = await _fetch_html(url, inputs.get("use_browser", False))
+            html, final_url = await _fetch_html(
+                url, inputs.get("use_browser", False), **_browser_inputs(inputs)
+            )
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. "
@@ -296,10 +394,41 @@ class GetPageMarkdownTool(KaosTool):
             )
 
         try:
-            from kaos_content.serializers.markdown import serialize_markdown
             from kaos_web.extract import html_to_document
 
             doc = html_to_document(html, url=final_url, extract_content=not raw)
+
+            # Store as artifact when runtime context is available
+            if context is not None and context.runtime is not None:
+                from kaos_content.artifacts import (
+                    document_to_summary,
+                    store_document,
+                    unique_document_name,
+                )
+
+                manifest = await store_document(
+                    doc,
+                    context.runtime,
+                    context,
+                    name=unique_document_name(doc.metadata.title or final_url),
+                    description=f"Markdown extraction from {final_url}",
+                    metadata={"source_url": final_url, "block_count": len(doc.body)},
+                )
+                summary = document_to_summary(doc, max_length=500)
+                return manifest.to_tool_result(
+                    summary=summary,
+                    structured_content={
+                        "artifact_id": manifest.artifact_id,
+                        "title": doc.metadata.title,
+                        "url": final_url,
+                        "body_uri": manifest.body_uri,
+                        "markdown_uri": f"kaos://content/{manifest.artifact_id}/markdown",
+                    },
+                )
+
+            # Inline fallback (no runtime context)
+            from kaos_content.serializers.markdown import serialize_markdown
+
             md = serialize_markdown(doc)
             return ToolResult.create_success(md)
         except Exception as exc:
@@ -401,6 +530,7 @@ class SearchPageTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                *_BROWSER_PARAMS,
             ],
         )
 
@@ -418,7 +548,9 @@ class SearchPageTool(KaosTool):
             )
 
         try:
-            html, final_url = await _fetch_html(url, inputs.get("use_browser", False))
+            html, final_url = await _fetch_html(
+                url, inputs.get("use_browser", False), **_browser_inputs(inputs)
+            )
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. "
@@ -724,6 +856,7 @@ class GetPageTablesTool(KaosTool):
                     default="tsv",
                     constraints={"enum": ["tsv", "markdown", "json"]},
                 ),
+                *_BROWSER_PARAMS,
             ],
         )
 
@@ -735,7 +868,9 @@ class GetPageTablesTool(KaosTool):
         fmt = inputs.get("format", "tsv")
 
         try:
-            html, final_url = await _fetch_html(url, use_browser=use_browser)
+            html, final_url = await _fetch_html(
+                url, use_browser=use_browser, **_browser_inputs(inputs)
+            )
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. Try use_browser=true for JS-rendered pages."
