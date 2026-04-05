@@ -653,7 +653,7 @@ class BrowserClient:
 
         else:
 
-            def _on_response(response: Any) -> None:  # type: ignore[misc]
+            def _on_response(response: Any) -> None:
                 # Match response to request by URL
                 for entry in reversed(log):
                     if entry["url"] == response.url and "status" not in entry:

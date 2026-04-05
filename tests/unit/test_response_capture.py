@@ -579,9 +579,9 @@ class TestEnableRequestLoggingToolCapture:
                     "capture_bodies": True,
                 }
             )
-            text = result.require_text()
-            assert "Body capture active" in text
-            assert "captured-responses" in text
+            msg = result.structuredContent["message"]
+            assert "Body capture active" in msg
+            assert "captured-responses" in msg
 
 
 class TestListRequestsToolHasBody:
@@ -617,9 +617,7 @@ class TestListRequestsToolHasBody:
 
             result = await tool.execute({"context_id": "s1"})
             assert not result.isError
-            import json
-
-            output = json.loads(result.require_text())
+            output = result.structuredContent
             assert output["requests"][0]["has_body"] is True
             assert output["requests"][0]["body_size"] == 1234
             assert output["requests"][1]["has_body"] is False
@@ -654,9 +652,7 @@ class TestGetRequestDetailToolBody:
 
             result = await tool.execute({"context_id": "s1", "request_id": 0})
             assert not result.isError
-            import json
-
-            output = json.loads(result.require_text())
+            output = result.structuredContent
             assert output["body"] == '{"people": []}'
             assert "body_encoding" not in output
 
@@ -688,9 +684,7 @@ class TestGetRequestDetailToolBody:
 
             result = await tool.execute({"context_id": "s1", "request_id": 0})
             assert not result.isError
-            import json
-
-            output = json.loads(result.require_text())
+            output = result.structuredContent
             assert output["body_encoding"] == "base64"
 
     @pytest.mark.asyncio
@@ -720,7 +714,7 @@ class TestGetRequestDetailToolBody:
             )
             assert not result.isError
             # get_response_body should not have been called
-            mock_client.get_response_body.assert_not_awaited()
+            mock_client.get_response_body.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -752,9 +746,9 @@ class TestListCapturedResponsesTool:
 
             result = await tool.execute({"context_id": "s1"})
             assert not result.isError
-            text = result.require_text()
-            assert "No captured response bodies" in text
-            assert "capture_bodies=true" in text
+            msg = result.structuredContent["message"]
+            assert "No captured response bodies" in msg
+            assert "capture_bodies=true" in msg
 
     @pytest.mark.asyncio
     async def test_returns_captured_response_summaries(self):
@@ -782,9 +776,7 @@ class TestListCapturedResponsesTool:
 
             result = await tool.execute({"context_id": "s1"})
             assert not result.isError
-            import json
-
-            output = json.loads(result.require_text())
+            output = result.structuredContent
             assert output["total_captured"] == 1
             assert output["responses"][0]["url"] == "https://api.example.com/people"
 
@@ -818,9 +810,7 @@ class TestListCapturedResponsesTool:
                 context=None,
             )
             assert not result.isError
-            import json
-
-            output = json.loads(result.require_text())
+            output = result.structuredContent
             assert output["total_captured"] == 1
             assert "artifacts_created" not in output
 
@@ -887,9 +877,7 @@ class TestListCapturedResponsesTool:
             assert call_kwargs["mime_type"] == "application/json"
             assert call_kwargs["session_id"] == "test-session"
 
-            import json
-
-            output = json.loads(result.require_text())
+            output = result.structuredContent
             assert output["artifacts_created"] == 1
             assert output["artifacts"][0]["artifact_id"] == "art-123"
 
@@ -927,4 +915,4 @@ class TestListCapturedResponsesTool:
             )
             assert not result.isError
             # No artifacts created for non-JSON
-            mock_context.runtime.artifacts.create_from_path.assert_not_awaited()
+            mock_context.runtime.artifacts.create_from_path.assert_not_called()

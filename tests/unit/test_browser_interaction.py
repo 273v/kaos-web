@@ -372,6 +372,7 @@ class TestBrowserToolMetadata:
             GetPageContentTool,
             GetRequestDetailTool,
             GetSnapshotTool,
+            ListCapturedResponsesTool,
             ListContextsTool,
             ListRequestsTool,
             PressKeyTool,
@@ -399,6 +400,7 @@ class TestBrowserToolMetadata:
             EnableRequestLoggingTool(),
             ListRequestsTool(),
             GetRequestDetailTool(),
+            ListCapturedResponsesTool(),
             ListContextsTool(),
             CloseContextTool(),
         ]
