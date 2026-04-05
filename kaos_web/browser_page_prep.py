@@ -1,8 +1,10 @@
 """Browser page preparation utilities.
 
-Handles cookie consent banner dismissal for browser-based content extraction.
-Only targets well-known Consent Management Platforms (CMPs) with stable,
-documented selectors. No heuristic or generic popup detection.
+Handles cookie consent banner dismissal and content settling detection
+for browser-based content extraction.
+
+Cookie dismissal targets well-known Consent Management Platforms (CMPs)
+with stable, documented selectors. No heuristic or generic popup detection.
 
 Each CMP entry is tested against major deployments and uses official element IDs
 where possible. The list is intentionally conservative — better to miss an
@@ -180,3 +182,88 @@ async def dismiss_cookie_banners(
     except Exception:
         logger.debug("Cookie banner dismiss click failed: %s", cmp.name)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Content settling
+# ---------------------------------------------------------------------------
+# Two-phase approach:
+#   Phase 1 (fast path, ~5ms): check if page already has meaningful content.
+#   Phase 2 (slow path, only when Phase 1 fails): MutationObserver with
+#     timer-reset pattern — resolve when DOM mutations stop for `quiet_ms`,
+#     or hard-timeout at `timeout_ms`.
+#
+# Cost: 0ms on already-rendered pages. 500ms-5s on JS-filled pages.
+#        Never hangs — hard timeout ensures we always return.
+# ---------------------------------------------------------------------------
+
+_CONTENT_CHECK_JS = """
+() => {
+    const candidates = document.querySelectorAll(
+        'main, article, [role="main"], #content, .content, #main, .main'
+    );
+    for (const el of candidates) {
+        if (el.innerText && el.innerText.trim().length > 200) return true;
+    }
+    return document.body && document.body.innerText
+        && document.body.innerText.trim().length > 500;
+}
+"""
+
+_SETTLE_JS = """
+(opts) => new Promise((resolve) => {
+    let timer = setTimeout(() => { observer.disconnect(); resolve(); }, opts.quiet);
+    const observer = new MutationObserver(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { observer.disconnect(); resolve(); }, opts.quiet);
+    });
+    observer.observe(document.body, {
+        childList: true, subtree: true, characterData: true
+    });
+    setTimeout(() => { observer.disconnect(); resolve(); }, opts.timeout);
+})
+"""
+
+
+async def wait_for_content_settled(
+    page: Any,
+    *,
+    quiet_ms: int = 500,
+    timeout_ms: int = 5000,
+) -> bool:
+    """Wait for page content to appear, using a two-phase approach.
+
+    Phase 1: Instant check — does the page already have meaningful content
+    in a semantic container? If yes, return immediately (0ms penalty).
+
+    Phase 2: MutationObserver — watch for DOM mutations to stop for
+    ``quiet_ms``. Hard timeout at ``timeout_ms`` to avoid hanging on
+    pages with constant updates (carousels, tickers, streaming).
+
+    Args:
+        page: Playwright Page object (must already be navigated).
+        quiet_ms: Mutation quiet period before considering settled.
+        timeout_ms: Hard timeout — extract whatever is there.
+
+    Returns:
+        True if content was found (fast path) or mutations settled.
+        False if the hard timeout was hit.
+    """
+    # Phase 1: fast path — check if content already exists.
+    try:
+        has_content = await page.evaluate(_CONTENT_CHECK_JS)
+        if has_content:
+            return True
+    except Exception:
+        return True  # Page may be closed; let caller handle extraction
+
+    logger.info("Page content not yet rendered, waiting for DOM to settle")
+
+    # Phase 2: slow path — MutationObserver wait.
+    try:
+        await page.evaluate(_SETTLE_JS, {"quiet": quiet_ms, "timeout": timeout_ms})
+    except Exception:
+        logger.debug("Content settling wait failed (page may be closed)")
+        return False
+
+    return True

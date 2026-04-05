@@ -161,6 +161,16 @@ class BrowserNavigateTool(KaosTool):
                     required=False,
                     default=False,
                 ),
+                ParameterSchema(
+                    name="wait_for_settled",
+                    type="boolean",
+                    description=(
+                        "Wait for JS content to render before returning. "
+                        "Zero penalty on already-rendered pages."
+                    ),
+                    required=False,
+                    default=False,
+                ),
             ],
         )
 
@@ -172,6 +182,7 @@ class BrowserNavigateTool(KaosTool):
         wait_until = inputs.get("wait_until", "load")
         wait_for_selector = inputs.get("wait_for_selector")
         dismiss_overlays = inputs.get("dismiss_overlays", False)
+        wait_for_settled = inputs.get("wait_for_settled", False)
 
         try:
             from kaos_web.models import WebRequest
@@ -182,6 +193,8 @@ class BrowserNavigateTool(KaosTool):
                 extra["wait_for_selector"] = wait_for_selector
             if dismiss_overlays:
                 extra["dismiss_overlays"] = True
+            if wait_for_settled:
+                extra["wait_for_settled"] = True
 
             resp = await client.fetch(WebRequest(url=url, extra=extra))
 

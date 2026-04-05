@@ -201,8 +201,18 @@ class BrowserClient:
                     except Exception:
                         pass  # Never let banner dismissal break content extraction
 
-                # Wait for selector if specified
+                # Wait for content to settle on JS-rendered pages.
+                # Skipped when wait_for_selector is explicit (caller knows what to wait for).
                 selector = request.extra.get("wait_for_selector")
+                if not selector and request.extra.get("wait_for_settled", False):
+                    try:
+                        from kaos_web.browser_page_prep import wait_for_content_settled
+
+                        await wait_for_content_settled(page)
+                    except Exception:
+                        pass  # Never let settling detection break extraction
+
+                # Wait for selector if specified
                 if selector:
                     try:
                         await page.wait_for_selector(selector, timeout=timeout)

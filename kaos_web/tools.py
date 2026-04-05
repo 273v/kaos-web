@@ -60,6 +60,18 @@ _BROWSER_PARAMS: list[ParameterSchema] = [
         ),
         required=False,
     ),
+    ParameterSchema(
+        name="wait_for_settled",
+        type="boolean",
+        description=(
+            "Wait for JS-rendered content to appear before extraction. "
+            "Zero penalty on already-rendered pages; waits up to 5s on "
+            "JS-heavy pages. Skipped when wait_for_selector is set. "
+            "Only applies when use_browser=true."
+        ),
+        required=False,
+        default=True,
+    ),
 ]
 
 
@@ -70,6 +82,8 @@ def _browser_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
         kw["dismiss_overlays"] = inputs["dismiss_overlays"]
     if inputs.get("wait_for_selector"):
         kw["wait_for_selector"] = inputs["wait_for_selector"]
+    if inputs.get("wait_for_settled") is not None:
+        kw["wait_for_settled"] = inputs["wait_for_settled"]
     return kw
 
 
@@ -80,6 +94,7 @@ async def _fetch_html(
     *,
     dismiss_overlays: bool = True,
     wait_for_selector: str | None = None,
+    wait_for_settled: bool = True,
 ) -> tuple[str, str]:
     """Fetch HTML from a URL. Returns (html, final_url).
 
@@ -95,6 +110,9 @@ async def _fetch_html(
             when using browser rendering. Defaults to True.
         wait_for_selector: CSS selector to wait for before extracting
             content. Only applies when using browser rendering.
+        wait_for_settled: Wait for JS-rendered content to appear.
+            Zero penalty on already-rendered pages. Skipped when
+            wait_for_selector is set. Defaults to True.
     """
     from kaos_web.clients.http import HttpClient
     from kaos_web.models import WebRequest
@@ -109,6 +127,8 @@ async def _fetch_html(
             extra["dismiss_overlays"] = True
         if wait_for_selector:
             extra["wait_for_selector"] = wait_for_selector
+        if wait_for_settled:
+            extra["wait_for_settled"] = True
         return extra
 
     if use_browser:

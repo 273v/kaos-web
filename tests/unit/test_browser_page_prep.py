@@ -15,6 +15,7 @@ from kaos_web.browser_page_prep import (
     KNOWN_CMPS,
     KnownCMP,
     dismiss_cookie_banners,
+    wait_for_content_settled,
 )
 
 # ---------------------------------------------------------------------------
@@ -321,3 +322,92 @@ class TestToolSchemas:
 
         params = self._get_param_names(BrowserNavigateTool)
         assert "dismiss_overlays" in params
+
+    def test_tools_have_wait_for_settled(self):
+        from kaos_web.browser_tools import BrowserNavigateTool
+        from kaos_web.tools import GetPageMarkdownTool
+
+        for cls in [GetPageMarkdownTool, BrowserNavigateTool]:
+            params = self._get_param_names(cls)
+            assert "wait_for_settled" in params, f"{cls.__name__} missing wait_for_settled"
+
+
+# ---------------------------------------------------------------------------
+# Tests — content settling
+# ---------------------------------------------------------------------------
+
+
+class TestWaitForContentSettled:
+    @pytest.mark.asyncio
+    async def test_fast_path_returns_true(self):
+        """When page already has content, returns True immediately."""
+        page = MagicMock()
+        page.evaluate = AsyncMock(return_value=True)
+        result = await wait_for_content_settled(page)
+        assert result is True
+        # Only one evaluate call (the fast-path check), no slow path
+        assert page.evaluate.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_slow_path_on_empty_page(self):
+        """When page has no content, falls through to MutationObserver wait."""
+        page = MagicMock()
+        # First call (fast path) returns False, second call (settle) returns None
+        page.evaluate = AsyncMock(side_effect=[False, None])
+        result = await wait_for_content_settled(page)
+        assert result is True
+        # Two evaluate calls: fast path + settle wait
+        assert page.evaluate.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_evaluate_exception_returns_true(self):
+        """If page.evaluate throws on fast path, returns True (let caller handle)."""
+        page = MagicMock()
+        page.evaluate = AsyncMock(side_effect=Exception("Page closed"))
+        result = await wait_for_content_settled(page)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_settle_exception_returns_false(self):
+        """If MutationObserver wait throws, returns False."""
+        page = MagicMock()
+        # Fast path returns False, settle wait throws
+        page.evaluate = AsyncMock(side_effect=[False, Exception("Timeout")])
+        result = await wait_for_content_settled(page)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_wait_for_settled_threaded_to_browser(self):
+        """wait_for_settled=True is passed through _fetch_html to BrowserClient."""
+        from kaos_web.tools import _fetch_html
+
+        mock_client = AsyncMock()
+        mock_client.fetch = AsyncMock(
+            return_value=MagicMock(html="<html></html>", url="https://example.com")
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("kaos_web.clients.browser.BrowserClient", return_value=mock_client):
+            await _fetch_html("https://example.com", use_browser=True, wait_for_settled=True)
+
+        request = mock_client.fetch.call_args[0][0]
+        assert request.extra.get("wait_for_settled") is True
+
+    @pytest.mark.asyncio
+    async def test_wait_for_settled_default_true(self):
+        """wait_for_settled defaults to True in _fetch_html."""
+        from kaos_web.tools import _fetch_html
+
+        mock_client = AsyncMock()
+        mock_client.fetch = AsyncMock(
+            return_value=MagicMock(html="<html></html>", url="https://example.com")
+        )
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("kaos_web.clients.browser.BrowserClient", return_value=mock_client):
+            await _fetch_html("https://example.com", use_browser=True)
+
+        request = mock_client.fetch.call_args[0][0]
+        assert request.extra.get("wait_for_settled") is True
