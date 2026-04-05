@@ -117,7 +117,9 @@ class BrowserNavigateTool(KaosTool):
                 "Navigate to a URL in a persistent browser context. Creates a named "
                 "context with an active page for subsequent interaction tools (click, fill, "
                 "screenshot, evaluate, snapshot). This is the entry point for interactive "
-                "browser workflows."
+                "browser workflows. If request logging was previously enabled for this "
+                "context, logging hooks are automatically re-attached to the new page "
+                "and logs accumulate across navigations."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.EXTRACT,
@@ -1158,10 +1160,15 @@ class EnableRequestLoggingTool(KaosTool):
             display_name="Enable Request Logging",
             description=(
                 "Start recording network requests made by the browser page. "
-                "Call this before navigating or interacting to capture all requests. "
-                "Retrieve recorded requests with 'kaos-web-browser-requests'. "
+                "Call this after 'kaos-web-browser-navigate' to set up a context. "
+                "Logging survives page replacement — subsequent navigate calls on the "
+                "same context_id automatically re-attach logging hooks. "
                 "Set capture_bodies=true to also capture response bodies for "
-                "fetch/xhr requests (e.g., JSON API calls made by SPA pages)."
+                "fetch/xhr requests (e.g., JSON API calls made by SPA pages). "
+                "Workflow: navigate → log-requests (capture_bodies=true) → navigate "
+                "to target page → browser-requests (resource_type='fetch') → "
+                "browser-get-request (get JSON body) → browser-captured-responses "
+                "(store_artifacts=true to persist)."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.EXTRACT,
@@ -1260,7 +1267,10 @@ class ListRequestsTool(KaosTool):
             description=(
                 "List network requests recorded by the browser. "
                 "Call 'kaos-web-browser-log-requests' first to start recording. "
-                "Returns URL, method, resource type, and status for each request."
+                "Returns URL, method, resource type, status, and has_body indicator "
+                "for each request. Filter by resource_type (e.g., 'fetch' or 'xhr') "
+                "to find API calls. Use 'kaos-web-browser-get-request' to get full "
+                "details and response body for a specific request ID."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.QUERY,
@@ -1334,8 +1344,11 @@ class GetRequestDetailTool(KaosTool):
             description=(
                 "Get full details of a specific network request by ID, "
                 "including headers, post data, response headers, and "
-                "optionally the response body (if captured). "
-                "Use 'kaos-web-browser-requests' first to find the request ID."
+                "optionally the response body (if captured with "
+                "capture_bodies=true). JSON/text bodies are returned as "
+                "decoded strings; binary as base64. "
+                "Use 'kaos-web-browser-requests' first to find the request ID. "
+                "For bulk retrieval, use 'kaos-web-browser-captured-responses' instead."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.QUERY,
@@ -1425,11 +1438,14 @@ class ListCapturedResponsesTool(KaosTool):
             description=(
                 "List network responses that have captured bodies. "
                 "Enable body capture first with 'kaos-web-browser-log-requests' "
-                "(capture_bodies=true). Filter by resource_type or content_type. "
+                "(capture_bodies=true), then navigate to trigger API calls. "
+                "Filter by resource_type (e.g., 'fetch') or content_type (e.g., 'json') "
+                "to find relevant API responses. "
                 "Use request_id with 'kaos-web-browser-get-request' to retrieve "
-                "the full body. "
-                "Set store_artifacts=true to persist JSON responses as session "
-                "artifacts discoverable via kaos://session/{session_id}/artifacts."
+                "the full decoded body for a specific response. "
+                "Set store_artifacts=true to persist all captured JSON responses as "
+                "session artifacts discoverable via kaos://session/{session_id}/artifacts "
+                "and queryable with kaos-tabular tools."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.QUERY,

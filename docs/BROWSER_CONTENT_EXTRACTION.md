@@ -10,6 +10,7 @@ Design document covering three interrelated problems encountered during browser-
 - [A. Cookie Consent Banner Dismissal](#a-cookie-consent-banner-dismissal)
 - [B. Content Loading Detection](#b-content-loading-detection)
 - [C. Parametric Readability](#c-parametric-readability)
+- [D. Response Body Capture](#d-response-body-capture)
 - [Field Testing Results](#field-testing-results)
 - [Public Datasets for Training](#public-datasets-for-training)
 - [Implementation Status](#implementation-status)
@@ -329,6 +330,72 @@ For initial training without manual labeling:
 
 ---
 
+## D. Response Body Capture
+
+### Problem
+
+SPA-style directories (DLA Piper, Linklaters) load a page shell and then populate content via `fetch`/`xhr` calls to backend APIs (Sitecore Discover, Sitecore Edge Search, internal REST endpoints). The existing request logging pipeline captured request/response **metadata** (URL, method, headers, status) but not **response bodies** — the actual structured data.
+
+Agents needed to use `browser-evaluate` with custom DOM-parsing JavaScript to extract records, a fragile and non-composable approach.
+
+### Implemented: Response Body Capture Pipeline
+
+**Files:** `kaos_web/clients/browser.py`, `kaos_web/browser_tools.py`
+
+#### Architecture
+
+`enable_request_logging(context_id, capture_bodies=True)` installs an **async** `page.on("response")` handler that:
+
+1. **Phase 1 (sync):** Matches response to request entry, populates status/headers
+2. **Phase 2 (sync filters):** Skips 3xx redirects, checks `resource_type` against whitelist (`fetch`, `xhr` by default), checks `content-type` against whitelist (JSON, HTML, XML, text, CSV), checks `Content-Length` against size limit (1MB default)
+3. **Phase 3 (async):** Calls `await response.body()` wrapped in try/except, truncates if over limit, stores in `_response_bodies[context_id][request_id]`
+
+Playwright's `pyee.asyncio.AsyncIOEventEmitter` handles async handlers natively via `asyncio.ensure_future` — fire-and-forget, exceptions must be caught internally.
+
+#### Hook Re-attachment on Page Replacement
+
+Logging config is stored in `_logging_config[context_id]`. When `BrowserClient.fetch()` replaces a page in a named context, `_attach_logging_handlers()` re-attaches handlers to the new page. Logs accumulate across navigations within the same context.
+
+#### MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `kaos-web-browser-log-requests` | Enable logging with `capture_bodies=true`, configurable `resource_types` and `max_body_size` |
+| `kaos-web-browser-requests` | List all requests with `has_body` indicator and `body_size` |
+| `kaos-web-browser-get-request` | Get full request/response detail with decoded body (JSON as string, binary as base64) |
+| `kaos-web-browser-captured-responses` | List responses with bodies, filter by type, optionally `store_artifacts=true` to persist as session artifacts |
+
+#### Agent Workflow
+
+```
+1. browser-navigate       url="https://firm.com"  context_id="s1"
+2. browser-log-requests   context_id="s1"  capture_bodies=true
+3. browser-navigate       url="https://firm.com/people"  context_id="s1"
+   → hooks auto-reattach, page load triggers API calls
+4. browser-requests       context_id="s1"  resource_type="fetch"
+   → shows API endpoints with has_body=true
+5. browser-get-request    context_id="s1"  request_id=95
+   → returns decoded JSON body (e.g., 305KB people data)
+6. browser-captured-responses  context_id="s1"  store_artifacts=true
+   → persists all JSON responses as session artifacts
+```
+
+### Field Testing Results
+
+| Site | Framework | People API | Records | Body Captured |
+|------|-----------|-----------|---------|---------------|
+| **DLA Piper** | Next.js + Sitecore Discover | `discover-euc1.sitecorecloud.io/discover/v2` | 1,826 people, 25/page | 305KB JSON |
+| **Linklaters** | Next.js + Sitecore Edge Search | `edge-platform.sitecorecloud.io/v1/search` | 2,813 lawyers, 24/page | 74KB JSON |
+| **Freshfields** | Next.js + server-side search | N/A (SSR, not client-side API) | Server-rendered HTML | Not applicable |
+
+Key observations:
+- Both DLA Piper and Linklaters use **Sitecore** backends, but different APIs (Discover vs Edge Search)
+- Freshfields uses server-side rendering — the search navigates to `?searchText=...` rather than calling a client-side API
+- Hook re-attachment works correctly — logging survives page replacement in all cases
+- The 1MB default body size limit is sufficient for typical API responses (largest was 305KB)
+
+---
+
 ## Implementation Status
 
 | Component | Status | Files |
@@ -345,4 +412,9 @@ For initial training without manual labeling:
 | Experiment harness and 10-page corpus | **Implemented** | `kaos_web/extract/readability_experiments.py`, `tests/fixtures/readability/corpus.json` |
 | Level 2 parametric readability (skipped) | **Superseded by L3** | — |
 | Content settling (`wait_for_settled`) | **Implemented** | `kaos_web/browser_page_prep.py`, `kaos_web/clients/browser.py` |
-| Structured record extraction (`extract-records` tool) | **Not started** | — |
+| Response body capture (`capture_bodies`) | **Implemented** | `kaos_web/clients/browser.py` |
+| Logging hook re-attachment on page replacement | **Implemented** | `kaos_web/clients/browser.py` |
+| `kaos-web-browser-captured-responses` tool | **Implemented** | `kaos_web/browser_tools.py` |
+| Artifact storage for captured responses | **Implemented** | `kaos_web/browser_tools.py` |
+| Response capture tests (36 tests) | **Implemented** | `tests/unit/test_response_capture.py` |
+| Structured record extraction (`extract-records` tool) | **Deferred** | Building blocks sufficient; agents compose the 4-step workflow |

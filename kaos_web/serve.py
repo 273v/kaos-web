@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, default=8000, help="HTTP port (default: 8000)")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     parser.add_argument(
-        "--browser", action="store_true", help="Enable browser interaction tools (18 tools)"
+        "--browser", action="store_true", help="Enable browser interaction tools (19 tools)"
     )
     parser.add_argument(
         "--crawl", action="store_true", help="Enable crawl/discovery tools (3 tools)"
@@ -83,7 +83,13 @@ def main(argv: list[str] | None = None) -> None:
         "For API endpoint discovery: enable request logging first, then navigate, "
         "then list requests filtered to resource_type='fetch' to find JSON APIs. "
         "For interactive workflows: navigate with a context_id, then use snapshot "
-        "to find elements, click/fill/type to interact, and content to extract results."
+        "to find elements, click/fill/type to interact, and content to extract results. "
+        "For SPA data extraction: navigate to establish context, enable "
+        "log-requests with capture_bodies=true, navigate to target page "
+        "(logging hooks survive page replacement), then use browser-requests "
+        "with resource_type='fetch' to find API calls, browser-get-request to "
+        "get decoded JSON bodies, and browser-captured-responses with "
+        "store_artifacts=true to persist captured responses as session artifacts."
     )
     settings = KaosMCPSettings(
         name="kaos-web-server",
