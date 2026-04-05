@@ -27,9 +27,9 @@ def runtime():
 
 
 class TestToolRegistration:
-    def test_register_7_tools(self, runtime: KaosRuntime) -> None:
+    def test_register_web_tools(self, runtime: KaosRuntime) -> None:
         count = register_web_tools(runtime)
-        assert count == 7
+        assert count == 9
 
         names = {t.metadata.name for t in runtime.tools.list_tool_objects()}
         assert "kaos-web-fetch-page" in names
@@ -38,6 +38,9 @@ class TestToolRegistration:
         assert "kaos-web-get-metadata" in names
         assert "kaos-web-search-page" in names
         assert "kaos-web-get-links" in names
+        assert "kaos-web-get-images" in names
+        assert "kaos-web-get-tables" in names
+        assert "kaos-web-search" in names
 
     def test_all_tools_have_annotations(self, runtime: KaosRuntime) -> None:
         register_web_tools(runtime)
@@ -56,8 +59,8 @@ class TestToolRegistration:
                 schema = tool.metadata.get_input_json_schema()
                 assert "properties" in schema
                 assert "required" in schema
-                # All tools require at least 'url'
-                assert "url" in schema["properties"]
+                # Every tool has at least one required parameter
+                assert len(schema["required"]) >= 1
 
 
 class TestGetPageTextThroughMCP:
