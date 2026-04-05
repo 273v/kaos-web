@@ -338,8 +338,11 @@ For initial training without manual labeling:
 | `wait_for_selector` parameter on tools | **Implemented** | `kaos_web/tools.py` |
 | Page lifecycle cleanup (`page_stored` pattern) | **Implemented** | `kaos_web/clients/browser.py` |
 | `dismiss_overlays` on `browser-navigate` | **Implemented** | `kaos_web/browser_tools.py` |
-| Unit tests (24 tests, 100% coverage on new code) | **Implemented** | `tests/unit/test_browser_page_prep.py` |
-| Level 2 parametric readability (`content_scope`) | **Not started** | `kaos_web/extract/readability.py` |
-| Level 3 ML-based readability | **Not started** | — |
+| Unit tests (24 tests, 100% coverage on banner code) | **Implemented** | `tests/unit/test_browser_page_prep.py` |
+| Level 3 learned readability (`content_scope`) | **Implemented** | `kaos_web/extract/readability_l3.py` |
+| `content_scope` parameter on tools | **Implemented** | `kaos_web/tools.py` (get-markdown, get-text, fetch-page, search-page) |
+| L3 integrated into `html_to_document` | **Implemented** | `kaos_web/extract/html_to_ast.py` |
+| Experiment harness and 10-page corpus | **Implemented** | `kaos_web/extract/readability_experiments.py`, `tests/fixtures/readability/corpus.json` |
+| Level 2 parametric readability (skipped) | **Superseded by L3** | — |
 | Content settling heuristic (`wait_for_settled`) | **Not started** | — |
 | Structured record extraction (`extract-records` tool) | **Not started** | — |

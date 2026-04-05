@@ -18,7 +18,10 @@ URL -> Client (HTTP or Browser) -> Middleware (retry/rate/robots/cache) -> Raw H
 Key modules:
 - `clients/http.py` — httpx-based async client with connection pooling, auth, SSL, proxy, structured error mapping
 - `clients/browser.py` — Playwright-based browser client with lazy launch, page tracking, interaction methods, context pooling
-- `extract/readability.py` — Readability algorithm (Mozilla port) for main content extraction
+- `browser_page_prep.py` — Cookie consent banner dismissal for 8 known CMPs (OneTrust, CookieBot, TrustArc, Quantcast, Complianz, Osano, Didomi, Termly)
+- `extract/readability.py` — Heuristic readability algorithm (Mozilla port), used as fallback
+- `extract/readability_l3.py` — **Level 3 learned readability**: pre-trained logistic regression (35 DOM-node features, 10-page corpus). Default extractor. `content_scope` parameter (0.0-1.0) controls precision/recall tradeoff
+- `extract/readability_experiments.py` — Experiment harness for evaluating L1/L2/L3 on labeled corpus
 - `extract/html_to_ast.py` — lxml HTML element tree to kaos-content Block/Inline AST conversion
 - `extract/metadata.py` — JSON-LD, OpenGraph, and meta tag extraction
 - `middleware/` — Composable chain: retry, rate_limit, robots, cache
@@ -123,9 +126,11 @@ async with BrowserClient(BrowserClientConfig(channel="chrome")) as client:
 - **`model_construct` for AST nodes**: Bypass Pydantic validation for performance when building AST from trusted lxml data. Uses `uuid4()` for fast IDs.
 - **Provenance on every node**: `SourceRef(source=url)` + `Provenance(source_ref=...)` attached to every block via `Attr`.
 - **Provenance cache**: Single `SourceRef` and `Provenance` created per document, reused across all nodes to avoid allocation overhead.
-- **Readability-first with semantic fallback**: Raw HTML goes through readability extraction before AST conversion. When readability returns < 50 words but the page has content, falls back to `<main>` → `<article>` parent → `[role=main]` → `<body>`.
+- **L3-first with readability fallback**: `html_to_document()` tries the Level 3 learned model first, falls back to heuristic readability, then to semantic container detection (`<main>` → `<article>` → `[role=main]` → `<body>`). When extraction returns < 50 words, the fallback chain activates.
+- **`content_scope` parameter**: `html_to_document(html, content_scope=0.7)` controls extraction breadth (0.0 = strict article-only, 0.5 = balanced default, 1.0 = permissive). Exposed on get-markdown, get-text, fetch-page, search-page tools.
+- **Cookie banner dismissal**: `dismiss_overlays=true` (default for extraction tools) auto-dismisses known CMP banners before content extraction in browser mode. Uses single `page.evaluate()` for detection (~5ms). Exposed on all browser-capable tools and `browser-navigate`.
 - **Noise filtering**: `_SKIP_CLASSES` filters Wikipedia [edit] links (`mw-editsection`), screen-reader-only text, and noprint elements. `_ACTION_LINK_RE` filters vote/hide/flag action links.
-- **`raw` mode**: `html_to_document(html, extract_content=False)` skips readability. Exposed via `raw=true` parameter on FetchPage, GetText, GetMarkdown tools.
+- **`raw` mode**: `html_to_document(html, extract_content=False)` skips all extraction. Exposed via `raw=true` parameter on FetchPage, GetText, GetMarkdown tools.
 - **Lazy imports**: Heavy dependencies (playwright, kaos-content serializers) are imported inside handlers, not at module level, keeping `--help` fast.
 - **Search lives in kaos-content**: `kaos_content.search.search_document()` is the canonical search. Never import search from kaos-pdf or duplicate it. All extraction modules share the same search.
 - **Middleware wired in HttpClient**: `HttpClient.fetch()` routes through `MiddlewareChain` (retry → rate_limit → robots → cache → raw httpx). Config flags control which middleware are active. Unit tests use `_NO_MIDDLEWARE` config to avoid mock interference.
