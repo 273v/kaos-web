@@ -8,8 +8,10 @@ covering articles, directories, search results, dockets, and listings.
 No ML runtime dependency — inference is a dot product + sigmoid (~1 μs/node).
 Weights are baked in as constants from the training run.
 
-The ``content_scope`` parameter (0.0-1.0) controls the classification
-threshold: 0.0 = strict (article-only), 0.5 = balanced, 1.0 = permissive.
+The ``content_scope`` parameter (0.0-1.0) controls extraction breadth:
+strict scopes favor the most specific strong content region, middle scopes
+merge in related peer regions, and permissive scopes can promote to a
+broader parent wrapper when that yields a better page-level slice.
 
 Usage::
 
@@ -69,6 +71,23 @@ _CANDIDATE_TAGS = frozenset(
         "footer",
     }
 )
+
+# Container-like tags that can represent extracted regions.
+_REGION_TAGS = frozenset(
+    {
+        "article",
+        "main",
+        "section",
+        "div",
+        "ul",
+        "ol",
+        "table",
+        "form",
+        "aside",
+    }
+)
+
+_MAX_SCOPE_REGIONS = 3
 
 # Feature order must exactly match training. Do not reorder.
 _FEATURE_ORDER: tuple[str, ...] = (
@@ -419,6 +438,138 @@ def _strip_non_content_tags(root: HtmlElement) -> None:
             parent.remove(el)
 
 
+def _node_content_threshold(content_scope: float) -> float:
+    """Map scope to the per-node score needed to seed a content region."""
+    return max(0.30, min(0.72 - (content_scope * 0.42), 0.72))
+
+
+def _descendant_refinement_ratio(content_scope: float) -> float:
+    """How close a descendant must score to replace a broad wrapper."""
+    return max(0.60, 0.82 - (content_scope * 0.22))
+
+
+def _sibling_region_ratio(content_scope: float) -> float:
+    """How strong a sibling region must be relative to the core region."""
+    return max(0.05, 0.42 - (content_scope * 0.44))
+
+
+def _is_ancestor(ancestor: HtmlElement, descendant: HtmlElement) -> bool:
+    """Return True if ``ancestor`` contains ``descendant`` in the DOM tree."""
+    current = descendant.getparent()
+    while current is not None:
+        if current is ancestor:
+            return True
+        current = current.getparent()
+    return False
+
+
+def _document_order_key(el: HtmlElement) -> tuple[int, int]:
+    """Best-effort stable key for document order when wrapping regions."""
+    sourceline = el.sourceline if el.sourceline is not None else 10**9
+    depth = sum(1 for _ in el.iterancestors())
+    return (sourceline, depth)
+
+
+def _collect_region_candidates(
+    scored: list[tuple[HtmlElement, float]],
+    *,
+    node_threshold: float,
+) -> list[tuple[HtmlElement, float]]:
+    """Aggregate high-scoring nodes into region-level container candidates."""
+    container_scores: dict[int, float] = {}
+    container_map: dict[int, HtmlElement] = {}
+
+    for el, score in scored:
+        if score < node_threshold:
+            continue
+
+        # Weight by text length so large paragraphs contribute more than
+        # tiny table cells. log1p prevents a single huge block from dominating.
+        contribution = score * math.log1p(_inner_text_length(el))
+
+        parent = el.getparent()
+        if parent is not None:
+            pid = id(parent)
+            container_scores[pid] = container_scores.get(pid, 0.0) + contribution
+            container_map[pid] = parent
+
+            grandparent = parent.getparent()
+            if grandparent is not None:
+                gpid = id(grandparent)
+                container_scores[gpid] = container_scores.get(gpid, 0.0) + contribution * 0.5
+                container_map[gpid] = grandparent
+
+    regions: list[tuple[HtmlElement, float]] = []
+    for cid, raw_score in container_scores.items():
+        el = container_map[cid]
+        if el.tag not in _REGION_TAGS:
+            continue
+        if _inner_text_length(el) < 40:
+            continue
+        adjusted = raw_score * (1.0 - _link_density(el))
+        regions.append((el, adjusted))
+
+    regions.sort(key=lambda item: item[1], reverse=True)
+    return regions
+
+
+def _select_core_region(
+    regions: list[tuple[HtmlElement, float]],
+    *,
+    content_scope: float,
+) -> tuple[HtmlElement, float]:
+    """Prefer a specific strong descendant over a broad wrapper when warranted."""
+    core_el, core_score = regions[0]
+    descend_ratio = _descendant_refinement_ratio(content_scope)
+
+    while True:
+        descendants = [
+            (el, score) for el, score in regions if el is not core_el and _is_ancestor(core_el, el)
+        ]
+        if not descendants:
+            return core_el, core_score
+
+        best_descendant, best_descendant_score = max(descendants, key=lambda item: item[1])
+        if best_descendant_score < core_score * descend_ratio:
+            return core_el, core_score
+
+        core_el = best_descendant
+        core_score = best_descendant_score
+
+
+def _select_peer_regions(
+    core_el: HtmlElement,
+    core_score: float,
+    regions: list[tuple[HtmlElement, float]],
+    *,
+    content_scope: float,
+) -> list[HtmlElement]:
+    """Collect strong sibling regions around the core region."""
+    parent = core_el.getparent()
+    if parent is None:
+        return [core_el]
+
+    selected: list[HtmlElement] = [core_el]
+    sibling_floor = core_score * _sibling_region_ratio(content_scope)
+
+    sibling_regions = [
+        (el, score)
+        for el, score in regions
+        if el is not core_el and el.getparent() is parent and score >= sibling_floor
+    ]
+    sibling_regions.sort(key=lambda item: item[1], reverse=True)
+
+    for el, _score in sibling_regions:
+        if len(selected) >= _MAX_SCOPE_REGIONS:
+            break
+        if any(_is_ancestor(existing, el) or _is_ancestor(el, existing) for existing in selected):
+            continue
+        selected.append(el)
+
+    selected.sort(key=_document_order_key)
+    return selected
+
+
 def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | None:
     """Extract main content using the Level 3 learned model.
 
@@ -481,119 +632,31 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
         score = _score_vector(features)
         scored.append((el, score))
 
-    # Step 4: Find the best container using readability-style parent accumulation.
-    # For each high-scoring leaf element, propagate its contribution to parent
-    # and grandparent containers. This selects the container that wraps the most
-    # content by volume, not the element with the highest individual score.
-    #
-    # Container selection is scope-INDEPENDENT — we always identify the same
-    # content region. content_scope only affects sibling breadth (Step 5).
-    container_scores: dict[int, float] = {}
-    container_map: dict[int, HtmlElement] = {}
-
-    # Use a fixed content threshold (0.5) for container accumulation so that
-    # the core content region is identified consistently regardless of scope.
-    content_threshold = 0.5
-
-    for el, score in scored:
-        if score < content_threshold:
-            continue
-
-        # Weight by text length so large paragraphs contribute more than
-        # tiny table cells. log1p prevents a single huge block from dominating.
-        text_weight = math.log1p(_inner_text_length(el))
-        contribution = score * text_weight
-
-        parent = el.getparent()
-        if parent is not None:
-            pid = id(parent)
-            container_scores[pid] = container_scores.get(pid, 0.0) + contribution
-            container_map[pid] = parent
-
-            grandparent = parent.getparent()
-            if grandparent is not None:
-                gpid = id(grandparent)
-                container_scores[gpid] = container_scores.get(gpid, 0.0) + contribution * 0.5
-                container_map[gpid] = grandparent
-
-    if not container_scores:
+    # Step 4: Aggregate node scores into region candidates.
+    node_threshold = _node_content_threshold(content_scope)
+    regions = _collect_region_candidates(scored, node_threshold=node_threshold)
+    if not regions:
         return body if _inner_text_length(body) > 50 else None
 
-    # Select the best container, penalized by link density.
-    best_el: HtmlElement | None = None
-    best_aggregate = -1.0
-    for cid, raw_score in container_scores.items():
-        el = container_map[cid]
-        adjusted = raw_score * (1.0 - _link_density(el))
-        if adjusted > best_aggregate:
-            best_aggregate = adjusted
-            best_el = el
+    # Step 5: Scope-aware core-region selection.
+    # Broad wrapper containers often win on aggregate score alone. Walk down
+    # toward a strong descendant when it captures nearly the same content signal.
+    best_el, best_aggregate = _select_core_region(regions, content_scope=content_scope)
 
-    if best_el is None:
-        return body if _inner_text_length(body) > 50 else None
-
-    # Step 5: Scope-dependent sibling inclusion.
-    #
-    # content_scope controls how much content AROUND the best region to include:
-    #   0.0 (strict)    — best container only, no siblings
-    #   0.3             — siblings must score > 40% of best (very selective)
-    #   0.5 (default)   — siblings must score > 20% of best
-    #   0.8             — siblings must score > 5% of best (generous)
-    #   1.0 (permissive)— walk up to parent, return entire parent element
-
-    # At maximum scope, return the parent directly (broadest extraction).
+    # At maximum scope, promote back to the parent wrapper when possible.
     if content_scope >= 0.95:
         parent = best_el.getparent()
         return parent if parent is not None and parent.tag != "body" else best_el
 
-    # At minimum scope, return just the best container (no siblings).
+    # At minimum scope, return just the refined core region.
     if content_scope <= 0.05:
         return best_el
 
-    # Middle range: collect siblings based on their content quality.
-    # Score each sibling by aggregating per-node scores of its descendants,
-    # then apply a scope-dependent threshold relative to the best container.
-    parent = best_el.getparent()
-    if parent is None:
-        return best_el
-
-    # Build per-element score map from the scored candidates.
-    node_scores: dict[int, float] = {id(el): s for el, s in scored}
-
-    def _subtree_content_score(el: HtmlElement) -> float:
-        """Sum of (score * log1p(text_len)) for high-scoring descendants."""
-        total = 0.0
-        for desc in el.iter():
-            if not isinstance(desc.tag, str):
-                continue
-            nid = id(desc)
-            s = node_scores.get(nid, 0.0)
-            if s >= 0.5:
-                total += s * math.log1p(_inner_text_length(desc))
-        return total * (1.0 - _link_density(el))
-
-    # Factor interpolates from 0.5 (strict) to 0.02 (permissive).
-    factor = 0.5 - content_scope * 0.48
-    sib_threshold = max(5.0, best_aggregate * factor)
-
-    siblings: list[HtmlElement] = []
-    for sib in parent:
-        if sib is best_el:
-            siblings.append(sib)
-            continue
-        if not isinstance(sib.tag, str):
-            continue
-        sib_score = _subtree_content_score(sib)
-        # Boost siblings with matching class
-        if sib.get("class") and sib.get("class") == best_el.get("class"):
-            sib_score += best_aggregate * 0.2
-        if sib_score >= sib_threshold:
-            siblings.append(sib)
-
+    # Middle scopes: merge a few strong peer regions under the same parent.
+    siblings = _select_peer_regions(best_el, best_aggregate, regions, content_scope=content_scope)
     if len(siblings) == 1:
         return siblings[0]
 
-    # Wrap siblings in a div.
     wrapper = lxml_html.fragment_fromstring("<div></div>", create_parent=False)
     for sib in siblings:
         sib_parent = sib.getparent()
