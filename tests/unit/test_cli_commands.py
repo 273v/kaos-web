@@ -15,7 +15,7 @@ from kaos_web.cli import main
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 ARTICLE_PATH = str(FIXTURES / "article.html")
 
-_has_kaos_pdf = importlib.util.find_spec("kaos_pdf") is not None
+_has_kaos_nlp_core = importlib.util.find_spec("kaos_nlp_core") is not None
 
 
 def _run_cli(argv: list[str]) -> tuple[str, str, int]:
@@ -94,7 +94,7 @@ class TestMetadataCommand:
         assert "structured_data" in data, "JSON output should contain structured_data"
 
 
-@pytest.mark.skipif(not _has_kaos_pdf, reason="kaos-pdf not installed")
+@pytest.mark.skipif(not _has_kaos_nlp_core, reason="kaos-nlp-core not installed")
 class TestSearchCommand:
     def test_search_from_file(self) -> None:
         """Search within the fixture for a term and find results."""
@@ -102,7 +102,7 @@ class TestSearchCommand:
             [
                 "search",
                 ARTICLE_PATH,
-                "blockquote important",
+                "article paragraph",
             ]
         )
 
@@ -117,7 +117,7 @@ class TestSearchCommand:
             [
                 "search",
                 ARTICLE_PATH,
-                "blockquote important",
+                "article paragraph",
                 "--json",
             ]
         )
@@ -128,7 +128,7 @@ class TestSearchCommand:
             f"Expected command='search', got '{data.get('command')}'"
         )
         assert "query" in data, "JSON envelope should contain 'query'"
-        assert data["query"] == "blockquote important"
+        assert data["query"] == "article paragraph"
         assert "results" in data, "JSON envelope should contain 'results'"
         assert isinstance(data["results"], list), "results should be a list"
         assert "total_matches" in data, "JSON envelope should contain 'total_matches'"

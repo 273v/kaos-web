@@ -24,8 +24,8 @@ from kaos_web.tools import (
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 ARTICLE_HTML = (FIXTURES / "article.html").read_text(encoding="utf-8")
 
-_has_kaos_pdf = bool(sys.modules.get("kaos_pdf")) or (
-    importlib.util.find_spec("kaos_pdf") is not None
+_has_kaos_nlp_core = bool(sys.modules.get("kaos_nlp_core")) or (
+    importlib.util.find_spec("kaos_nlp_core") is not None
 )
 
 
@@ -120,7 +120,7 @@ class TestGetPageMetadataTool:
         assert len(meta.get("structured_data", [])) >= 1, "Should extract JSON-LD structured data"
 
 
-@pytest.mark.skipif(not _has_kaos_pdf, reason="kaos-pdf not installed")
+@pytest.mark.skipif(not _has_kaos_nlp_core, reason="kaos-nlp-core not installed")
 class TestSearchPageTool:
     @patch("kaos_web.tools._fetch_html", new_callable=AsyncMock)
     async def test_search_page_finds_results(self, mock_fetch: AsyncMock) -> None:
@@ -131,7 +131,7 @@ class TestSearchPageTool:
         result = await tool.execute(
             {
                 "url": "https://example.com/article",
-                "query": "blockquote important statement",
+                "query": "article paragraph emphasized text",
                 "top_k": 5,
                 "level": "paragraph",
             }
@@ -144,7 +144,7 @@ class TestSearchPageTool:
         assert data is not None, "Search results should be in structuredContent"
         assert "results" in data, "Response should contain 'results' key"
         assert data["url"] == "https://example.com/article"
-        assert data["query"] == "blockquote important statement"
+        assert data["query"] == "article paragraph emphasized text"
 
         results = data["results"]
         assert len(results) > 0, "Should find at least one matching result"
