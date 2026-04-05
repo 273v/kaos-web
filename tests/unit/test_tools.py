@@ -131,7 +131,7 @@ class TestSearchPageTool:
         result = await tool.execute(
             {
                 "url": "https://example.com/article",
-                "query": "article paragraph emphasized text",
+                "query": "blockquote important statement",
                 "top_k": 5,
                 "level": "paragraph",
             }
@@ -144,7 +144,7 @@ class TestSearchPageTool:
         assert data is not None, "Search results should be in structuredContent"
         assert "results" in data, "Response should contain 'results' key"
         assert data["url"] == "https://example.com/article"
-        assert data["query"] == "article paragraph emphasized text"
+        assert data["query"] == "blockquote important statement"
 
         results = data["results"]
         assert len(results) > 0, "Should find at least one matching result"

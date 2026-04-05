@@ -102,7 +102,7 @@ class TestSearchCommand:
             [
                 "search",
                 ARTICLE_PATH,
-                "article paragraph",
+                "blockquote important",
             ]
         )
 
@@ -117,7 +117,7 @@ class TestSearchCommand:
             [
                 "search",
                 ARTICLE_PATH,
-                "article paragraph",
+                "blockquote important",
                 "--json",
             ]
         )
@@ -128,7 +128,7 @@ class TestSearchCommand:
             f"Expected command='search', got '{data.get('command')}'"
         )
         assert "query" in data, "JSON envelope should contain 'query'"
-        assert data["query"] == "article paragraph"
+        assert data["query"] == "blockquote important"
         assert "results" in data, "JSON envelope should contain 'results'"
         assert isinstance(data["results"], list), "results should be a list"
         assert "total_matches" in data, "JSON envelope should contain 'total_matches'"
