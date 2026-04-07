@@ -212,7 +212,7 @@ Key = (method, url, params). Configurable TTL and max size.
 
 ### 4. MCP Tools
 
-5 tools, following `docs/TOOL_DESIGN_GUIDE.md`:
+5 tools, following `docs/guides/tool-design.md`:
 
 | Tool | Name | Description |
 |------|------|-------------|
@@ -237,7 +237,7 @@ kaos-web metadata URL [--json]
 kaos-web extract URL [--output FILE] [--json]
 ```
 
-Follows `docs/CLI_STANDARD.md`: `--json` envelope, errors to stderr, `main(argv)` signature.
+Follows `docs/guides/cli-standard.md`: `--json` envelope, errors to stderr, `main(argv)` signature.
 
 ---
 
@@ -310,5 +310,5 @@ Key differences:
 - httpx: https://www.python-httpx.org/
 - Playwright Python: https://playwright.dev/python/
 - kelvin-web: `../kelvin-modules/kelvin_web/`
-- `docs/TOOL_DESIGN_GUIDE.md`: MCP tool design patterns
-- `docs/AGENTIC_MCP_ASSESSMENT.md`: MCP best practices scorecard
+- `docs/guides/tool-design.md`: MCP tool design patterns
+- `docs/design/agentic-mcp-assessment.md`: MCP best practices scorecard

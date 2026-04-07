@@ -434,7 +434,7 @@ class PageMetadata(BaseModel):
 
 ### 5. MCP Tools
 
-28 tools following `docs/TOOL_DESIGN_GUIDE.md`.
+28 tools following `docs/guides/tool-design.md`.
 
 #### Extraction tools (7) — `tools.py`
 
@@ -495,7 +495,7 @@ kaos-web search URL QUERY [--top-k 10] [--level paragraph|sentence] [--json]
 kaos-web metadata URL [--json]
 ```
 
-Follows `docs/CLI_STANDARD.md`:
+Follows `docs/guides/cli-standard.md`:
 - `--json` envelope: `{"command": "...", "url": "...", ...}`
 - Human-readable output by default, JSON for piping/agents
 - Errors to stderr with non-zero exit, output to stdout
@@ -605,8 +605,8 @@ Target: 550+ tests by Phase 7 completion.
 - `docs/DESIGN.md` — Original architecture design
 - `docs/HTML_TO_AST_REFERENCE.md` — Edge case patterns from 9 reference libraries
 - `docs/QUALITY.md` — Quality report with benchmarks
-- `docs/TOOL_DESIGN_GUIDE.md` — MCP tool design patterns (top-level)
-- `docs/AGENTIC_MCP_ASSESSMENT.md` — MCP best practices scorecard (top-level)
+- `docs/guides/tool-design.md` — MCP tool design patterns (top-level)
+- `docs/design/agentic-mcp-assessment.md` — MCP best practices scorecard (top-level)
 
 ### Prior Art
 - `../kelvin-modules/kelvin_web/` — kelvin-web HTTP/browser/middleware/cache
