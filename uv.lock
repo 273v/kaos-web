@@ -432,6 +432,7 @@ provides-extras = ["duckdb", "html", "images", "layout", "markdown", "mcp", "nlp
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "kaos-office", extras = ["xlsx-calamine"], editable = "../kaos-office" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-asyncio", specifier = ">=0.26.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
