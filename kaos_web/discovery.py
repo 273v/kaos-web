@@ -121,7 +121,7 @@ async def discover_urls(
     base_url = f"{parsed.scheme}://{parsed.netloc}"
 
     inc = _compile_patterns(include_patterns)
-    exc = _compile_patterns(exclude_patterns)
+    exclude = _compile_patterns(exclude_patterns)
 
     # Optional: robots.txt check
     robots_parser = None
@@ -135,8 +135,13 @@ async def discover_urls(
             if resp.ok and resp.html:
                 robots_parser = RobotFileParser()
                 robots_parser.parse(resp.html.splitlines())
-        except Exception:
-            pass
+        except Exception as robots_exc:
+            warning = (
+                f"robots.txt check failed for {base_url}: {robots_exc}. "
+                "Proceeding without robots enforcement."
+            )
+            result.errors.append(warning)
+            logger.warning(warning)
 
     def _is_allowed(check_url: str) -> bool:
         if not robots_parser:
@@ -155,7 +160,7 @@ async def discover_urls(
                         continue
                     if not _same_domain(entry.url, base_domain):
                         continue
-                    if not _matches_patterns(entry.url, inc, exc):
+                    if not _matches_patterns(entry.url, inc, exclude):
                         continue
                     if not _is_allowed(entry.url):
                         continue
@@ -191,7 +196,7 @@ async def discover_urls(
                         continue
                     if not link.url.startswith(("http://", "https://")):
                         continue
-                    if not _matches_patterns(link.url, inc, exc):
+                    if not _matches_patterns(link.url, inc, exclude):
                         continue
                     if not _is_allowed(link.url):
                         continue

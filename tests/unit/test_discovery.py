@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from kaos_web.discovery import (
@@ -223,3 +225,20 @@ class TestDiscoverUrls:
         )
         result = await discover_urls("example.com", fetch)
         assert result.total > 0
+
+    @pytest.mark.asyncio
+    async def test_robots_failure_is_reported(self):
+        async def fetch(request):
+            if request.url.endswith("/robots.txt"):
+                raise RuntimeError("network timeout")
+            if request.url == "https://example.com":
+                return WebResponse(url=request.url, status_code=200, html=LINKS_HTML)
+            return WebResponse(url=request.url, status_code=404, html="")
+
+        with patch("kaos_web.discovery.logger.warning") as mock_warn:
+            result = await discover_urls("https://example.com", fetch, sitemap="skip")
+
+        assert result.total > 0
+        assert any("robots.txt check failed" in err for err in result.errors)
+        mock_warn.assert_called_once()
+        assert "Proceeding without robots enforcement" in mock_warn.call_args[0][0]
