@@ -1,10 +1,48 @@
-"""Tests for KaosWebSettings typed settings layer."""
+"""Tests for KaosWebSettings typed settings layer.
+
+The module-level ``_isolate_kaos_web_env`` fixture clears all
+``KAOS_WEB_*`` and legacy search/browser env vars before every test so
+real credentials in the developer's shell (e.g. ``SERPAPI_API_KEY``
+exported from ``~/.bashrc``) cannot leak into the assertions. Per-test
+``monkeypatch.setenv`` calls then set only what the individual test
+wants, giving deterministic results in both clean CI and developer
+machines.
+"""
 
 from __future__ import annotations
 
 import pytest
 
 from kaos_web.settings import KaosWebSettings
+
+# Every env var that KaosWebSettings reads, both the canonical KAOS_WEB_*
+# prefix and the legacy aliases. Keeping them all in one list prevents the
+# per-class "forgot to clear BRAVE_API_KEY" class of bug.
+_ALL_KAOS_WEB_ENV_VARS = (
+    # Search backend + API keys
+    "KAOS_WEB_SEARCH_BACKEND",
+    "KAOS_SEARCH_BACKEND",
+    "KAOS_WEB_SERPAPI_API_KEY",
+    "SERPAPI_API_KEY",
+    "KAOS_WEB_EXA_API_KEY",
+    "EXA_API_KEY",
+    "KAOS_WEB_BRAVE_API_KEY",
+    "BRAVE_API_KEY",
+    # Browser config
+    "KAOS_WEB_BROWSER_TYPE",
+    "KAOS_BROWSER_TYPE",
+    "KAOS_WEB_BROWSER_HEADLESS",
+    "KAOS_BROWSER_HEADLESS",
+    "KAOS_WEB_BROWSER_CHANNEL",
+    "KAOS_BROWSER_CHANNEL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_kaos_web_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear all KaosWebSettings env vars before every test in this file."""
+    for var in _ALL_KAOS_WEB_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
 
 
 class TestKaosWebSettingsDefaults:
@@ -131,31 +169,6 @@ class TestGetSearchApiKey:
 
 
 class TestDetectSearchBackend:
-    """Backend auto-detection tests.
-
-    These tests must run with a clean search-backend env so real keys
-    in the developer's shell (e.g. ``SERPAPI_API_KEY`` exported from
-    ``~/.bashrc``) cannot leak into the assertions. The autouse fixture
-    below clears every search-backend env var — both the canonical
-    ``KAOS_WEB_*`` form and the legacy aliases — before each test runs.
-    Per-test ``monkeypatch.setenv`` calls then set only what the
-    individual test wants.
-    """
-
-    @pytest.fixture(autouse=True)
-    def _isolate_search_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        for var in (
-            "KAOS_WEB_SEARCH_BACKEND",
-            "KAOS_SEARCH_BACKEND",
-            "KAOS_WEB_SERPAPI_API_KEY",
-            "SERPAPI_API_KEY",
-            "KAOS_WEB_EXA_API_KEY",
-            "EXA_API_KEY",
-            "KAOS_WEB_BRAVE_API_KEY",
-            "BRAVE_API_KEY",
-        ):
-            monkeypatch.delenv(var, raising=False)
-
     def test_no_keys_returns_duckduckgo(self) -> None:
         s = KaosWebSettings()
         assert s.detect_search_backend() == "duckduckgo"
