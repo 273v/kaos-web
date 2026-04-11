@@ -36,6 +36,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--crawl", action="store_true", help="Enable crawl/discovery tools (3 tools)"
     )
+    parser.add_argument(
+        "--domain", action="store_true", help="Enable domain intelligence tools (10 tools)"
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -72,6 +75,14 @@ def main(argv: list[str] | None = None) -> None:
         n_crawl = register_crawl_tools(runtime)
         n_tools += n_crawl
         print(f"Registered {n_crawl} crawl/discovery tools", file=sys.stderr)
+
+    # Optionally register domain intelligence tools
+    if args.domain:
+        from kaos_web.domain_tools import register_domain_tools
+
+        n_domain = register_domain_tools(runtime)
+        n_tools += n_domain
+        print(f"Registered {n_domain} domain intelligence tools", file=sys.stderr)
 
     print(f"Total: {n_tools} tools registered", file=sys.stderr)
 

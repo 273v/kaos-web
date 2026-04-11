@@ -35,11 +35,13 @@ kaos-web-serve = "kaos_web.serve:main"
 
 [project.optional-dependencies]
 browser = ["playwright>=1.50.0"]
+dns = ["dnspython>=2.6.0"]
 mcp = ["kaos-mcp>=0.1.0"]
 nlp = ["kaos-nlp-core>=0.1.0"]
 
 [dependency-groups]
 dev = [
+  "dnspython>=2.8.0",
   "kaos-mcp>=0.1.0",
   "kaos-nlp-core>=0.1.0",
   "playwright>=1.58.0",
