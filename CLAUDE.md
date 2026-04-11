@@ -32,6 +32,8 @@ Key modules:
 - `batch.py` — Concurrent URL fetching with asyncio.Semaphore
 - `crawl.py` — BFS site crawl orchestrator with depth/page limits
 - `crawl_tools.py` — 3 crawl MCP tools (discover-urls, batch-fetch, crawl-site)
+- `domain/` — Domain intelligence package: `tcp.py` (async port probing), `tls.py` (stdlib SSL cert inspection with validated→fallback pattern), `http.py` (header + security scoring + CDN detection), `service.py` (composite), `dns.py` (dnspython-based queries + reverse PTR + DNSSEC + zone transfers), `security.py` (SPF/DKIM/DMARC parsing, 12 DKIM selectors), `whois.py` (own stdlib WHOIS client, 55-TLD server map, referral following), `profile.py` (composite domain profile), `org.py` (Schema.org Organization/LegalService/Attorney entity extraction from JSON-LD + OpenGraph + footer patterns), `models.py` (Pydantic models)
+- `domain_tools.py` — 11 domain intelligence MCP tools (tcp-probe, tls-inspect, http-headers, service-detect, dns-lookup, dns-enumerate, dns-zone-transfer, dns-security, whois-lookup, domain-profile, extract-org). Registered via `register_domain_tools()` and enabled with `kaos-web-serve --domain`.
 - `cli.py` — CLI with fetch, search, metadata commands
 
 ## Dependencies
@@ -39,10 +41,13 @@ Key modules:
 - **httpx[http2]** — Async HTTP client with HTTP/2, connection pooling
 - **lxml** — Fast HTML parsing and tree walking
 - **playwright** (optional `[browser]` extra) — Headless browser rendering
+- **dnspython** (optional `[dns]` extra) — DNS queries, zone transfers, reverse PTR (used by domain intelligence tools)
 - **kaos-content** — Document AST model (Block/Inline/Provenance)
 - **kaos-core** — Runtime, tool framework, artifact helpers
 - **kaos-mcp** (optional `[mcp]` extra) — MCP server bridge
 - **kaos-nlp-core** (optional `[nlp]` extra) — BM25 search within extracted content
+
+**Pure stdlib for domain tools**: TCP probing (`asyncio.open_connection`), TLS inspection (`ssl` + `socket`), WHOIS (`asyncio.open_connection` on port 43 + regex parsing — no `python-whois` dep).
 
 ## Configuration — KaosWebSettings
 

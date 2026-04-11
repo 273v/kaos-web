@@ -27,7 +27,7 @@ kaos-web extract page.html --format text
 kaos-web metadata https://example.com --json
 kaos-web serve                               # MCP server (stdio)
 kaos-web serve --http --port 8000            # MCP server (HTTP)
-kaos-web serve --browser --crawl             # all 28 tools
+kaos-web serve --browser --crawl --domain    # all 42 tools
 ```
 
 ## MCP Integration
