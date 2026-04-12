@@ -157,6 +157,61 @@ _ACTION_LINK_RE = re.compile(
 # Below this threshold, we try semantic container fallback.
 _MIN_READABILITY_WORDS = 50
 
+# --- Inline XBRL preprocessing -----------------------------------------
+#
+# SEC EDGAR filings use Inline XBRL (iXBRL): standard HTML wrapped in
+# ``ix:`` namespace elements.  lxml parses namespace-prefixed tags as
+# ``{uri}localname`` which the AST builder doesn't recognize.  The fix:
+# strip the XBRL wrapper before AST conversion.
+#
+# Reference: https://www.xbrl.org/Specification/inlineXBRL-part1/REC-2013-11-18/inlineXBRL-part1-REC-2013-11-18.html
+
+_XBRL_HIDDEN_RE = re.compile(
+    r"<ix:header\b[^>]*>.*?</ix:header>",
+    re.DOTALL | re.IGNORECASE,
+)
+_XBRL_TAG_RE = re.compile(r"</?ix:[^>]*>", re.IGNORECASE)
+_DISPLAY_NONE_RE = re.compile(
+    r'<div\b[^>]*style\s*=\s*"[^"]*display\s*:\s*none[^"]*"[^>]*>.*?</div>',
+    re.DOTALL | re.IGNORECASE,
+)
+_XML_DECL_RE = re.compile(r"<\?xml[^?]*\?>")
+_XMLNS_RE = re.compile(r'\s+xmlns:[a-z_-]+="[^"]*"', re.IGNORECASE)
+
+
+def _strip_inline_xbrl(html: str) -> str:
+    """Remove Inline XBRL markup from an HTML string.
+
+    Inline XBRL (iXBRL) wraps standard HTML in ``ix:`` namespace
+    elements.  This function:
+
+    1. Removes ``<ix:header>`` blocks (XBRL metadata, not visible).
+    2. Removes ``<div style="display:none">`` blocks (hidden XBRL data).
+    3. Unwraps all remaining ``ix:`` tags, keeping their text content.
+       For example ``<ix:nonNumeric ...>42</ix:nonNumeric>`` → ``42``.
+    4. Strips the XML declaration and XBRL namespace attributes so
+       lxml can parse the result as plain HTML.
+
+    The returned string is standard HTML that the rest of the
+    kaos-web pipeline (readability extraction, AST conversion) can
+    process normally.
+    """
+    # Order matters: remove hidden blocks before unwrapping tags,
+    # so we don't accidentally keep hidden metadata text.
+    result = _XBRL_HIDDEN_RE.sub("", html)
+    result = _DISPLAY_NONE_RE.sub("", result)
+    result = _XBRL_TAG_RE.sub("", result)
+    result = _XML_DECL_RE.sub("", result)
+    result = _XMLNS_RE.sub("", result)
+    return result
+
+
+def _looks_like_xbrl(html: str) -> bool:
+    """Heuristic: does this HTML contain Inline XBRL markup?"""
+    # Check the first 2000 chars for XBRL signatures.
+    head = html[:2000]
+    return "ix:" in head or "inlineXBRL" in head or "xbrl" in head.lower()
+
 # Shared default Attr instance (frozen, safe to reuse).
 _DEFAULT_ATTR = Attr()
 
@@ -1227,6 +1282,7 @@ def html_to_document(
     url: str = "",
     extract_content: bool = True,
     content_scope: float = 0.5,
+    strip_xbrl: bool | None = None,
 ) -> ContentDocument:
     """Convert HTML to a ContentDocument AST.
 
@@ -1238,12 +1294,25 @@ def html_to_document(
         content_scope: Extraction breadth from 0.0 (strict, article-only)
             to 1.0 (permissive, include more surrounding content).
             Default 0.5. Only applies when ``extract_content=True``.
+        strip_xbrl: If ``True``, preprocess the HTML to strip Inline
+            XBRL (iXBRL) markup before parsing.  If ``None``
+            (default), auto-detect XBRL and strip if present.  If
+            ``False``, skip XBRL stripping even if detected.
+
+            SEC EDGAR filings use iXBRL which wraps HTML in ``ix:``
+            namespace elements that lxml and readability models
+            cannot process.  This parameter enables the kaos-web
+            pipeline to handle EDGAR filings natively.
 
     Returns:
         ContentDocument with Block/Inline AST nodes and provenance.
     """
     if not html_content or not html_content.strip():
         return _empty_document()
+
+    # Strip Inline XBRL if requested or auto-detected.
+    if strip_xbrl is True or (strip_xbrl is None and _looks_like_xbrl(html_content)):
+        html_content = _strip_inline_xbrl(html_content)
 
     root: HtmlElement | None = None
     full_doc: HtmlElement | None = None  # Parsed once, reused if needed
