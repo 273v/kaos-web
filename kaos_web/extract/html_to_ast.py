@@ -901,6 +901,8 @@ def _process_children_as_blocks(el: HtmlElement, url: str) -> list[Block]:
     """Process all children of an element as block nodes.
 
     Also handles stray text between child elements by wrapping it in Paragraphs.
+    After the initial pass, runs a merge pass that collapses "orphan inline"
+    paragraphs into the preceding paragraph (see :func:`_merge_orphan_inlines`).
     """
     result: list[Block] = []
     prov = _make_provenance(url)
@@ -932,7 +934,88 @@ def _process_children_as_blocks(el: HtmlElement, url: str) -> list[Block]:
             if collapsed:
                 result.append(_mk_paragraph((_mk_text(collapsed),), prov))
 
-    return result
+    return _merge_orphan_inlines(result)
+
+
+# Characters that are inline decorations when they appear as the sole
+# content of a block-level element.  These are typically trademark,
+# copyright, or footnote symbols that styled HTML (EDGAR, PDF-to-HTML)
+# places in separate <div> or <span> elements at block level.
+_ORPHAN_INLINE_CHARS = frozenset("®™©℠¹²³⁴⁵⁶⁷⁸⁹⁰*†‡§¶")
+
+# Maximum length of a paragraph's text for it to be considered an orphan.
+_ORPHAN_MAX_LEN = 4
+
+
+def _is_orphan_inline(block: Block) -> bool:
+    """True if ``block`` is a short paragraph that's really inline content.
+
+    Detects paragraphs that contain only:
+    - Trademark/copyright symbols (®, ™, ©)
+    - Superscript numbers (¹, ², ³, etc.)
+    - Footnote markers (*, †, ‡)
+    - Other single characters that styled HTML placed in their own block
+
+    These arise from EDGAR/XBRL, PDF-to-HTML converters, and other tools
+    that use ``<div>`` or ``<span>`` at block level for what should be
+    inline content.
+    """
+    if block.node_type != "paragraph":
+        return False
+    children = block.children
+    if not children:
+        return False
+    # Extract the text content of the paragraph.
+    text = "".join(
+        c.value for c in children if hasattr(c, "value") and isinstance(c.value, str)
+    ).strip()
+    if not text or len(text) > _ORPHAN_MAX_LEN:
+        return False
+    # All characters must be in the orphan set.
+    return all(ch in _ORPHAN_INLINE_CHARS for ch in text)
+
+
+def _merge_orphan_inlines(blocks: list[Block]) -> list[Block]:
+    """Merge orphan-inline paragraphs into the preceding paragraph.
+
+    After the main block-processing pass, the block list may contain
+    sequences like::
+
+        Paragraph("iPhone")
+        Paragraph("®")           ← orphan inline
+        Paragraph(" is the ...")
+
+    This function collapses them into::
+
+        Paragraph("iPhone® is the ...")
+
+    Only paragraphs whose entire text content is in
+    :data:`_ORPHAN_INLINE_CHARS` and is ≤ :data:`_ORPHAN_MAX_LEN`
+    characters are merged.  All other blocks pass through unchanged.
+    """
+    if len(blocks) < 2:
+        return blocks
+
+    merged: list[Block] = [blocks[0]]
+    for block in blocks[1:]:
+        if _is_orphan_inline(block) and merged and merged[-1].node_type == "paragraph":
+            # Merge: append the orphan's children to the preceding paragraph.
+            prev = merged[-1]
+            new_children = tuple(prev.children) + tuple(block.children)
+            merged[-1] = _mk_paragraph(new_children, prev.provenance)
+        elif (
+            merged
+            and merged[-1].node_type == "paragraph"
+            and block.node_type == "paragraph"
+            and _is_orphan_inline(merged[-1])
+        ):
+            # Edge case: the PREVIOUS block was an orphan that didn't
+            # have a predecessor to merge into — merge forward instead.
+            new_children = tuple(merged[-1].children) + tuple(block.children)
+            merged[-1] = _mk_paragraph(new_children, block.provenance)
+        else:
+            merged.append(block)
+    return merged
 
 
 # ---------------------------------------------------------------------------
