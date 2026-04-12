@@ -102,8 +102,10 @@ _DATE_FORMATS: tuple[str, ...] = (
 )
 
 
-def _parse_date(value: str) -> str | None:
+def _parse_date(value: str | None) -> str | None:
     """Try multiple date formats, return ISO 8601 or None."""
+    if value is None:
+        return None
     value = value.strip().rstrip(".")
     if not value:
         return None

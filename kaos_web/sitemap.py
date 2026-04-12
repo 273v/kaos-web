@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
 
-from lxml import etree  # type: ignore[unresolved-import]  # ty: ignore[unresolved-import]
+from lxml import etree  # type: ignore[unresolved-import]
 
 from kaos_core.logging import get_logger
 from kaos_web.models import WebRequest, WebResponse

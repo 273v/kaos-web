@@ -11,7 +11,13 @@ import asyncio
 
 from kaos_web.domain.dns import enumerate_dns
 from kaos_web.domain.http import analyze_headers
-from kaos_web.domain.models import DomainProfile
+from kaos_web.domain.models import (
+    DnsProfile,
+    DomainProfile,
+    MailSecurityReport,
+    ServiceProfile,
+    WhoisRecord,
+)
 from kaos_web.domain.security import analyze_mail_security
 from kaos_web.domain.service import detect_services
 from kaos_web.domain.whois import whois_lookup
@@ -39,20 +45,25 @@ async def profile_domain(
     Returns:
         DomainProfile with all gathered intelligence.
     """
-    tasks: dict[str, asyncio.Task[object]] = {}
+    dns_task: asyncio.Task[DnsProfile] | None = None
+    services_task: asyncio.Task[ServiceProfile] | None = None
+    whois_task: asyncio.Task[WhoisRecord] | None = None
+    mail_task: asyncio.Task[MailSecurityReport] | None = None
 
     async with asyncio.TaskGroup() as tg:
-        tasks["dns"] = tg.create_task(enumerate_dns(domain, timeout=timeout))
-        tasks["services"] = tg.create_task(detect_services(domain, timeout=timeout))
+        dns_task = tg.create_task(enumerate_dns(domain, timeout=timeout))
+        services_task = tg.create_task(detect_services(domain, timeout=timeout))
         if include_whois:
-            tasks["whois"] = tg.create_task(whois_lookup(domain, timeout=timeout))
+            whois_task = tg.create_task(whois_lookup(domain, timeout=timeout))
         if include_mail_security:
-            tasks["mail"] = tg.create_task(analyze_mail_security(domain, timeout=timeout))
+            mail_task = tg.create_task(analyze_mail_security(domain, timeout=timeout))
 
-    dns_result = tasks["dns"].result()
-    services_result = tasks["services"].result()
-    whois_result = tasks["whois"].result() if "whois" in tasks else None
-    mail_result = tasks["mail"].result() if "mail" in tasks else None
+    assert dns_task is not None  # always set above
+    assert services_task is not None  # always set above
+    dns_result = dns_task.result()
+    services_result = services_task.result()
+    whois_result = whois_task.result() if whois_task is not None else None
+    mail_result = mail_task.result() if mail_task is not None else None
 
     # Discover robots.txt and sitemaps from the HTTPS endpoint
     sitemap_urls: list[str] = []

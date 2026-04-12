@@ -61,6 +61,7 @@ async def lookup(
         DnsQueryResult with records or error status.
     """
     import dns.asyncresolver
+    import dns.exception
     import dns.flags
     import dns.rdatatype
     from dns.resolver import NXDOMAIN, NoAnswer, NoNameservers
@@ -318,6 +319,7 @@ async def attempt_zone_transfer(
     Returns:
         ZoneTransferResult with status and optional record count.
     """
+    import dns.name
     import dns.query
     import dns.rdatatype
     import dns.zone
@@ -331,7 +333,7 @@ async def attempt_zone_transfer(
 
         try:
             addresses = socket.getaddrinfo(nameserver, 53, type=socket.SOCK_STREAM)
-            ns_addr = addresses[0][4][0] if addresses else nameserver
+            ns_addr = str(addresses[0][4][0]) if addresses else nameserver
         except (socket.gaierror, OSError):
             return ZoneTransferResult(
                 nameserver=nameserver,

@@ -96,7 +96,7 @@ _SOCIAL_DOMAINS: dict[str, str] = {
 
 # ── Jurisdiction patterns ───────────────────────────────────────────
 
-_JURISDICTION_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
+_JURISDICTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None]] = [
     # US state entities
     (
         re.compile(

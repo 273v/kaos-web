@@ -81,8 +81,10 @@ def _extract_cert_info(
     subject = _flatten_cert_field(cert.get("subject", ()))
     issuer = _flatten_cert_field(cert.get("issuer", ()))
 
-    not_before = _parse_cert_date(cert.get("notBefore"))
-    not_after = _parse_cert_date(cert.get("notAfter"))
+    raw_not_before = cert.get("notBefore")
+    raw_not_after = cert.get("notAfter")
+    not_before = _parse_cert_date(str(raw_not_before) if raw_not_before else None)
+    not_after = _parse_cert_date(str(raw_not_after) if raw_not_after else None)
 
     days_until_expiry = None
     if not_after:
@@ -92,14 +94,15 @@ def _extract_cert_info(
     san_dns: list[str] = []
     for san_type, san_value in cert.get("subjectAltName", ()):
         if san_type == "DNS":
-            san_dns.append(san_value)
+            san_dns.append(str(san_value))
 
+    raw_serial = cert.get("serialNumber")
     return TlsCertInfo(
         host=host,
         port=port,
         subject=subject,
         issuer=issuer,
-        serial_number=cert.get("serialNumber"),
+        serial_number=str(raw_serial) if raw_serial else None,
         not_before=not_before.isoformat() if not_before else None,
         not_after=not_after.isoformat() if not_after else None,
         days_until_expiry=days_until_expiry,

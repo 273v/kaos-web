@@ -529,6 +529,11 @@ provides-extras = ["mcp"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "kaos-content", editable = "../kaos-content" },
+    { name = "kaos-ml-core", editable = "../kaos-ml-core" },
+    { name = "kaos-nlp-transformers", editable = "../kaos-nlp-transformers" },
+    { name = "markdown-it-py", specifier = ">=4.0.0" },
+    { name = "mdit-py-plugins", specifier = ">=0.5.0" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-asyncio", specifier = ">=0.25" },
     { name = "pytest-benchmark", specifier = ">=5.1.0" },
