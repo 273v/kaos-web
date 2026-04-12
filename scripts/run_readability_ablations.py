@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from kaos_web.extract.readability_experiments import (
+from readability_experiments import (
     DEFAULT_CORPUS_PATH,
     format_ablation_table,
     load_corpus,

@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from kaos_web.extract.readability_experiments import (
+import sys
+from pathlib import Path
+
+# readability_experiments is a research script, not a production module
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+
+from readability_experiments import (  # ty: ignore[unresolved-import]
     FEATURE_GROUPS,
     FEATURE_ORDER,
     LogisticRegressionModel,

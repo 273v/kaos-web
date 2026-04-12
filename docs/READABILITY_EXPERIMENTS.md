@@ -52,7 +52,7 @@ We wanted to answer this concretely rather than philosophically:
 
 The experiment harness lives in:
 
-- [readability_experiments.py](/home/mjbommar/projects/273v/kaos-modules/kaos-web/kaos_web/extract/readability_experiments.py)
+- [readability_experiments.py](/home/mjbommar/projects/273v/kaos-modules/kaos-web/scripts/readability_experiments.py)
 
 Runnable scripts:
 
@@ -133,7 +133,7 @@ The strongest version of Level 3 came from adding richer structural and contextu
 
 ### Feature Families
 
-Defined in `FEATURE_GROUPS` inside [readability_experiments.py](/home/mjbommar/projects/273v/kaos-modules/kaos-web/kaos_web/extract/readability_experiments.py).
+Defined in `FEATURE_GROUPS` inside [readability_experiments.py](/home/mjbommar/projects/273v/kaos-modules/kaos-web/scripts/readability_experiments.py).
 
 #### 1. `text_content`
 

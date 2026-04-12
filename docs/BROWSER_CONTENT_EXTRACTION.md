@@ -409,7 +409,7 @@ Key observations:
 | Level 3 learned readability (`content_scope`) | **Implemented** | `kaos_web/extract/readability_l3.py` |
 | `content_scope` parameter on tools | **Implemented** | `kaos_web/tools.py` (get-markdown, get-text, fetch-page, search-page) |
 | L3 integrated into `html_to_document` | **Implemented** | `kaos_web/extract/html_to_ast.py` |
-| Experiment harness and 10-page corpus | **Implemented** | `kaos_web/extract/readability_experiments.py`, `tests/fixtures/readability/corpus.json` |
+| Experiment harness and 10-page corpus | **Implemented** | `scripts/readability_experiments.py`, `tests/fixtures/readability/corpus.json` |
 | Level 2 parametric readability (skipped) | **Superseded by L3** | — |
 | Content settling (`wait_for_settled`) | **Implemented** | `kaos_web/browser_page_prep.py`, `kaos_web/clients/browser.py` |
 | Response body capture (`capture_bodies`) | **Implemented** | `kaos_web/clients/browser.py` |

@@ -49,8 +49,8 @@ class SearchResult:
 _BACKENDS = ("serpapi", "duckduckgo", "exa", "brave")
 
 
-def _get_settings(settings: KaosWebSettings | None = None) -> KaosWebSettings:
-    """Get or create web settings (lazy import to avoid circular deps)."""
+def _resolve_settings(settings: KaosWebSettings | None = None) -> KaosWebSettings:
+    """Resolve web settings (lazy import to avoid circular deps at module level)."""
     if settings is not None:
         return settings
     from kaos_web.settings import KaosWebSettings
@@ -85,7 +85,7 @@ async def search_web(
         msg = "Search query must not be empty."
         raise ValueError(msg)
 
-    s = _get_settings(settings)
+    s = _resolve_settings(settings)
     resolved = (backend or s.search_backend).lower()
 
     if resolved:
@@ -131,7 +131,7 @@ async def _search_serpapi(
     Endpoint: GET https://serpapi.com/search
     Free tier: 250 searches/month
     """
-    s = _get_settings(settings)
+    s = _resolve_settings(settings)
     api_key = s.get_search_api_key("serpapi") or ""
     if not api_key:
         msg = "SERPAPI_API_KEY not set. Get a key at https://serpapi.com/manage-api-key"
@@ -215,7 +215,7 @@ async def _search_duckduckgo(
     No auth needed. Rate-limited by IP. No guarantees on availability.
     Parses HTML results from html.duckduckgo.com/html/.
     """
-    s = _get_settings(settings)
+    s = _resolve_settings(settings)
     async with httpx.AsyncClient(
         timeout=s.search_ddg_timeout,
         follow_redirects=True,
@@ -315,7 +315,7 @@ async def _search_exa(
     Endpoint: POST https://api.exa.ai/search
     Free tier: 1000 requests/month, 10 QPS
     """
-    s = _get_settings(settings)
+    s = _resolve_settings(settings)
     api_key = s.get_search_api_key("exa") or ""
     if not api_key:
         msg = "EXA_API_KEY not set. Get a key at https://dashboard.exa.ai/api-keys"
@@ -379,7 +379,7 @@ async def _search_brave(
     Endpoint: GET https://api.search.brave.com/res/v1/web/search
     Free tier: ~1000 queries/month
     """
-    s = _get_settings(settings)
+    s = _resolve_settings(settings)
     api_key = s.get_search_api_key("brave") or ""
     if not api_key:
         msg = "BRAVE_API_KEY not set. Get a key at https://brave.com/search/api/"

@@ -1041,7 +1041,14 @@ class WebSearchTool(KaosTool):
                 summary=f"{len(results)} results for '{query}'",
             )
         except ValueError as exc:
-            return ToolResult.create_error(str(exc))
+            backend_hint = f" (backend={backend})" if backend else ""
+            return ToolResult.create_error(
+                f"Web search failed{backend_hint}: {exc}. "
+                "Verify your search API key is set (KAOS_WEB_SERPAPI_API_KEY, "
+                "KAOS_WEB_EXA_API_KEY, or KAOS_WEB_BRAVE_API_KEY). "
+                "Try a different backend with the 'backend' parameter "
+                "(serpapi, exa, brave, duckduckgo)."
+            )
         except Exception as exc:
             return ToolResult.create_error(
                 f"Web search failed: {exc}. Check your BRAVE_API_KEY or SEARXNG_URL configuration."

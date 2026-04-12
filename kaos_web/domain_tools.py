@@ -102,7 +102,11 @@ class TcpProbeTool(KaosTool):
         try:
             result = await probe_ports(host, port_list, preset=preset, timeout=timeout)
         except Exception as exc:
-            return ToolResult.create_error(f"TCP probe failed: {exc}")
+            return ToolResult.create_error(
+                f"TCP probe failed for {host}: {exc}. "
+                "Verify the domain resolves with kaos-web-dns-lookup, or try "
+                "kaos-web-tls-inspect for HTTPS connectivity."
+            )
 
         output = result.model_dump(mode="json")
         return ToolResult.create_success(
@@ -158,7 +162,9 @@ class TlsInspectTool(KaosTool):
         result = await inspect_tls(host, port)
         if result.error:
             return ToolResult.create_error(
-                f"TLS inspection failed for {host}:{port}: {result.error}"
+                f"TLS inspection failed for {host}:{port}: {result.error}. "
+                "Try kaos-web-tcp-probe to check basic port connectivity, or "
+                "kaos-web-http-headers for HTTP-level analysis."
             )
 
         output = result.model_dump(mode="json", exclude_none=True)
@@ -215,7 +221,11 @@ class HttpHeadersTool(KaosTool):
 
         result = await analyze_headers(url)
         if result.error:
-            return ToolResult.create_error(f"HTTP request failed: {result.error}")
+            return ToolResult.create_error(
+                f"HTTP request failed: {result.error}. "
+                "Try kaos-web-tls-inspect for certificate-level analysis, or "
+                "kaos-web-tcp-probe to verify the host is reachable."
+            )
 
         output = result.model_dump(mode="json", exclude_none=True)
         return ToolResult.create_success(
@@ -321,10 +331,15 @@ class DnsLookupTool(KaosTool):
             results = await lookup_many(domain, record_types)
         except ImportError:
             return ToolResult.create_error(
-                "dnspython is required for DNS tools. Install with: pip install dnspython"
+                "dnspython is required for DNS tools. Install with: pip install dnspython. "
+                "Try kaos-web-whois-lookup for alternative domain information without dnspython."
             )
         except Exception as exc:
-            return ToolResult.create_error(f"DNS lookup failed: {exc}")
+            return ToolResult.create_error(
+                f"DNS lookup failed for {domain}: {exc}. "
+                "Try kaos-web-whois-lookup for registration-based domain information, or "
+                "kaos-web-tcp-probe to check host connectivity directly."
+            )
 
         output = {
             "domain": domain,
@@ -377,10 +392,15 @@ class DnsEnumerateTool(KaosTool):
             result = await enumerate_dns(domain)
         except ImportError:
             return ToolResult.create_error(
-                "dnspython is required for DNS tools. Install with: pip install dnspython"
+                "dnspython is required for DNS tools. Install with: pip install dnspython. "
+                "Try kaos-web-whois-lookup for alternative domain information without dnspython."
             )
         except Exception as exc:
-            return ToolResult.create_error(f"DNS enumeration failed: {exc}")
+            return ToolResult.create_error(
+                f"DNS enumeration failed for {domain}: {exc}. "
+                "Try kaos-web-dns-lookup for a targeted single-type query, or "
+                "kaos-web-whois-lookup for registration-based domain information."
+            )
 
         output = result.model_dump(mode="json")
         total_records = sum(len(q.records) for q in result.queries)
@@ -443,7 +463,8 @@ class DnsZoneTransferTool(KaosTool):
             ns_result = await lookup(domain, "NS")
             if not ns_result.records:
                 return ToolResult.create_error(
-                    f"No NS records found for {domain}. Provide nameservers explicitly."
+                    f"No NS records found for {domain}. Provide nameservers explicitly, "
+                    "or use kaos-web-dns-enumerate to discover the full DNS profile first."
                 )
             nameservers = [r.value.rstrip(".") for r in ns_result.records]
 
@@ -453,10 +474,14 @@ class DnsZoneTransferTool(KaosTool):
             )
         except ImportError:
             return ToolResult.create_error(
-                "dnspython is required for zone transfer. Install with: pip install dnspython"
+                "dnspython is required for zone transfer. Install with: pip install dnspython. "
+                "Try kaos-web-dns-lookup for standard DNS queries without zone transfer."
             )
         except Exception as exc:
-            return ToolResult.create_error(f"Zone transfer failed: {exc}")
+            return ToolResult.create_error(
+                f"Zone transfer failed for {domain}: {exc}. "
+                "Try kaos-web-dns-enumerate for standard DNS enumeration without AXFR."
+            )
 
         output = {
             "domain": domain,
@@ -505,10 +530,15 @@ class DnsSecurityTool(KaosTool):
             result = await analyze_mail_security(domain)
         except ImportError:
             return ToolResult.create_error(
-                "dnspython is required for mail security analysis. Install with: pip install dnspython"
+                "dnspython is required for mail security analysis. Install with: pip install dnspython. "
+                "Try kaos-web-tls-inspect for certificate-only security analysis without dnspython."
             )
         except Exception as exc:
-            return ToolResult.create_error(f"Mail security analysis failed: {exc}")
+            return ToolResult.create_error(
+                f"Mail security analysis failed for {domain}: {exc}. "
+                "Try kaos-web-dns-lookup with record_types='TXT' for raw SPF/DMARC records, or "
+                "kaos-web-tls-inspect for certificate-level security analysis."
+            )
 
         output = result.model_dump(mode="json")
         mechs = [f"{r.mechanism.value}={r.status.value}" for r in result.records]
@@ -555,7 +585,11 @@ class WhoisLookupTool(KaosTool):
 
         result = await whois_lookup(domain)
         if result.error:
-            return ToolResult.create_error(f"WHOIS lookup failed for {domain}: {result.error}")
+            return ToolResult.create_error(
+                f"WHOIS lookup failed for {domain}: {result.error}. "
+                "Try kaos-web-dns-lookup for DNS-based domain information, or "
+                "kaos-web-dns-enumerate for a full DNS profile."
+            )
 
         # Exclude raw_text from default output (it's large)
         output = result.model_dump(mode="json", exclude={"raw_text"})
@@ -609,7 +643,12 @@ class DomainProfileTool(KaosTool):
         try:
             result = await profile_domain(domain)
         except Exception as exc:
-            return ToolResult.create_error(f"Domain profiling failed: {exc}")
+            return ToolResult.create_error(
+                f"Domain profiling failed for {domain}: {exc}. "
+                "Try individual tools instead: kaos-web-dns-enumerate for DNS, "
+                "kaos-web-whois-lookup for registration data, kaos-web-service-detect "
+                "for HTTP/TLS services, or kaos-web-dns-security for mail authentication."
+            )
 
         output = result.model_dump(mode="json", exclude_none=True)
 
@@ -685,7 +724,11 @@ class ExtractOrgTool(KaosTool):
                 html = resp.text
                 final_url = str(resp.url)
         except Exception as exc:
-            return ToolResult.create_error(f"Failed to fetch {url}: {exc}")
+            return ToolResult.create_error(
+                f"Failed to fetch {url}: {exc}. "
+                "Try kaos-web-get-metadata for structured data extraction via a different "
+                "HTTP path, or kaos-web-domain-profile for infrastructure-level domain intelligence."
+            )
 
         from kaos_web.domain.org import extract_org_entity
 

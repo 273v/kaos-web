@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from kaos_web.extract.readability_experiments import (
+from readability_experiments import (
     DEFAULT_CORPUS_PATH,
     format_summary_table,
     load_corpus,
@@ -53,4 +53,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

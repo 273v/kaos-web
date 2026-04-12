@@ -21,7 +21,7 @@ Key modules:
 - `browser_page_prep.py` — Cookie consent banner dismissal for 8 known CMPs (OneTrust, CookieBot, TrustArc, Quantcast, Complianz, Osano, Didomi, Termly)
 - `extract/readability.py` — Heuristic readability algorithm (Mozilla port), used as fallback
 - `extract/readability_l3.py` — **Level 3 learned readability**: pre-trained logistic regression (35 DOM-node features, 10-page corpus). Default extractor. `content_scope` parameter (0.0-1.0) controls precision/recall tradeoff
-- `extract/readability_experiments.py` — Experiment harness for evaluating L1/L2/L3 on labeled corpus
+- `scripts/readability_experiments.py` — Experiment harness for evaluating L1/L2/L3 on labeled corpus (research script, not importable production code)
 - `extract/html_to_ast.py` — lxml HTML element tree to kaos-content Block/Inline AST conversion
 - `extract/metadata.py` — JSON-LD, OpenGraph, and meta tag extraction
 - `middleware/` — Composable chain: retry, rate_limit, robots, cache

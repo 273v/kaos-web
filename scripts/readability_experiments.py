@@ -38,7 +38,7 @@ from kaos_web.extract.readability import (
 )
 
 DEFAULT_CORPUS_PATH = (
-    Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "readability" / "corpus.json"
+    Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "readability" / "corpus.json"
 )
 
 _NODE_ID_ATTR = "data-kaos-exp-id"
