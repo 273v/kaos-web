@@ -12,7 +12,10 @@ import contextlib
 import time
 from collections.abc import Sequence
 
+from kaos_core.logging import get_logger
 from kaos_web.domain.models import COMMON_PORTS, PortResult, PortStatus, TcpProbeResult
+
+logger = get_logger(__name__)
 
 
 async def probe_port(
@@ -53,7 +56,7 @@ async def probe_port(
             except TimeoutError:
                 pass
             except Exception:
-                pass
+                logger.debug("Banner read failed on port %d", port, exc_info=True)
 
         writer.close()
         with contextlib.suppress(Exception):

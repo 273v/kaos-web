@@ -11,10 +11,13 @@ from __future__ import annotations
 from typing import Any
 
 from kaos_core import KaosContext, KaosRuntime, KaosTool, ToolMetadata, ToolResult
+from kaos_core.logging import get_logger
 from kaos_core.types.annotations import ToolAnnotations
 from kaos_core.types.enums import ToolCapability, ToolCategory
 from kaos_core.types.parameters import ParameterSchema
 from kaos_web.models import WebResponse
+
+logger = get_logger(__name__)
 
 _MODULE = "kaos-web"
 _VERSION = "0.1.0"
@@ -230,7 +233,12 @@ class BatchFetchTool(KaosTool):
                         pages.append(page_data)
                         continue
                     except Exception:
-                        pass  # Fall through to inline extraction
+                        logger.debug(
+                            "Artifact storage failed for batch response %s",
+                            resp.url,
+                            exc_info=True,
+                        )
+                        # Fall through to inline extraction
 
                 page_data = await _extract_response(resp, output_format)
                 pages.append(page_data)
@@ -377,7 +385,12 @@ class CrawlSiteTool(KaosTool):
                         pages.append(page_data)
                         continue
                     except Exception:
-                        pass  # Fall through to inline extraction
+                        logger.debug(
+                            "Artifact storage failed for crawl page %s",
+                            page.url,
+                            exc_info=True,
+                        )
+                        # Fall through to inline extraction
 
                 if output_format == "summary":
                     word_count = len(page.content_text.split()) if page.content_text else 0

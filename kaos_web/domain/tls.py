@@ -12,7 +12,10 @@ import socket
 import ssl
 from typing import Any
 
+from kaos_core.logging import get_logger
 from kaos_web.domain.models import TlsCertInfo
+
+logger = get_logger(__name__)
 
 
 def _extract_cert_info(
@@ -56,7 +59,7 @@ def _extract_cert_info(
                 cipher_info = ssock.cipher()
                 protocol_version = ssock.version()
         except Exception:
-            pass
+            logger.debug("TLS fallback inspection failed for %s:%d", host, port, exc_info=True)
     except TimeoutError:
         return TlsCertInfo(host=host, port=port, error=f"Connection timed out after {timeout}s")
     except ConnectionRefusedError:

@@ -6,8 +6,10 @@ retryable flag) for middleware decision-making and agent-friendly error messages
 
 from __future__ import annotations
 
+from kaos_core.exceptions import KaosCoreError
 
-class WebError(Exception):
+
+class WebError(KaosCoreError):
     """Base error for all kaos-web operations."""
 
     def __init__(

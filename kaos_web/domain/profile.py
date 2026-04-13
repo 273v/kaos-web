@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+from kaos_core.logging import get_logger
 from kaos_web.domain.dns import enumerate_dns
 from kaos_web.domain.http import analyze_headers
 from kaos_web.domain.models import (
@@ -21,6 +22,8 @@ from kaos_web.domain.models import (
 from kaos_web.domain.security import analyze_mail_security
 from kaos_web.domain.service import detect_services
 from kaos_web.domain.whois import whois_lookup
+
+logger = get_logger(__name__)
 
 
 async def profile_domain(
@@ -77,7 +80,7 @@ async def profile_domain(
         if robots_resp.status_code == 200:
             robots_url = f"https://{domain}/robots.txt"
     except Exception:
-        pass
+        logger.debug("robots.txt check failed for %s", domain, exc_info=True)
 
     return DomainProfile(
         domain=domain,
