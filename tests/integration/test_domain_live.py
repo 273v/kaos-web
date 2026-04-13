@@ -101,10 +101,12 @@ class TestDomainToolMetadata:
 @pytest.mark.asyncio
 class TestTcpProbeLive:
     async def test_273v_web_ports(self) -> None:
-        result = await TOOLS["kaos-web-tcp-probe"].execute({
-            "host": _273V,
-            "ports": "80,443",
-        })
+        result = await TOOLS["kaos-web-tcp-probe"].execute(
+            {
+                "host": _273V,
+                "ports": "80,443",
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["host"] == _273V
@@ -113,10 +115,12 @@ class TestTcpProbeLive:
         assert ports[443] == "open"
 
     async def test_preset_web(self) -> None:
-        result = await TOOLS["kaos-web-tcp-probe"].execute({
-            "host": _GOOGLE,
-            "preset": "web",
-        })
+        result = await TOOLS["kaos-web-tcp-probe"].execute(
+            {
+                "host": _GOOGLE,
+                "preset": "web",
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["open_count"] >= 2  # Google has both 80 and 443
@@ -138,7 +142,10 @@ class TestTlsInspectLive:
         assert data.get("days_until_expiry") is None or data["days_until_expiry"] > 0
         # SAN should include the domain
         san = data.get("san_dns", [])
-        assert any(_273V in s or "*.273ventures.com" in s or "273ventures" in s for s in san) or data.get("error") is not None
+        assert (
+            any(_273V in s or "*.273ventures.com" in s or "273ventures" in s for s in san)
+            or data.get("error") is not None
+        )
 
     async def test_kelvin_cert(self) -> None:
         result = await TOOLS["kaos-web-tls-inspect"].execute({"host": _KELVIN})
@@ -161,9 +168,11 @@ class TestTlsInspectLive:
 @pytest.mark.asyncio
 class TestHttpHeadersLive:
     async def test_273v_headers(self) -> None:
-        result = await TOOLS["kaos-web-http-headers"].execute({
-            "url": f"https://{_273V}",
-        })
+        result = await TOOLS["kaos-web-http-headers"].execute(
+            {
+                "url": f"https://{_273V}",
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["status_code"] == 200
@@ -171,9 +180,11 @@ class TestHttpHeadersLive:
         assert isinstance(data["security_score"], int)
 
     async def test_kelvin_headers(self) -> None:
-        result = await TOOLS["kaos-web-http-headers"].execute({
-            "url": f"https://{_KELVIN}",
-        })
+        result = await TOOLS["kaos-web-http-headers"].execute(
+            {
+                "url": f"https://{_KELVIN}",
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["status_code"] in (200, 301, 302, 403)
@@ -200,10 +211,12 @@ class TestServiceDetectLive:
 @pytest.mark.asyncio
 class TestDnsLookupLive:
     async def test_273v_a_record(self) -> None:
-        result = await TOOLS["kaos-web-dns-lookup"].execute({
-            "domain": _273V,
-            "record_types": "A",
-        })
+        result = await TOOLS["kaos-web-dns-lookup"].execute(
+            {
+                "domain": _273V,
+                "record_types": "A",
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["total_records"] >= 1
@@ -214,10 +227,12 @@ class TestDnsLookupLive:
         assert re.match(r"\d+\.\d+\.\d+\.\d+", a_records[0]["value"])
 
     async def test_multi_type(self) -> None:
-        result = await TOOLS["kaos-web-dns-lookup"].execute({
-            "domain": _GOOGLE,
-            "record_types": "A,MX,NS",
-        })
+        result = await TOOLS["kaos-web-dns-lookup"].execute(
+            {
+                "domain": _GOOGLE,
+                "record_types": "A,MX,NS",
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert len(data["queries"]) == 3
@@ -230,9 +245,11 @@ class TestDnsLookupLive:
 @pytest.mark.asyncio
 class TestDnsEnumerateLive:
     async def test_273v_full_profile(self) -> None:
-        result = await TOOLS["kaos-web-dns-enumerate"].execute({
-            "domain": _273V,
-        })
+        result = await TOOLS["kaos-web-dns-enumerate"].execute(
+            {
+                "domain": _273V,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["domain"] == _273V
@@ -242,9 +259,11 @@ class TestDnsEnumerateLive:
         assert len(a_queries) >= 1
 
     async def test_google_has_mx(self) -> None:
-        result = await TOOLS["kaos-web-dns-enumerate"].execute({
-            "domain": _GOOGLE,
-        })
+        result = await TOOLS["kaos-web-dns-enumerate"].execute(
+            {
+                "domain": _GOOGLE,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert len(data["mx_hosts"]) >= 1
@@ -258,9 +277,11 @@ class TestDnsEnumerateLive:
 class TestDnsZoneTransferLive:
     async def test_273v_zone_transfer_refused(self) -> None:
         """Zone transfer should be refused on properly configured servers."""
-        result = await TOOLS["kaos-web-dns-zone-transfer"].execute({
-            "domain": _273V,
-        })
+        result = await TOOLS["kaos-web-dns-zone-transfer"].execute(
+            {
+                "domain": _273V,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         # Should have attempted at least one nameserver
@@ -277,9 +298,11 @@ class TestDnsZoneTransferLive:
 class TestDnsSecurityLive:
     async def test_google_mail_security(self) -> None:
         """Google should have strong mail authentication."""
-        result = await TOOLS["kaos-web-dns-security"].execute({
-            "domain": _GOOGLE,
-        })
+        result = await TOOLS["kaos-web-dns-security"].execute(
+            {
+                "domain": _GOOGLE,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["domain"] == _GOOGLE
@@ -299,9 +322,11 @@ class TestDnsSecurityLive:
         assert data["overall_posture"] in ("strong", "moderate")
 
     async def test_273v_mail_security(self) -> None:
-        result = await TOOLS["kaos-web-dns-security"].execute({
-            "domain": _273V,
-        })
+        result = await TOOLS["kaos-web-dns-security"].execute(
+            {
+                "domain": _273V,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert len(data["records"]) == 3
@@ -313,9 +338,11 @@ class TestDnsSecurityLive:
 @pytest.mark.asyncio
 class TestWhoisLookupLive:
     async def test_google_whois(self) -> None:
-        result = await TOOLS["kaos-web-whois-lookup"].execute({
-            "domain": _GOOGLE,
-        })
+        result = await TOOLS["kaos-web-whois-lookup"].execute(
+            {
+                "domain": _GOOGLE,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["domain"] == _GOOGLE
@@ -325,9 +352,11 @@ class TestWhoisLookupLive:
         assert len(data["name_servers"]) >= 2
 
     async def test_273v_whois(self) -> None:
-        result = await TOOLS["kaos-web-whois-lookup"].execute({
-            "domain": _273V,
-        })
+        result = await TOOLS["kaos-web-whois-lookup"].execute(
+            {
+                "domain": _273V,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["domain"] == _273V
@@ -335,9 +364,11 @@ class TestWhoisLookupLive:
         assert data["expiration_date"] is not None
 
     async def test_kelvin_legal_whois(self) -> None:
-        result = await TOOLS["kaos-web-whois-lookup"].execute({
-            "domain": _KELVIN,
-        })
+        result = await TOOLS["kaos-web-whois-lookup"].execute(
+            {
+                "domain": _KELVIN,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["domain"] == _KELVIN
@@ -350,9 +381,11 @@ class TestWhoisLookupLive:
 class TestDomainProfileLive:
     async def test_273v_full_profile(self) -> None:
         """Full domain profile for 273ventures.com — the big integration test."""
-        result = await TOOLS["kaos-web-domain-profile"].execute({
-            "domain": _273V,
-        })
+        result = await TOOLS["kaos-web-domain-profile"].execute(
+            {
+                "domain": _273V,
+            }
+        )
         assert not result.isError
         data = result.require_structured()
         assert data["domain"] == _273V
