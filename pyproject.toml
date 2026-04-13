@@ -89,6 +89,7 @@ addopts = [
 ]
 markers = [
   "integration: tests that hit real HTTP servers (require network)",
+  "live: tests that require API keys (SERPAPI, BRAVE, EXA, etc.)",
 ]
 
 [tool.ruff]
