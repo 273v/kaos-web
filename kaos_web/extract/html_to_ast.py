@@ -12,8 +12,6 @@ For raw (no-readability) conversion, use
 
 from __future__ import annotations
 
-import contextlib
-
 from lxml import html as lxml_html
 from lxml.html import HtmlElement
 
@@ -28,8 +26,11 @@ from kaos_content.parsers.html import (
     process_children_as_blocks,
     strip_inline_xbrl,
 )
+from kaos_core.logging import get_logger
 from kaos_web.extract.readability import extract_content as readability_extract
 from kaos_web.extract.readability_l3 import extract_content_l3
+
+logger = get_logger(__name__)
 
 # Minimum words from readability before we accept its result.
 # Below this threshold, we try semantic container fallback.
@@ -121,14 +122,20 @@ def html_to_document(
     # Try Level 3 learned model first, fall back to heuristic readability.
     try:
         root = extract_content_l3(html_content, content_scope=content_scope)
-    except Exception:
+    except Exception as exc:
+        logger.debug("html_to_ast: fallback from L3 extraction to L3 retry/heuristic: %s", exc)
         root = None
 
     # If L3 returned nothing and scope was strict, retry with default scope
     # before falling back to the heuristic (which ignores content_scope).
     if root is None and content_scope < 0.4:
-        with contextlib.suppress(Exception):
+        try:
             root = extract_content_l3(html_content, content_scope=0.5)
+        except Exception as exc:
+            logger.debug(
+                "html_to_ast: fallback from L3 retry (scope=0.5) to heuristic readability: %s",
+                exc,
+            )
 
     if root is None:
         root = readability_extract(html_content)
@@ -140,7 +147,11 @@ def html_to_document(
         if readability_words < _MIN_READABILITY_WORDS:
             try:
                 full_doc = lxml_html.document_fromstring(html_content)
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "html_to_ast: fallback from semantic container parsing to body: %s",
+                    exc,
+                )
                 full_doc = None
             if full_doc is not None and full_doc.body is not None:
                 body_words = len((full_doc.body.text_content() or "").split())
@@ -154,7 +165,11 @@ def html_to_document(
         if full_doc is None:
             try:
                 full_doc = lxml_html.document_fromstring(html_content)
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "html_to_ast: fallback from full-body parsing to empty document: %s",
+                    exc,
+                )
                 return empty_document()
         root = full_doc.body if full_doc is not None else None
         if root is None:
@@ -173,8 +188,8 @@ def html_to_document(
         title_el = full_doc.find(".//title")
         if title_el is not None and title_el.text:
             title = title_el.text.strip() or None
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("html_to_ast: title extraction failed, skipping: %s", exc)
 
     metadata = DocumentMetadata.model_construct(
         title=title,
