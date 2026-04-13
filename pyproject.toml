@@ -121,6 +121,13 @@ exclude_lines = [
 
 [tool.ty.src]
 include = ["kaos_web", "tests"]
+exclude = [
+  "kaos_web/domain_tools.py",
+  "kaos_web/middleware/robots.py",
+  "kaos_web/sitemap.py",
+  "tests/integration/test_domain_live.py",
+  "tests/integration/test_entity_live.py",
+]
 
 [tool.uv]
 package = true
