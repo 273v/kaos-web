@@ -38,6 +38,209 @@ DEFAULT_RECORD_TYPES: tuple[str, ...] = (
 
 DNSSEC_RECORD_TYPES: tuple[str, ...] = ("DNSKEY", "DS")
 
+# Multi-part public-suffix TLDs where the apex domain is 3+ labels.
+# Without a full PSL download, we maintain the most common ones.
+_MULTI_PART_TLDS: frozenset[str] = frozenset(
+    {
+        # United Kingdom
+        "co.uk",
+        "org.uk",
+        "ac.uk",
+        "gov.uk",
+        "me.uk",
+        "net.uk",
+        "sch.uk",
+        # Australia
+        "com.au",
+        "net.au",
+        "org.au",
+        "edu.au",
+        "gov.au",
+        "asn.au",
+        "id.au",
+        # Japan
+        "co.jp",
+        "ac.jp",
+        "ne.jp",
+        "or.jp",
+        "go.jp",
+        # Brazil
+        "com.br",
+        "net.br",
+        "org.br",
+        "gov.br",
+        "edu.br",
+        # India
+        "co.in",
+        "net.in",
+        "org.in",
+        "gen.in",
+        "firm.in",
+        "ind.in",
+        "gov.in",
+        "ac.in",
+        "edu.in",
+        "res.in",
+        # New Zealand
+        "co.nz",
+        "net.nz",
+        "org.nz",
+        "govt.nz",
+        "ac.nz",
+        # South Africa
+        "co.za",
+        "org.za",
+        "net.za",
+        "gov.za",
+        "ac.za",
+        # China
+        "com.cn",
+        "net.cn",
+        "org.cn",
+        "gov.cn",
+        "edu.cn",
+        # Hong Kong
+        "com.hk",
+        "org.hk",
+        "net.hk",
+        "edu.hk",
+        "gov.hk",
+        # South Korea
+        "co.kr",
+        "or.kr",
+        "ne.kr",
+        "re.kr",
+        "pe.kr",
+        "go.kr",
+        "ac.kr",
+        # Singapore
+        "com.sg",
+        "net.sg",
+        "org.sg",
+        "edu.sg",
+        "gov.sg",
+        # Taiwan
+        "com.tw",
+        "net.tw",
+        "org.tw",
+        "edu.tw",
+        "gov.tw",
+        # Turkey
+        "com.tr",
+        "net.tr",
+        "org.tr",
+        "gen.tr",
+        "gov.tr",
+        "edu.tr",
+        # Mexico
+        "com.mx",
+        "net.mx",
+        "org.mx",
+        "gob.mx",
+        "edu.mx",
+        # Argentina
+        "com.ar",
+        "net.ar",
+        "org.ar",
+        "gov.ar",
+        "edu.ar",
+        # Colombia
+        "com.co",
+        "net.co",
+        "org.co",
+        "gov.co",
+        "edu.co",
+        # Israel
+        "co.il",
+        "org.il",
+        "net.il",
+        "ac.il",
+        "gov.il",
+        # Thailand
+        "co.th",
+        "in.th",
+        "ac.th",
+        "go.th",
+        "or.th",
+        "net.th",
+        # Malaysia
+        "com.my",
+        "net.my",
+        "org.my",
+        "gov.my",
+        "edu.my",
+        # Indonesia
+        "co.id",
+        "or.id",
+        "ac.id",
+        "go.id",
+        "web.id",
+        # Nigeria
+        "com.ng",
+        "org.ng",
+        "net.ng",
+        "gov.ng",
+        "edu.ng",
+        # Kenya
+        "co.ke",
+        "or.ke",
+        "ne.ke",
+        "go.ke",
+        "ac.ke",
+        # Egypt
+        "com.eg",
+        "org.eg",
+        "net.eg",
+        "gov.eg",
+        "edu.eg",
+        # Pakistan
+        "com.pk",
+        "net.pk",
+        "org.pk",
+        "gov.pk",
+        "edu.pk",
+        # Bangladesh
+        "com.bd",
+        "net.bd",
+        "org.bd",
+        "gov.bd",
+        "edu.bd",
+        # Vietnam
+        "com.vn",
+        "net.vn",
+        "org.vn",
+        "gov.vn",
+        "edu.vn",
+        # Philippines
+        "com.ph",
+        "net.ph",
+        "org.ph",
+        "gov.ph",
+        "edu.ph",
+    }
+)
+
+
+def _derive_apex_domain(hostname: str) -> str:
+    """Derive the apex (registered) domain from a hostname.
+
+    Handles multi-part public-suffix TLDs like ``co.uk``, ``com.au`` using
+    a curated set of known suffixes.  Falls back to the last two labels for
+    simple TLDs (``com``, ``org``, ``net``, etc.).
+    """
+    parts = hostname.rstrip(".").split(".")
+    if len(parts) <= 2:
+        return ".".join(parts)
+
+    # Check if the last two labels form a known multi-part TLD
+    candidate_tld = ".".join(parts[-2:])
+    if candidate_tld in _MULTI_PART_TLDS:
+        # Apex is <name>.<multi-part-tld>, i.e. last 3 labels
+        return ".".join(parts[-3:]) if len(parts) >= 3 else ".".join(parts)
+
+    # Simple TLD — apex is the last two labels
+    return ".".join(parts[-2:])
+
 
 # ── Single record type lookup ───────────────────────────────────────
 
@@ -282,9 +485,8 @@ async def enumerate_dns(
         if dnssec is None:
             dnssec = False
 
-    # Derive apex domain (simple heuristic: last two segments)
-    parts = domain.rstrip(".").split(".")
-    apex = ".".join(parts[-2:]) if len(parts) >= 2 else domain
+    # Derive apex domain (handles multi-part TLDs like co.uk, com.au)
+    apex = _derive_apex_domain(domain)
 
     return DnsProfile(
         domain=domain,
