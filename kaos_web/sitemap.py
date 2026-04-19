@@ -100,11 +100,23 @@ def _find_text(el: etree.Element, tag: str) -> str | None:
 
 
 def _parse_xml_sitemap(content: bytes) -> tuple[list[SitemapEntry], list[str]]:
-    """Parse an XML sitemap. Returns (entries, sub_sitemap_urls)."""
+    """Parse an XML sitemap. Returns (entries, sub_sitemap_urls).
+
+    Uses lxml's recovering parser so truncated/malformed sitemaps still
+    yield whatever complete ``<url>`` entries they contain — real-world
+    sitemaps are frequently truncated by proxies or CDN limits.
+    """
     try:
-        root = etree.fromstring(content)
-    except etree.ParseError:
-        return [], []
+        from lxml import etree as lxml_etree  # ty: ignore[unresolved-import]
+
+        parser = lxml_etree.XMLParser(recover=True, resolve_entities=False)
+        root = lxml_etree.fromstring(content, parser=parser)
+    except (ValueError, lxml_etree.XMLSyntaxError):
+        # Fall back to stdlib for defence in depth
+        try:
+            root = etree.fromstring(content)
+        except etree.ParseError:
+            return [], []
 
     if root is None:
         return [], []
