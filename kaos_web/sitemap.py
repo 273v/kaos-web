@@ -15,8 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
-
-from lxml import etree  # type: ignore[unresolved-import]
+from xml.etree import ElementTree as etree
 
 from kaos_core.logging import get_logger
 from kaos_web.models import WebRequest, WebResponse
@@ -82,7 +81,12 @@ def _parse_priority(text: str | None) -> float | None:
         return None
 
 
-def _find_text(el: etree._Element, tag: str) -> str | None:
+def _local_name(tag: str) -> str:
+    """Return the local element name without any XML namespace."""
+    return tag.split("}", 1)[-1]
+
+
+def _find_text(el: etree.Element, tag: str) -> str | None:
     """Find text of a child element, handling optional namespace."""
     # Try with namespace first
     child = el.find(f"{{{_SM_NS}}}{tag}")
@@ -99,24 +103,20 @@ def _parse_xml_sitemap(content: bytes) -> tuple[list[SitemapEntry], list[str]]:
     """Parse an XML sitemap. Returns (entries, sub_sitemap_urls)."""
     try:
         root = etree.fromstring(content)
-    except etree.XMLSyntaxError:
-        # Try to recover by removing BOM or fixing encoding
-        try:
-            root = etree.fromstring(content, parser=etree.XMLParser(recover=True))
-        except Exception:
-            return [], []
+    except etree.ParseError:
+        return [], []
 
     if root is None:
         return [], []
 
     entries: list[SitemapEntry] = []
     sub_sitemaps: list[str] = []
-    local_tag = etree.QName(root.tag).localname if isinstance(root.tag, str) else ""
+    local_tag = _local_name(root.tag) if isinstance(root.tag, str) else ""
 
     if local_tag == "sitemapindex":
         # Sitemap index — collect child sitemap URLs
         for sm in root.iter():
-            tag = etree.QName(sm.tag).localname if isinstance(sm.tag, str) else ""
+            tag = _local_name(sm.tag) if isinstance(sm.tag, str) else ""
             if tag == "sitemap":
                 loc = _find_text(sm, "loc")
                 if loc:
@@ -125,7 +125,7 @@ def _parse_xml_sitemap(content: bytes) -> tuple[list[SitemapEntry], list[str]]:
     elif local_tag == "urlset":
         # Regular sitemap — collect URL entries
         for url_el in root.iter():
-            tag = etree.QName(url_el.tag).localname if isinstance(url_el.tag, str) else ""
+            tag = _local_name(url_el.tag) if isinstance(url_el.tag, str) else ""
             if tag == "url":
                 loc = _find_text(url_el, "loc")
                 if loc:

@@ -897,7 +897,9 @@ class GetPageTablesTool(KaosTool):
                 ParameterSchema(
                     name="format",
                     type="string",
-                    description="Output format: 'tsv' (default, token-efficient), 'markdown', or 'json'.",
+                    description=(
+                        "Output format: 'tsv' (default, token-efficient), 'markdown', or 'json'."
+                    ),
                     required=False,
                     default="tsv",
                     constraints={"enum": ["tsv", "markdown", "json"]},

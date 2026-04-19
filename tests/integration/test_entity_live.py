@@ -9,31 +9,20 @@ from __future__ import annotations
 
 import pytest
 
+from kaos_core import KaosRuntime
+
 pytestmark = pytest.mark.integration
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
-class _MockToolsRegistry:
-    def __init__(self) -> None:
-        self.tools: list = []
-
-    def register_tool(self, tool: object) -> None:
-        self.tools.append(tool)
-
-
-class _MockRuntime:
-    def __init__(self) -> None:
-        self.tools = _MockToolsRegistry()
-
-
 def _build_tools() -> dict:
     from kaos_web.domain_tools import register_domain_tools
 
-    rt = _MockRuntime()
-    register_domain_tools(rt)
-    return {t.metadata.name: t for t in rt.tools.tools}
+    runtime = KaosRuntime()
+    register_domain_tools(runtime)
+    return {tool.metadata.name: tool for tool in runtime.tools.list_tool_objects()}
 
 
 TOOLS = _build_tools()

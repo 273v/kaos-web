@@ -30,12 +30,19 @@ class RobotsConfig(BaseModel):
 class _CachedRobots:
     """Cached robots.txt parser for a domain."""
 
-    __slots__ = ("crawl_delay", "fetched_at", "parser")
+    __slots__ = ("allow_all", "crawl_delay", "fetched_at", "parser")
 
-    def __init__(self, parser: RobotFileParser, crawl_delay: float | None) -> None:
+    def __init__(
+        self,
+        parser: RobotFileParser,
+        crawl_delay: float | None,
+        *,
+        allow_all: bool = False,
+    ) -> None:
         self.parser = parser
         self.fetched_at = time.monotonic()
         self.crawl_delay = crawl_delay
+        self.allow_all = allow_all
 
 
 class RobotsMiddleware:
@@ -72,6 +79,7 @@ class RobotsMiddleware:
     async def _fetch_robots(self, robots_url: str, domain: str, handler: Handler) -> _CachedRobots:
         """Fetch and parse robots.txt for a domain."""
         parser = RobotFileParser(robots_url)
+        allow_all = False
         try:
             # Fetch robots.txt through the handler (respects middleware below us)
             request = WebRequest(url=robots_url, timeout=self.config.fetch_timeout)
@@ -79,19 +87,18 @@ class RobotsMiddleware:
             if response.ok and response.html:
                 parser.parse(response.html.splitlines())
             else:
-                # No robots.txt or error → allow everything
-                # allow_all is a documented RobotFileParser attribute that ty lacks stubs for
-                parser.allow_all = True  # type: ignore[unresolved-attribute]
+                # No robots.txt or HTTP error -> allow everything.
+                allow_all = True
         except Exception:
             # Network error fetching robots.txt → allow everything
             logger.debug("Failed to fetch %s, allowing all", robots_url)
-            parser.allow_all = True  # type: ignore[unresolved-attribute]
+            allow_all = True
 
         # Extract crawl-delay (stdlib returns str | None, convert to float)
         raw_delay = parser.crawl_delay(self.config.user_agent)
         crawl_delay: float | None = float(raw_delay) if isinstance(raw_delay, str) else raw_delay
 
-        cached = _CachedRobots(parser, crawl_delay)
+        cached = _CachedRobots(parser, crawl_delay, allow_all=allow_all)
         self._cache[domain] = cached
         return cached
 
@@ -111,7 +118,9 @@ class RobotsMiddleware:
             cached = await self._fetch_robots(robots_url, domain, next_handler)
 
         # Check if URL is allowed
-        if not cached.parser.can_fetch(self.config.user_agent, request.url):
+        if not cached.allow_all and not cached.parser.can_fetch(
+            self.config.user_agent, request.url
+        ):
             raise WebClientError(
                 f"Blocked by robots.txt: {request.url}. "
                 f"The site's robots.txt disallows access to this URL for user-agent "

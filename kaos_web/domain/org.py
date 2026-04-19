@@ -96,11 +96,19 @@ _SOCIAL_DOMAINS: dict[str, str] = {
 
 # ── Jurisdiction patterns ───────────────────────────────────────────
 
+_US_STATE_PATTERN = (
+    "Delaware|Nevada|California|New York|Texas|Florida|Wyoming|Illinois|"
+    "Massachusetts|Georgia|Washington|Colorado|Ohio|Virginia|Maryland|"
+    "New Jersey|Pennsylvania|Connecticut|North Carolina"
+)
+
 _JURISDICTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None]] = [
     # US state entities
     (
         re.compile(
-            r"(?:a|an)\s+(Delaware|Nevada|California|New York|Texas|Florida|Wyoming|Illinois|Massachusetts|Georgia|Washington|Colorado|Ohio|Virginia|Maryland|New Jersey|Pennsylvania|Connecticut|North Carolina)\s+(?:limited liability company|LLC|corporation|Inc\.|incorporated|L\.?L\.?C\.?|L\.?L\.?P\.?|limited partnership)",
+            rf"(?:a|an)\s+({_US_STATE_PATTERN})\s+"
+            r"(?:limited liability company|LLC|corporation|Inc\.|incorporated|"
+            r"L\.?L\.?C\.?|L\.?L\.?P\.?|limited partnership)",
             re.IGNORECASE,
         ),
         "jurisdiction",
@@ -108,7 +116,9 @@ _JURISDICTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None]] = [
     ),
     (
         re.compile(
-            r"(?:incorporated|organized|formed|registered)\s+(?:in|under the laws of)\s+(?:the\s+)?(?:State\s+of\s+)?(Delaware|Nevada|California|New York|Texas|Florida|Wyoming|Illinois|Massachusetts|Georgia|Washington|Colorado|Ohio|Virginia|Maryland|New Jersey|Pennsylvania|Connecticut|North Carolina)",
+            rf"(?:incorporated|organized|formed|registered)\s+"
+            r"(?:in|under the laws of)\s+(?:the\s+)?(?:State\s+of\s+)?"
+            rf"({_US_STATE_PATTERN})",
             re.IGNORECASE,
         ),
         "jurisdiction",
@@ -117,7 +127,10 @@ _JURISDICTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None]] = [
     # UK entities
     (
         re.compile(
-            r"(?:registered|incorporated)\s+in\s+(England(?:\s+and\s+Wales)?|Scotland|Northern Ireland)(?:,?\s+(?:Company|Registration)\s+(?:No\.?|Number:?)\s*(\w+))?",
+            r"(?:registered|incorporated)\s+in\s+"
+            r"(England(?:\s+and\s+Wales)?|Scotland|Northern Ireland)"
+            r"(?:,?\s+(?:Company|Registration)\s+"
+            r"(?:No\.?|Number:?)\s*(\w+))?",
             re.IGNORECASE,
         ),
         "jurisdiction",
@@ -140,7 +153,9 @@ _JURISDICTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None]] = [
 ]
 
 _ENTITY_FORM_PATTERNS = re.compile(
-    r"\b(LLC|L\.L\.C\.|LLP|L\.L\.P\.|Inc\.|Incorporated|Ltd\.|Limited|Corp\.|Corporation|PLC|P\.L\.C\.|GmbH|AG|S\.A\.|S\.r\.l\.|PLLC|P\.A\.|Professional Association)\b",
+    r"\b(LLC|L\.L\.C\.|LLP|L\.L\.P\.|Inc\.|Incorporated|Ltd\.|Limited|Corp\.|"
+    r"Corporation|PLC|P\.L\.C\.|GmbH|AG|S\.A\.|S\.r\.l\.|PLLC|P\.A\.|"
+    r"Professional Association)\b",
     re.IGNORECASE,
 )
 

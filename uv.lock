@@ -425,9 +425,11 @@ markdown = [
 [package.metadata]
 requires-dist = [
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.0.0" },
+    { name = "imagehash", marker = "extra == 'dedup'", specifier = ">=4.3.0" },
     { name = "kaos-core", editable = "../kaos-core" },
     { name = "kaos-mcp", marker = "extra == 'mcp'", editable = "../kaos-mcp" },
     { name = "kaos-nlp-core", marker = "extra == 'nlp'", editable = "../kaos-nlp-core" },
+    { name = "kaos-nlp-transformers", marker = "extra == 'dedup'", editable = "../kaos-nlp-transformers" },
     { name = "lxml", marker = "extra == 'html'", specifier = ">=5.0.0" },
     { name = "markdown-it-py", extras = ["plugins"], marker = "extra == 'markdown'", specifier = ">=3.0.0" },
     { name = "numpy", marker = "extra == 'images'", specifier = ">=2.0.0" },
@@ -435,17 +437,27 @@ requires-dist = [
     { name = "pillow", marker = "extra == 'images'", specifier = ">=11.0.0" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.0.0" },
     { name = "pydantic", specifier = ">=2.11.0" },
+    { name = "scipy", marker = "extra == 'dedup'", specifier = ">=1.13.0" },
     { name = "uuid6", marker = "python_full_version < '3.14'", specifier = ">=2024.7.10" },
 ]
-provides-extras = ["duckdb", "html", "images", "layout", "markdown", "mcp", "nlp", "polars"]
+provides-extras = ["dedup", "duckdb", "html", "images", "layout", "markdown", "mcp", "nlp", "polars"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "duckdb", specifier = ">=1.0.0" },
+    { name = "imagehash", specifier = ">=4.3.0" },
+    { name = "kaos-mcp", editable = "../kaos-mcp" },
+    { name = "kaos-nlp-core", editable = "../kaos-nlp-core" },
+    { name = "kaos-nlp-transformers", editable = "../kaos-nlp-transformers" },
     { name = "kaos-office", extras = ["xlsx-calamine"], editable = "../kaos-office" },
+    { name = "numpy", specifier = ">=2.0.0" },
+    { name = "pillow", specifier = ">=11.0.0" },
+    { name = "polars", specifier = ">=1.0.0" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-asyncio", specifier = ">=0.26.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "ruff", specifier = ">=0.11.0" },
+    { name = "scipy", specifier = ">=1.13.0" },
     { name = "ty", specifier = ">=0.0.1a17" },
 ]
 
@@ -474,6 +486,7 @@ provides-extras = ["mcp", "pydantic-ai"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "kaos-mcp", editable = "../kaos-mcp" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "pytest-asyncio", specifier = ">=0.26.0" },
     { name = "pytest-benchmark", specifier = ">=5.1.0" },
@@ -529,7 +542,9 @@ provides-extras = ["mcp"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "datasets", specifier = ">=4.8.4" },
     { name = "kaos-content", editable = "../kaos-content" },
+    { name = "kaos-mcp", editable = "../kaos-mcp" },
     { name = "kaos-ml-core", editable = "../kaos-ml-core" },
     { name = "kaos-nlp-transformers", editable = "../kaos-nlp-transformers" },
     { name = "markdown-it-py", specifier = ">=4.0.0" },

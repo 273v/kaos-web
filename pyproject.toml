@@ -98,7 +98,6 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF", "C4", "PTH"]
-ignore = ["B008", "E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["kaos_web", "kaos_core", "kaos_content"]
@@ -121,13 +120,6 @@ exclude_lines = [
 
 [tool.ty.src]
 include = ["kaos_web", "tests"]
-exclude = [
-  "kaos_web/domain_tools.py",
-  "kaos_web/middleware/robots.py",
-  "kaos_web/sitemap.py",
-  "tests/integration/test_domain_live.py",
-  "tests/integration/test_entity_live.py",
-]
 
 [tool.uv]
 package = true

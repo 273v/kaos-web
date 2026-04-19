@@ -111,7 +111,10 @@ class TcpProbeTool(KaosTool):
         output = result.model_dump(mode="json")
         return ToolResult.create_success(
             output,
-            summary=f"{host}: {result.open_count} open, {result.closed_count} closed, {result.timeout_count} timeout",
+            summary=(
+                f"{host}: {result.open_count} open, {result.closed_count} closed, "
+                f"{result.timeout_count} timeout"
+            ),
         )
 
 
@@ -230,7 +233,10 @@ class HttpHeadersTool(KaosTool):
         output = result.model_dump(mode="json", exclude_none=True)
         return ToolResult.create_success(
             output,
-            summary=f"{result.status_code} {result.server_software or ''} — security score {result.security_score}/100",
+            summary=(
+                f"{result.status_code} {result.server_software or ''} — "
+                f"security score {result.security_score}/100"
+            ),
         )
 
 
@@ -308,7 +314,9 @@ class DnsLookupTool(KaosTool):
                 ParameterSchema(
                     name="record_types",
                     type="string",
-                    description="Comma-separated record types (default: 'A'). E.g. 'A,AAAA,MX,NS,TXT'.",
+                    description=(
+                        "Comma-separated record types (default: 'A'). E.g. 'A,AAAA,MX,NS,TXT'."
+                    ),
                     required=False,
                     default="A",
                 ),
@@ -331,7 +339,8 @@ class DnsLookupTool(KaosTool):
             results = await lookup_many(domain, record_types)
         except ImportError:
             return ToolResult.create_error(
-                "dnspython is required for DNS tools. Install with: pip install dnspython. "
+                "dnspython is required for DNS tools. "
+                "Install with: pip install dnspython. "
                 "Try kaos-web-whois-lookup for alternative domain information without dnspython."
             )
         except Exception as exc:
@@ -348,7 +357,9 @@ class DnsLookupTool(KaosTool):
         }
         return ToolResult.create_success(
             output,
-            summary=f"{domain}: {output['total_records']} record(s) across {len(record_types)} type(s)",
+            summary=(
+                f"{domain}: {output['total_records']} record(s) across {len(record_types)} type(s)"
+            ),
         )
 
 
@@ -439,7 +450,9 @@ class DnsZoneTransferTool(KaosTool):
                 ParameterSchema(
                     name="nameservers",
                     type="string",
-                    description="Comma-separated nameserver hostnames. If omitted, discovers via NS lookup.",
+                    description=(
+                        "Comma-separated nameserver hostnames. If omitted, discovers via NS lookup."
+                    ),
                     required=False,
                 ),
             ],
@@ -530,7 +543,8 @@ class DnsSecurityTool(KaosTool):
             result = await analyze_mail_security(domain)
         except ImportError:
             return ToolResult.create_error(
-                "dnspython is required for mail security analysis. Install with: pip install dnspython. "
+                "dnspython is required for mail security analysis. "
+                "Install with: pip install dnspython. "
                 "Try kaos-web-tls-inspect for certificate-only security analysis without dnspython."
             )
         except Exception as exc:
@@ -727,7 +741,8 @@ class ExtractOrgTool(KaosTool):
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. "
                 "Try kaos-web-get-metadata for structured data extraction via a different "
-                "HTTP path, or kaos-web-domain-profile for infrastructure-level domain intelligence."
+                "HTTP path, or kaos-web-domain-profile for infrastructure-level "
+                "domain intelligence."
             )
 
         from kaos_web.domain.org import extract_org_entity
