@@ -23,6 +23,7 @@ from kaos_content.parsers.html import (
     extractor_scope,
     looks_like_xbrl,
     parse_html,
+    pre_content_scope,
     process_children_as_blocks,
     strip_inline_xbrl,
 )
@@ -80,6 +81,7 @@ def html_to_document(
     extract_content: bool = True,
     content_scope: float = 0.5,
     strip_xbrl: bool | None = None,
+    pre_content_mode: str = "code",
 ) -> ContentDocument:
     """Convert HTML to a ContentDocument AST.
 
@@ -100,6 +102,13 @@ def html_to_document(
             namespace elements that lxml and readability models
             cannot process.  This parameter enables the kaos-web
             pipeline to handle EDGAR filings natively.
+        pre_content_mode: How to interpret ``<pre>`` tag content.
+            ``"code"`` (default) emits a ``CodeBlock`` preserving
+            whitespace. ``"prose"`` treats the inner text as
+            blank-line-separated prose and emits ``Paragraph`` blocks.
+            Use ``"prose"`` for sources (e.g. Federal Register
+            ``raw_text_url``) that abuse ``<pre>`` as a plain-text
+            container.
 
     Returns:
         ContentDocument with Block/Inline AST nodes and provenance.
@@ -107,7 +116,12 @@ def html_to_document(
     # For raw (no-readability) conversion, delegate to kaos-content.
     if not extract_content:
         with extractor_scope("kaos-web"):
-            return parse_html(html_content, url=url, strip_xbrl=strip_xbrl)
+            return parse_html(
+                html_content,
+                url=url,
+                strip_xbrl=strip_xbrl,
+                pre_content_mode=pre_content_mode,
+            )
 
     if not html_content or not html_content.strip():
         return empty_document()
@@ -177,8 +191,9 @@ def html_to_document(
 
     # Set extractor to "kaos-web" for provenance since this path applies
     # kaos-web's readability extraction on top of the kaos-content walker.
-    with extractor_scope("kaos-web"):
-        # Convert the element tree to AST blocks.
+    # Nest ``pre_content_scope`` so the chosen ``<pre>`` interpretation
+    # applies equally when readability extraction surfaces a ``<pre>``.
+    with extractor_scope("kaos-web"), pre_content_scope(pre_content_mode):
         blocks = process_children_as_blocks(root, url)
 
     # Extract title from the original HTML for metadata.
