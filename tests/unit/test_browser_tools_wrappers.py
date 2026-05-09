@@ -686,9 +686,7 @@ class TestSaveAuthStateTool:
             artifact_id="art-auth", body_uri="kaos://artifacts/art-auth/body"
         )
         with _patch_client(client):
-            result = await SaveAuthStateTool().execute(
-                {"context_id": "s1"}, context=ctx
-            )
+            result = await SaveAuthStateTool().execute({"context_id": "s1"}, context=ctx)
         assert not result.isError
         # Manifest fields surfaced in the structured output.
         out = result.structuredContent
@@ -697,8 +695,9 @@ class TestSaveAuthStateTool:
         assert out["body_uri"] == "kaos://artifacts/art-auth/body"
         assert out["size_bytes"] > 0
         # Underlying client was called for the in-memory state, not for
-        # any caller-supplied path.
-        client.get_storage_state.assert_awaited_once_with("s1")
+        # any caller-supplied path. WEB5-002: session_id threaded through
+        # from KaosContext.
+        client.get_storage_state.assert_awaited_once_with("s1", session_id="sess-test")
         # Artifact creation was scoped to the caller's session.
         ctx.runtime.artifacts.create_from_path.assert_awaited_once()
         kwargs = ctx.runtime.artifacts.create_from_path.await_args.kwargs
@@ -725,9 +724,7 @@ class TestSaveAuthStateTool:
         client.get_storage_state = AsyncMock(side_effect=RuntimeError("io"))
         ctx, _ = _make_runtime_context()
         with _patch_client(client):
-            result = await SaveAuthStateTool().execute(
-                {"context_id": "s1"}, context=ctx
-            )
+            result = await SaveAuthStateTool().execute({"context_id": "s1"}, context=ctx)
         assert result.isError
         text = _err_text(result)
         assert "Failed to save auth state" in text
@@ -963,7 +960,8 @@ class TestListCapturedResponsesTool:
 class TestListContextsTool:
     async def test_lists_with_url_lookup(self) -> None:
         client = MagicMock()
-        client.active_contexts = ["s1", "s2"]
+        # WEB5-002: active_contexts is now a method taking session_id.
+        client.active_contexts = MagicMock(return_value=["s1", "s2"])
         client.get_url = AsyncMock(side_effect=["https://a.com", "https://b.com"])
         with _patch_client(client):
             result = await ListContextsTool().execute({})
@@ -974,7 +972,7 @@ class TestListContextsTool:
 
     async def test_get_url_failure_falls_back_to_unknown(self) -> None:
         client = MagicMock()
-        client.active_contexts = ["s1"]
+        client.active_contexts = MagicMock(return_value=["s1"])
         client.get_url = AsyncMock(side_effect=RuntimeError("dropped"))
         with _patch_client(client):
             result = await ListContextsTool().execute({})
@@ -984,10 +982,9 @@ class TestListContextsTool:
         assert out["contexts"][0]["url"] == "(unknown)"
 
     async def test_outer_failure(self) -> None:
-        # Inject a client whose .active_contexts property raises
+        # Inject a client whose .active_contexts call raises
         class _Bad:
-            @property
-            def active_contexts(self) -> list[str]:
+            def active_contexts(self, session_id: str = "") -> list[str]:
                 raise RuntimeError("disconnected")
 
         with _patch_client(_Bad()):
@@ -1004,7 +1001,8 @@ class TestListContextsTool:
 class TestCloseContextTool:
     async def test_close_success(self) -> None:
         client = MagicMock()
-        client.active_contexts = ["s1"]
+        # WEB5-002: active_contexts is now a method taking session_id.
+        client.active_contexts = MagicMock(return_value=["s1"])
         client.close_context = AsyncMock()
         with _patch_client(client):
             result = await CloseContextTool().execute({"context_id": "s1"})
@@ -1012,7 +1010,7 @@ class TestCloseContextTool:
 
     async def test_close_failure_translates(self) -> None:
         client = MagicMock()
-        client.active_contexts = ["s1"]
+        client.active_contexts = MagicMock(return_value=["s1"])
         client.close_context = AsyncMock(side_effect=RuntimeError("disconnected"))
         with _patch_client(client):
             result = await CloseContextTool().execute({"context_id": "s1"})

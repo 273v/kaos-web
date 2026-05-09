@@ -36,7 +36,7 @@ class TestBrowserNavigateAndTrack:
             )
 
             assert resp.status_code == 200
-            assert "nav1" in client.active_contexts
+            assert "nav1" in client.active_contexts()
             assert resp.title is not None
             assert "example" in resp.title.lower()
 
@@ -44,7 +44,7 @@ class TestBrowserNavigateAndTrack:
         """Fetch without context_id doesn't leave pages behind."""
         async with BrowserClient(_BROWSER_CONFIG) as client:
             await client.fetch(WebRequest(url="https://example.com"))
-            assert client.active_contexts == []
+            assert client.active_contexts() == []
 
     async def test_close_context_cleans_up(self) -> None:
         """close_context removes page and context."""
@@ -52,10 +52,10 @@ class TestBrowserNavigateAndTrack:
             await client.fetch(
                 WebRequest(url="https://example.com", extra={"context_id": "cleanup1"})
             )
-            assert "cleanup1" in client.active_contexts
+            assert "cleanup1" in client.active_contexts()
 
             await client.close_context("cleanup1")
-            assert "cleanup1" not in client.active_contexts
+            assert "cleanup1" not in client.active_contexts()
 
 
 # ── Click ──

@@ -209,6 +209,19 @@ The `CacheMiddleware` automatically bypasses any request that carries
 `X-Auth-Token`, or `X-CSRF-Token` headers, so authenticated responses
 cannot leak across callers via the shared cache.
 
+Browser contexts (the named pools behind `kaos-web-browser-navigate`
+and friends) are bound to the calling `KaosContext.session_id` — there
+is no env var for this; the binding is automatic and unconditional. A
+caller in one MCP session cannot click, fill, screenshot, evaluate,
+read cookies, save auth state, or pull captured network traffic from
+another session's browser context, even with knowledge of the
+`context_id`. Cross-session lookups return the same "No active page" /
+"No context" error a missing context would, so existence in another
+session is never disclosed. The threat model is a remote MCP HTTP
+server fronting multiple agents; a single-user stdio caller with no
+runtime context falls back to a shared anonymous bucket and continues
+to work as before.
+
 URL filter regexes used by `kaos-web-discover-urls` /
 `kaos-web-crawl-site` route through the `kaos-nlp-core` Rust regex
 engine (linear-time, no catastrophic backtracking) when the `[nlp]`

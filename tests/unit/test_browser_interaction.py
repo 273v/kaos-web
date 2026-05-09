@@ -5,6 +5,8 @@ Tests verify:
 - Interaction methods (click, fill, type, select, press_key, evaluate, snapshot)
 - Error handling when no page exists for context_id
 - All 10 browser MCP tool metadata and error paths
+- Session-scoped context binding (WEB5-002): cross-session lookups miss
+  uniformly; ``active_contexts(session_id)`` filters by caller bucket.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kaos_web.clients.browser import BrowserClient
+from kaos_web.clients.browser import ANONYMOUS_SESSION_ID, BrowserClient
 from kaos_web.errors import WebBrowserError
 
 # ── Fixtures ──
@@ -76,7 +78,7 @@ class TestPageTracking:
     def test_initial_state_empty(self):
         client = BrowserClient()
         assert client._pages == {}
-        assert client.active_contexts == []
+        assert client.active_contexts() == []
 
     @pytest.mark.asyncio
     async def test_fetch_with_context_id_stores_page(self):
@@ -93,9 +95,10 @@ class TestPageTracking:
 
         await client.fetch(WebRequest(url="https://example.com", extra={"context_id": "s1"}))
 
-        assert "s1" in client._pages
-        assert "s1" in client._contexts
-        assert client.active_contexts == ["s1"]
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        assert scope in client._pages
+        assert scope in client._contexts
+        assert client.active_contexts() == ["s1"]
         # Page should NOT be closed
         page.close.assert_not_called()
 
@@ -124,24 +127,25 @@ class TestPageTracking:
         client = BrowserClient()
         page = _mock_page()
         ctx = _mock_context()
-        client._pages["s1"] = page
-        client._contexts["s1"] = ctx
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        client._pages[scope] = page
+        client._contexts[scope] = ctx
 
         await client.close_context("s1")
 
-        assert "s1" not in client._pages
-        assert "s1" not in client._contexts
+        assert scope not in client._pages
+        assert scope not in client._contexts
         page.close.assert_called_once()
         ctx.close.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_close_all_cleans_everything(self):
-        """close() should clean up all pages and contexts."""
+        """close() should clean up all pages and contexts across sessions."""
         client = BrowserClient()
         p1, p2 = _mock_page(), _mock_page()
         c1, c2 = _mock_context(), _mock_context()
-        client._pages = {"s1": p1, "s2": p2}
-        client._contexts = {"s1": c1, "s2": c2}
+        client._pages = {("alice", "s1"): p1, ("bob", "s2"): p2}
+        client._contexts = {("alice", "s1"): c1, ("bob", "s2"): c2}
 
         await client.close()
 
@@ -160,18 +164,19 @@ class TestPageTracking:
         client._browser = mock_browser
 
         old_page = _mock_page()
-        client._pages["s1"] = old_page
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        client._pages[scope] = old_page
 
         new_page = _mock_page("https://other.com")
         ctx = _mock_context(new_page)
-        client._contexts["s1"] = ctx
+        client._contexts[scope] = ctx
 
         from kaos_web.models import WebRequest
 
         await client.fetch(WebRequest(url="https://other.com", extra={"context_id": "s1"}))
 
         old_page.close.assert_called_once()
-        assert client._pages["s1"] is new_page
+        assert client._pages[scope] is new_page
 
 
 # ── Interaction method tests ──
@@ -182,7 +187,7 @@ class TestClickMethod:
     async def test_click_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         await client.click("s1", "button#submit")
         page.click.assert_called_once()
@@ -198,7 +203,7 @@ class TestClickMethod:
         client = BrowserClient()
         page = _mock_page()
         page.click = AsyncMock(side_effect=Exception("Timeout 30000ms exceeded"))
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         from kaos_web.errors import WebTimeoutError
 
@@ -212,7 +217,7 @@ class TestFillMethod:
     async def test_fill_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         await client.fill("s1", "input#name", "hello")
         page.fill.assert_called_once()
@@ -229,7 +234,7 @@ class TestTypeTextMethod:
     async def test_type_text_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         await client.type_text("s1", "input#search", "hello", delay=50)
         page.type.assert_called_once()
@@ -246,7 +251,7 @@ class TestPressKeyMethod:
     async def test_press_key_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         await client.press_key("s1", "input#search", "Enter")
         page.press.assert_called_once()
@@ -257,7 +262,7 @@ class TestSelectOptionMethod:
     async def test_select_option_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         result = await client.select_option("s1", "select#color", "red")
         page.select_option.assert_called_once()
@@ -269,7 +274,7 @@ class TestGetSnapshotMethod:
     async def test_snapshot_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         snapshot = await client.get_snapshot("s1")
         assert isinstance(snapshot, str)
@@ -288,7 +293,7 @@ class TestEvaluateInContextMethod:
     async def test_evaluate_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         result = await client.evaluate_in_context("s1", "1 + 1")
         assert result == 42  # Mock returns 42
@@ -305,7 +310,7 @@ class TestScreenshotContextMethod:
     async def test_screenshot_context_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         result = await client.screenshot_context("s1")
         assert result == b"\x89PNG\r\n\x1a\n"
@@ -322,7 +327,7 @@ class TestGetContentMethod:
     async def test_get_content_success(self):
         client = BrowserClient()
         page = _mock_page()
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         html = await client.get_content("s1")
         assert "<html>" in html
@@ -333,7 +338,7 @@ class TestGetUrlMethod:
     async def test_get_url_success(self):
         client = BrowserClient()
         page = _mock_page("https://example.com/page")
-        client._pages["s1"] = page
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = page
 
         url = await client.get_url("s1")
         assert url == "https://example.com/page"
@@ -347,8 +352,8 @@ class TestRequirePage:
 
     def test_error_lists_active_contexts(self):
         client = BrowserClient()
-        client._pages["s1"] = _mock_page()
-        client._pages["s2"] = _mock_page()
+        client._pages[(ANONYMOUS_SESSION_ID, "s1")] = _mock_page()
+        client._pages[(ANONYMOUS_SESSION_ID, "s2")] = _mock_page()
         with pytest.raises(WebBrowserError, match="s1"):
             client._require_page("missing")
 
@@ -661,7 +666,7 @@ class TestContextManagementTools:
         tool = ListContextsTool()
         with patch("kaos_web.browser_tools._get_browser_client") as mock_get:
             mock_client = AsyncMock()
-            mock_client.active_contexts = []
+            mock_client.active_contexts = MagicMock(return_value=[])
             mock_get.return_value = mock_client
 
             result = await tool.execute({})
@@ -674,7 +679,7 @@ class TestContextManagementTools:
         tool = CloseContextTool()
         with patch("kaos_web.browser_tools._get_browser_client") as mock_get:
             mock_client = AsyncMock()
-            mock_client.active_contexts = ["other"]
+            mock_client.active_contexts = MagicMock(return_value=["other"])
             mock_get.return_value = mock_client
 
             result = await tool.execute({"context_id": "missing"})
@@ -687,7 +692,7 @@ class TestContextManagementTools:
         tool = CloseContextTool()
         with patch("kaos_web.browser_tools._get_browser_client") as mock_get:
             mock_client = AsyncMock()
-            mock_client.active_contexts = ["s1"]
+            mock_client.active_contexts = MagicMock(return_value=["s1"])
             mock_client.close_context = AsyncMock()
             mock_get.return_value = mock_client
 
@@ -704,7 +709,7 @@ class TestGetCookiesMethod:
         client = BrowserClient()
         ctx = _mock_context()
         ctx.cookies = AsyncMock(return_value=[{"name": "sid", "value": "abc"}])
-        client._contexts["s1"] = ctx
+        client._contexts[(ANONYMOUS_SESSION_ID, "s1")] = ctx
 
         cookies = await client.get_cookies("s1")
         assert len(cookies) == 1
@@ -715,7 +720,7 @@ class TestGetCookiesMethod:
         client = BrowserClient()
         ctx = _mock_context()
         ctx.cookies = AsyncMock(return_value=[])
-        client._contexts["s1"] = ctx
+        client._contexts[(ANONYMOUS_SESSION_ID, "s1")] = ctx
 
         await client.get_cookies("s1", urls=["https://example.com"])
         ctx.cookies.assert_called_once_with(["https://example.com"])
@@ -733,7 +738,7 @@ class TestSetCookiesMethod:
         client = BrowserClient()
         ctx = _mock_context()
         ctx.add_cookies = AsyncMock()
-        client._contexts["s1"] = ctx
+        client._contexts[(ANONYMOUS_SESSION_ID, "s1")] = ctx
 
         await client.set_cookies("s1", [{"name": "x", "value": "y", "url": "https://example.com"}])
         ctx.add_cookies.assert_called_once()
@@ -751,7 +756,7 @@ class TestSaveStorageStateMethod:
         client = BrowserClient()
         ctx = _mock_context()
         ctx.storage_state = AsyncMock()
-        client._contexts["s1"] = ctx
+        client._contexts[(ANONYMOUS_SESSION_ID, "s1")] = ctx
 
         path = await client.save_storage_state("s1", "/tmp/state.json")
         assert path == "/tmp/state.json"
@@ -774,12 +779,12 @@ class TestRequestLogging:
         ctx = _mock_context()
         page = _mock_page()
         page.on = MagicMock()
-        client._contexts["s1"] = ctx
-        client._pages["s1"] = page
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        client._contexts[scope] = ctx
+        client._pages[scope] = page
 
         await client.enable_request_logging("s1")
-        assert hasattr(client, "_request_logs")
-        assert client._request_logs["s1"] == []
+        assert client._request_logs[scope] == []
         assert page.on.call_count == 2  # request + response handlers
 
     @pytest.mark.asyncio
@@ -798,7 +803,7 @@ class TestRequestLogging:
     async def test_get_request_detail_found(self):
         client = BrowserClient()
         client._request_logs = {
-            "s1": [
+            (ANONYMOUS_SESSION_ID, "s1"): [
                 {"id": 0, "url": "https://example.com", "method": "GET"},
                 {"id": 1, "url": "https://example.com/api", "method": "POST"},
             ]
@@ -812,12 +817,13 @@ class TestRequestLogging:
         client = BrowserClient()
         page = _mock_page()
         ctx = _mock_context()
-        client._pages["s1"] = page
-        client._contexts["s1"] = ctx
-        client._request_logs = {"s1": [{"id": 0}]}
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        client._pages[scope] = page
+        client._contexts[scope] = ctx
+        client._request_logs = {scope: [{"id": 0}]}
 
         await client.close_context("s1")
-        assert "s1" not in client._request_logs
+        assert scope not in client._request_logs
 
     @pytest.mark.asyncio
     async def test_enable_logging_no_context_raises(self):

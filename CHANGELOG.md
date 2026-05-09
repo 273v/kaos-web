@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Browser contexts are now session-scoped** (WEB5-002). Every entry
+  in ``BrowserClient._contexts`` / ``_pages`` / ``_request_logs`` /
+  ``_response_bodies`` / ``_logging_config`` is keyed by the tuple
+  ``(KaosContext.session_id, context_id)``. Previously, the shared
+  process-global client keyed by raw ``context_id`` strings — any
+  caller who knew or guessed a context_id could click/fill/screenshot
+  another caller's pages, read their cookies, or download captured
+  fetch/XHR bodies. With the MCP HTTP server fronting multiple
+  agents, that is a cross-tenant browser session takeover. Cross-
+  session lookups now miss uniformly with the same "No active page" /
+  "No context '<id>'" error a missing context returns — never
+  disclosing existence in another session. ``close_context`` from a
+  different session is a silent no-op. ``BrowserClient.active_contexts``
+  changed from a property to a ``method(session_id) -> list[str]``
+  that returns only the calling session's context IDs. Library
+  callers that omit ``session_id`` fall back to a module-level
+  ``ANONYMOUS_SESSION_ID`` sentinel so the original single-user stdio
+  surface keeps working without churn.
+
 - **`SaveAuthStateTool` no longer accepts a caller-supplied filesystem
   path** (WEB5-004). The previous implementation passed an MCP-input
   ``path`` straight to Playwright's ``context.storage_state(path=...)``

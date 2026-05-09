@@ -18,6 +18,7 @@ from kaos_web.clients.browser import (
     _DEFAULT_CAPTURE_CONTENT_TYPES,
     _DEFAULT_CAPTURE_RESOURCE_TYPES,
     _DEFAULT_MAX_BODY_SIZE,
+    ANONYMOUS_SESSION_ID,
     BrowserClient,
 )
 
@@ -48,18 +49,25 @@ def _mock_context(page: MagicMock | None = None) -> MagicMock:
 
 def _setup_client_with_context(
     context_id: str = "s1",
+    *,
+    session_id: str = ANONYMOUS_SESSION_ID,
 ) -> tuple[BrowserClient, MagicMock]:
     """Create a BrowserClient with a fully-mocked browser, context, and page.
 
     Seeds ``_browser`` and ``_playwright`` so ``_ensure_browser()`` short-
     circuits and never reaches ``async_playwright().start()`` — keeping these
     tests offline and bounded.
+
+    WEB5-002: keys storage by ``(session_id, context_id)``. Defaults to
+    ``ANONYMOUS_SESSION_ID`` so existing tests that don't care about
+    session scoping continue to work without churn.
     """
     client = BrowserClient()
     page = _mock_page()
     ctx = _mock_context(page)
-    client._contexts[context_id] = ctx
-    client._pages[context_id] = page
+    scope = (session_id, context_id)
+    client._contexts[scope] = ctx
+    client._pages[scope] = page
     client._browser = MagicMock()
     client._playwright = MagicMock()
     return client, page
@@ -126,19 +134,25 @@ class TestCaptureConstants:
 class TestResponseBodyCapture:
     @pytest.mark.asyncio
     async def test_capture_bodies_initializes_storage(self):
-        """capture_bodies=True initializes _response_bodies dict."""
+        """capture_bodies=True initializes the per-scope _response_bodies entry."""
         client, _page = _setup_client_with_context()
         await client.enable_request_logging("s1", capture_bodies=True)
-        assert hasattr(client, "_response_bodies")
-        assert "s1" in client._response_bodies
-        assert client._response_bodies["s1"] == {}
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        assert scope in client._response_bodies
+        assert client._response_bodies[scope] == {}
 
     @pytest.mark.asyncio
-    async def test_no_capture_does_not_initialize_bodies(self):
-        """capture_bodies=False (default) does not create _response_bodies."""
+    async def test_no_capture_does_not_initialize_bodies_for_scope(self):
+        """capture_bodies=False (default) does not create the per-scope bodies entry.
+
+        WEB5-002: ``_response_bodies`` itself is always present (one map
+        per BrowserClient), but the per-``(session_id, context_id)``
+        slot is only created when body capture is explicitly enabled.
+        """
         client, _page = _setup_client_with_context()
         await client.enable_request_logging("s1")
-        assert not hasattr(client, "_response_bodies")
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        assert scope not in client._response_bodies
 
     @pytest.mark.asyncio
     async def test_async_handler_captures_json_body(self):
@@ -167,15 +181,15 @@ class TestResponseBodyCapture:
         await response_handler(resp)
 
         # Verify body was captured
-        assert 0 in client._response_bodies["s1"]
-        captured = client._response_bodies["s1"][0]
+        assert 0 in client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")]
+        captured = client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")][0]
         assert captured["body"] == body_bytes
         assert captured["content_type"] == "application/json"
         assert captured["size"] == len(body_bytes)
         assert captured["truncated"] is False
 
         # Verify log entry has body metadata
-        log = client._request_logs["s1"]
+        log = client._request_logs[(ANONYMOUS_SESSION_ID, "s1")]
         assert log[0]["has_body"] is True
         assert log[0]["body_size"] == len(body_bytes)
 
@@ -199,7 +213,7 @@ class TestResponseBodyCapture:
         resp = _mock_response(url="https://example.com/old", status=302)
         await response_handler(resp)
 
-        assert 0 not in client._response_bodies["s1"]
+        assert 0 not in client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")]
 
     @pytest.mark.asyncio
     async def test_skips_non_matching_resource_type(self):
@@ -225,7 +239,7 @@ class TestResponseBodyCapture:
         )
         await response_handler(resp)
 
-        assert 0 not in client._response_bodies["s1"]
+        assert 0 not in client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")]
 
     @pytest.mark.asyncio
     async def test_skips_non_matching_content_type(self):
@@ -251,7 +265,7 @@ class TestResponseBodyCapture:
         )
         await response_handler(resp)
 
-        assert 0 not in client._response_bodies["s1"]
+        assert 0 not in client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")]
 
     @pytest.mark.asyncio
     async def test_skips_oversized_by_content_length(self):
@@ -277,8 +291,8 @@ class TestResponseBodyCapture:
         await response_handler(resp)
 
         # Body not captured, but reason logged
-        assert 0 not in client._response_bodies["s1"]
-        log_entry = client._request_logs["s1"][0]
+        assert 0 not in client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")]
+        log_entry = client._request_logs[(ANONYMOUS_SESSION_ID, "s1")][0]
         assert log_entry["has_body"] is False
         assert log_entry["body_reason"] == "too_large"
         assert log_entry["body_content_length"] == 5000
@@ -305,10 +319,10 @@ class TestResponseBodyCapture:
         resp = _mock_response(url="https://api.example.com/large", body=big_body)
         await response_handler(resp)
 
-        captured = client._response_bodies["s1"][0]
+        captured = client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")][0]
         assert len(captured["body"]) == max_size
         assert captured["truncated"] is True
-        assert client._request_logs["s1"][0]["body_truncated"] is True
+        assert client._request_logs[(ANONYMOUS_SESSION_ID, "s1")][0]["body_truncated"] is True
 
     @pytest.mark.asyncio
     async def test_handles_body_fetch_failure(self):
@@ -333,8 +347,8 @@ class TestResponseBodyCapture:
         )
         await response_handler(resp)
 
-        assert 0 not in client._response_bodies["s1"]
-        log_entry = client._request_logs["s1"][0]
+        assert 0 not in client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")]
+        log_entry = client._request_logs[(ANONYMOUS_SESSION_ID, "s1")][0]
         assert log_entry["has_body"] is False
         assert log_entry["body_reason"] == "fetch_failed"
 
@@ -363,7 +377,7 @@ class TestResponseBodyCapture:
         resp = _mock_response(resource_type="fetch")
         await response_handler(resp)
 
-        assert 0 not in client._response_bodies["s1"]
+        assert 0 not in client._response_bodies[(ANONYMOUS_SESSION_ID, "s1")]
 
 
 # ---------------------------------------------------------------------------
@@ -383,8 +397,9 @@ class TestResponseRetrieval:
     async def test_get_response_body_returns_captured(self):
         """get_response_body returns stored body info."""
         client = BrowserClient()
+        scope = (ANONYMOUS_SESSION_ID, "s1")
         client._response_bodies = {
-            "s1": {
+            scope: {
                 0: {
                     "body": b'{"ok": true}',
                     "content_type": "application/json",
@@ -402,8 +417,9 @@ class TestResponseRetrieval:
     async def test_get_captured_responses_basic(self):
         """get_captured_responses returns summaries without body bytes."""
         client = BrowserClient()
+        scope = (ANONYMOUS_SESSION_ID, "s1")
         client._request_logs = {
-            "s1": [
+            scope: [
                 {
                     "id": 0,
                     "url": "https://a.com/api",
@@ -422,7 +438,7 @@ class TestResponseRetrieval:
             ]
         }
         client._response_bodies = {
-            "s1": {
+            scope: {
                 0: {
                     "body": b"{}",
                     "content_type": "application/json",
@@ -440,8 +456,9 @@ class TestResponseRetrieval:
     async def test_get_captured_responses_filter_resource_type(self):
         """Filter by resource_type."""
         client = BrowserClient()
+        scope = (ANONYMOUS_SESSION_ID, "s1")
         client._request_logs = {
-            "s1": [
+            scope: [
                 {
                     "id": 0,
                     "url": "https://a.com/a",
@@ -459,7 +476,7 @@ class TestResponseRetrieval:
             ]
         }
         client._response_bodies = {
-            "s1": {
+            scope: {
                 0: {
                     "body": b"{}",
                     "content_type": "application/json",
@@ -482,8 +499,9 @@ class TestResponseRetrieval:
     async def test_get_captured_responses_filter_content_type(self):
         """Filter by content_type substring."""
         client = BrowserClient()
+        scope = (ANONYMOUS_SESSION_ID, "s1")
         client._request_logs = {
-            "s1": [
+            scope: [
                 {
                     "id": 0,
                     "url": "https://a.com/a",
@@ -501,7 +519,7 @@ class TestResponseRetrieval:
             ]
         }
         client._response_bodies = {
-            "s1": {
+            scope: {
                 0: {
                     "body": b"{}",
                     "content_type": "application/json",
@@ -526,21 +544,22 @@ class TestResponseCleanup:
     async def test_close_context_clears_bodies(self):
         """close_context removes response bodies for that context."""
         client, _page = _setup_client_with_context()
-        client._response_bodies = {"s1": {0: {"body": b"data"}}}
-        client._logging_config = {"s1": {"capture_bodies": True}}
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        client._response_bodies = {scope: {0: {"body": b"data"}}}
+        client._logging_config = {scope: {"capture_bodies": True}}
         await client.close_context("s1")
-        assert "s1" not in client._response_bodies
-        assert "s1" not in client._logging_config
+        assert scope not in client._response_bodies
+        assert scope not in client._logging_config
 
     @pytest.mark.asyncio
     async def test_close_clears_all_bodies(self):
-        """close() clears all response bodies and logging config."""
+        """close() clears all response bodies and logging config across sessions."""
         client = BrowserClient()
         client._response_bodies = {
-            "s1": {0: {"body": b"a"}},
-            "s2": {0: {"body": b"b"}},
+            ("alice", "s1"): {0: {"body": b"a"}},
+            ("bob", "s2"): {0: {"body": b"b"}},
         }
-        client._logging_config = {"s1": {}, "s2": {}}
+        client._logging_config = {("alice", "s1"): {}, ("bob", "s2"): {}}
         await client.close()
         assert client._response_bodies == {}
         assert client._logging_config == {}
@@ -559,9 +578,9 @@ class TestLoggingHookReattachment:
         """enable_request_logging stores config for re-attachment."""
         client, _page = _setup_client_with_context()
         await client.enable_request_logging("s1", capture_bodies=True)
-        assert hasattr(client, "_logging_config")
-        assert "s1" in client._logging_config
-        cfg = client._logging_config["s1"]
+        scope = (ANONYMOUS_SESSION_ID, "s1")
+        assert scope in client._logging_config
+        cfg = client._logging_config[scope]
         assert cfg["capture_bodies"] is True
         assert "fetch" in cfg["resource_types"]
 
@@ -576,7 +595,7 @@ class TestLoggingHookReattachment:
 
         # Simulate fetch() creating a new page
         new_page = _mock_page("https://example.com/people")
-        new_ctx = client._contexts["s1"]
+        new_ctx = client._contexts[(ANONYMOUS_SESSION_ID, "s1")]
         new_ctx.new_page = AsyncMock(return_value=new_page)
 
         # Mock goto response
@@ -611,11 +630,11 @@ class TestLoggingHookReattachment:
         mock_req.is_navigation_request = MagicMock(return_value=True)
         request_handler(mock_req)
 
-        assert len(client._request_logs["s1"]) == 1
+        assert len(client._request_logs[(ANONYMOUS_SESSION_ID, "s1")]) == 1
 
         # Simulate fetch() replacing the page
         new_page = _mock_page("https://example.com/page2")
-        new_ctx = client._contexts["s1"]
+        new_ctx = client._contexts[(ANONYMOUS_SESSION_ID, "s1")]
         new_ctx.new_page = AsyncMock(return_value=new_page)
         goto_response = AsyncMock()
         goto_response.status = 200
@@ -640,9 +659,15 @@ class TestLoggingHookReattachment:
         new_request_handler(mock_req2)
 
         # Both requests should be in the same log
-        assert len(client._request_logs["s1"]) == 2
-        assert client._request_logs["s1"][0]["url"] == "https://example.com/page1"
-        assert client._request_logs["s1"][1]["url"] == "https://example.com/api/data"
+        assert len(client._request_logs[(ANONYMOUS_SESSION_ID, "s1")]) == 2
+        assert (
+            client._request_logs[(ANONYMOUS_SESSION_ID, "s1")][0]["url"]
+            == "https://example.com/page1"
+        )
+        assert (
+            client._request_logs[(ANONYMOUS_SESSION_ID, "s1")][1]["url"]
+            == "https://example.com/api/data"
+        )
 
     @pytest.mark.asyncio
     async def test_fetch_without_logging_does_not_attach(self):
@@ -651,7 +676,7 @@ class TestLoggingHookReattachment:
 
         # No enable_request_logging call
         new_page = _mock_page("https://example.com/page")
-        new_ctx = client._contexts["s1"]
+        new_ctx = client._contexts[(ANONYMOUS_SESSION_ID, "s1")]
         new_ctx.new_page = AsyncMock(return_value=new_page)
         goto_response = AsyncMock()
         goto_response.status = 200
@@ -1223,16 +1248,14 @@ class TestRedactObservedTraffic:
         mock_req.is_navigation_request = MagicMock(return_value=False)
         request_handler(mock_req)
 
-        log = client._request_logs["s1"]
+        log = client._request_logs[(ANONYMOUS_SESSION_ID, "s1")]
         assert log[0]["headers"]["Authorization"].startswith("<redacted:")
         assert "secret-token" not in log[0]["headers"]["Authorization"]
         assert log[0]["headers"]["Cookie"].startswith("<redacted:")
         assert log[0]["headers"]["User-Agent"] == "Mozilla/5.0"
 
     @pytest.mark.asyncio
-    async def test_request_log_no_redact_when_disabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
+    async def test_request_log_no_redact_when_disabled(self, monkeypatch: pytest.MonkeyPatch):
         """Opt-out via env var returns raw header values for security
         research / debugging workflows."""
         monkeypatch.setenv("KAOS_WEB_REDACT_OBSERVED_TRAFFIC", "false")
@@ -1250,7 +1273,7 @@ class TestRedactObservedTraffic:
         mock_req.is_navigation_request = MagicMock(return_value=False)
         request_handler(mock_req)
 
-        log = client._request_logs["s1"]
+        log = client._request_logs[(ANONYMOUS_SESSION_ID, "s1")]
         assert log[0]["headers"]["Authorization"] == "Bearer raw-token"
 
     @pytest.mark.asyncio
@@ -1280,7 +1303,7 @@ class TestRedactObservedTraffic:
         }
         await response_handler(resp)
 
-        log = client._request_logs["s1"]
+        log = client._request_logs[(ANONYMOUS_SESSION_ID, "s1")]
         rh = log[0]["response_headers"]
         assert rh["Content-Type"] == "application/json"
         assert rh["Set-Cookie"].startswith("<redacted:")

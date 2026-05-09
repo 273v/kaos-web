@@ -6,6 +6,10 @@ Features:
 - Lazy browser launch (~200-500ms, only on first fetch)
 - Context-per-request isolation (separate cookies, storage)
 - Named context pooling (session persistence via context_id)
+- Session-scoped context pooling: every named context is bound to a
+  ``(session_id, context_id)`` tuple so a different KaosContext.session_id
+  cannot access another caller's pages, cookies, or captured traffic
+  (audit-04 finding #2 / WEB5-002).
 - Resource blocking (images, fonts, CSS, media)
 - Wait strategies (load, domcontentloaded, networkidle, selector)
 - Screenshot capture
@@ -30,6 +34,17 @@ from kaos_web.errors import (
 from kaos_web.models import WebRequest, WebResponse
 
 logger = get_logger(__name__)
+
+# WEB5-002 / audit-04 finding #2: every browser-state lookup is keyed by
+# the tuple ``(session_id, context_id)``. The MCP tool layer derives
+# ``session_id`` from ``KaosContext.session_id``. Library callers that
+# don't have a runtime context (single-user stdio mode is the original
+# use case) fall back to this sentinel — so the surface stays usable
+# without forcing every script to invent a session ID. Two callers
+# without runtimes share the anonymous bucket; cross-bucket isolation
+# only kicks in once the MCP layer is involved (which is the threat
+# model — a remote MCP HTTP server fronting multiple agents).
+ANONYMOUS_SESSION_ID = "__anonymous__"
 
 # ---------------------------------------------------------------------------
 # Response body capture defaults
@@ -119,8 +134,18 @@ class BrowserClient:
         self._config = config or BrowserClientConfig()
         self._playwright: Any = None
         self._browser: Any = None
-        self._contexts: dict[str, Any] = {}  # Named context pool
-        self._pages: dict[str, Any] = {}  # Active pages by context_id
+        # WEB5-002: every map is keyed by ``(session_id, context_id)``.
+        # Cross-session lookups intentionally miss — see ``_require_page``,
+        # ``get_cookies``, ``set_cookies``, ``save_storage_state``,
+        # ``get_storage_state``, ``enable_request_logging``, and
+        # ``close_context`` for the uniform "No context '<id>'" error
+        # path that does not leak the existence of another session's
+        # context.
+        self._contexts: dict[tuple[str, str], Any] = {}  # Named context pool
+        self._pages: dict[tuple[str, str], Any] = {}  # Active pages by (session_id, context_id)
+        self._request_logs: dict[tuple[str, str], list[dict]] = {}
+        self._response_bodies: dict[tuple[str, str], dict[int, dict[str, Any]]] = {}
+        self._logging_config: dict[tuple[str, str], dict[str, Any]] = {}
 
     async def _ensure_browser(self) -> Any:
         """Launch browser lazily on first use."""
@@ -150,12 +175,15 @@ class BrowserClient:
         return self._browser
 
     async def _get_or_create_context(
-        self, browser: Any, context_id: str | None
+        self, browser: Any, session_id: str, context_id: str | None
     ) -> tuple[Any, bool]:
         """Get existing named context or create a new one.
 
         Returns (context, owns_context) where owns_context=True means the caller
-        should close it (unnamed/ephemeral contexts).
+        should close it (unnamed/ephemeral contexts). Named contexts are
+        scoped to ``(session_id, context_id)`` so a different
+        ``KaosContext.session_id`` never resolves another session's
+        context (WEB5-002).
         """
         cfg = self._config
 
@@ -187,14 +215,17 @@ class BrowserClient:
         if cfg.extra_headers:
             context_opts["extra_http_headers"] = cfg.extra_headers
 
-        # Named context: reuse or create
+        # Named context: reuse or create. Keyed by (session_id, context_id)
+        # so the same context_id from a different session resolves to a
+        # different bucket (WEB5-002).
         owns_context = context_id is None
-        if context_id and context_id in self._contexts:
-            context = self._contexts[context_id]
+        scope = (session_id, context_id) if context_id else None
+        if scope is not None and scope in self._contexts:
+            context = self._contexts[scope]
         else:
             context = await browser.new_context(**context_opts)
-            if context_id:
-                self._contexts[context_id] = context
+            if scope is not None:
+                self._contexts[scope] = context
 
             # Block unwanted resources on new contexts
             if cfg.block_resources:
@@ -224,30 +255,34 @@ class BrowserClient:
 
         Supported ``request.extra`` keys:
         - ``context_id``: Named context for persistent sessions
+        - ``session_id``: Owning session for the named context (WEB5-002).
+          Defaults to ``ANONYMOUS_SESSION_ID``. The MCP tool layer always
+          sets this from ``KaosContext.session_id``.
         - ``wait_until``: Navigation wait strategy
         - ``wait_for_selector``: CSS selector to wait for after navigation
         - ``dismiss_overlays``: Auto-dismiss known cookie consent banners
         """
         browser = await self._ensure_browser()
         context_id = request.extra.get("context_id")
-        context, owns_context = await self._get_or_create_context(browser, context_id)
+        session_id = request.extra.get("session_id", ANONYMOUS_SESSION_ID)
+        context, owns_context = await self._get_or_create_context(browser, session_id, context_id)
+
+        scope = (session_id, context_id) if context_id else None
 
         try:
             # For named contexts, close any existing page before creating a new one
-            if context_id and context_id in self._pages:
-                old_page = self._pages.pop(context_id)
+            if scope is not None and scope in self._pages:
+                old_page = self._pages.pop(scope)
                 await old_page.close()
 
             page = await context.new_page()
             page_stored = False
 
             # Re-attach logging handlers if logging was enabled for this context
-            if (
-                context_id
-                and hasattr(self, "_logging_config")
-                and context_id in self._logging_config
-            ):
-                self._attach_logging_handlers(context_id, page)
+            if scope is not None and scope in self._logging_config:
+                # scope is non-None ⇒ context_id is non-None.
+                _, scoped_context_id = scope
+                self._attach_logging_handlers(session_id, scoped_context_id, page)
 
             try:
                 # Navigate
@@ -306,8 +341,8 @@ class BrowserClient:
                 headers: dict[str, str] = dict(response.headers) if response else {}
 
                 # For named contexts, keep the page alive for interaction
-                if context_id:
-                    self._pages[context_id] = page
+                if scope is not None:
+                    self._pages[scope] = page
                     page_stored = True
 
                 return WebResponse(
@@ -334,11 +369,15 @@ class BrowserClient:
 
     # ── Interactive methods (require named context with active page) ──
 
-    def _require_page(self, context_id: str) -> Any:
-        """Get the active page for a context, raising if not found."""
-        page = self._pages.get(context_id)
+    def _require_page(self, context_id: str, *, session_id: str = ANONYMOUS_SESSION_ID) -> Any:
+        """Get the active page for ``(session_id, context_id)``, raising if not found.
+
+        The error message lists only the calling session's contexts —
+        cross-session existence is never disclosed (WEB5-002).
+        """
+        page = self._pages.get((session_id, context_id))
         if page is None:
-            available = list(self._pages.keys()) if self._pages else []
+            available = [cid for (sid, cid) in self._pages if sid == session_id]
             raise WebBrowserError(
                 f"No active page for context '{context_id}'. "
                 f"First navigate with fetch(WebRequest(url=..., "
@@ -349,31 +388,50 @@ class BrowserClient:
             )
         return page
 
-    async def click(self, context_id: str, selector: str, **kwargs: Any) -> None:
+    async def click(
+        self,
+        context_id: str,
+        selector: str,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+        **kwargs: Any,
+    ) -> None:
         """Click an element on the active page in a named context.
 
         Args:
             context_id: Named context with an active page.
             selector: CSS selector for the element to click.
+            session_id: Owning session (WEB5-002). MCP tools pass
+                ``KaosContext.session_id``; library callers without a
+                runtime fall back to ``ANONYMOUS_SESSION_ID``.
             **kwargs: Extra Playwright click options (timeout, force, etc.).
         """
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         timeout = kwargs.pop("timeout", self._config.default_timeout)
         try:
             await page.click(selector, timeout=timeout, **kwargs)
         except Exception as exc:
             _raise_browser_error(exc, page.url, "click")
 
-    async def fill(self, context_id: str, selector: str, value: str, **kwargs: Any) -> None:
+    async def fill(
+        self,
+        context_id: str,
+        selector: str,
+        value: str,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+        **kwargs: Any,
+    ) -> None:
         """Fill an input field on the active page.
 
         Args:
             context_id: Named context with an active page.
             selector: CSS selector for the input element.
             value: Text value to fill.
+            session_id: Owning session (WEB5-002).
             **kwargs: Extra Playwright fill options.
         """
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         timeout = kwargs.pop("timeout", self._config.default_timeout)
         try:
             await page.fill(selector, value, timeout=timeout, **kwargs)
@@ -381,7 +439,13 @@ class BrowserClient:
             _raise_browser_error(exc, page.url, "fill")
 
     async def select_option(
-        self, context_id: str, selector: str, value: str, **kwargs: Any
+        self,
+        context_id: str,
+        selector: str,
+        value: str,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+        **kwargs: Any,
     ) -> list[str]:
         """Select an option from a <select> element.
 
@@ -389,16 +453,25 @@ class BrowserClient:
             context_id: Named context with an active page.
             selector: CSS selector for the select element.
             value: Option value to select.
+            session_id: Owning session (WEB5-002).
             **kwargs: Extra Playwright select options.
         """
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         timeout = kwargs.pop("timeout", self._config.default_timeout)
         try:
             return await page.select_option(selector, value, timeout=timeout, **kwargs)
         except Exception as exc:
             _raise_browser_error(exc, page.url, "select_option")
 
-    async def type_text(self, context_id: str, selector: str, text: str, **kwargs: Any) -> None:
+    async def type_text(
+        self,
+        context_id: str,
+        selector: str,
+        text: str,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+        **kwargs: Any,
+    ) -> None:
         """Type text character-by-character (simulating keystrokes).
 
         Unlike fill(), this fires keydown/keypress/keyup events for each character.
@@ -408,9 +481,10 @@ class BrowserClient:
             context_id: Named context with an active page.
             selector: CSS selector for the input element.
             text: Text to type character-by-character.
+            session_id: Owning session (WEB5-002).
             **kwargs: Extra options (delay between keystrokes, etc.).
         """
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         timeout = kwargs.pop("timeout", self._config.default_timeout)
         delay = kwargs.pop("delay", 0)
         try:
@@ -418,23 +492,32 @@ class BrowserClient:
         except Exception as exc:
             _raise_browser_error(exc, page.url, "type")
 
-    async def press_key(self, context_id: str, selector: str, key: str, **kwargs: Any) -> None:
+    async def press_key(
+        self,
+        context_id: str,
+        selector: str,
+        key: str,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+        **kwargs: Any,
+    ) -> None:
         """Press a keyboard key on an element (e.g., 'Enter', 'Tab', 'Escape').
 
         Args:
             context_id: Named context with an active page.
             selector: CSS selector for the element to focus.
             key: Key to press (Playwright key name, e.g., 'Enter', 'ArrowDown').
+            session_id: Owning session (WEB5-002).
             **kwargs: Extra Playwright press options.
         """
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         timeout = kwargs.pop("timeout", self._config.default_timeout)
         try:
             await page.press(selector, key, timeout=timeout, **kwargs)
         except Exception as exc:
             _raise_browser_error(exc, page.url, "press_key")
 
-    async def get_snapshot(self, context_id: str) -> str:
+    async def get_snapshot(self, context_id: str, *, session_id: str = ANONYMOUS_SESSION_ID) -> str:
         """Get the accessibility tree of the active page.
 
         Returns a text representation of the page's ARIA tree (via Playwright's
@@ -442,33 +525,34 @@ class BrowserClient:
         headings, links, buttons, and inputs in an indented text format — ideal
         for agents to understand page structure and find selectors.
         """
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         try:
             snapshot = await page.locator("body").aria_snapshot()
             return snapshot or ""
         except Exception as exc:
             _raise_browser_error(exc, page.url, "snapshot")
 
-    async def get_content(self, context_id: str) -> str:
+    async def get_content(self, context_id: str, *, session_id: str = ANONYMOUS_SESSION_ID) -> str:
         """Get the current HTML content of the active page."""
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         return await page.content()
 
-    async def get_url(self, context_id: str) -> str:
+    async def get_url(self, context_id: str, *, session_id: str = ANONYMOUS_SESSION_ID) -> str:
         """Get the current URL of the active page."""
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         return page.url
 
     async def screenshot_context(
         self,
         context_id: str,
         *,
+        session_id: str = ANONYMOUS_SESSION_ID,
         full_page: bool = True,
         format: str = "png",
         quality: int | None = None,
     ) -> bytes:
         """Take a screenshot of the active page in a named context."""
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         kwargs: dict[str, Any] = {
             "full_page": full_page,
             "type": format,
@@ -477,9 +561,15 @@ class BrowserClient:
             kwargs["quality"] = quality
         return await page.screenshot(**kwargs)
 
-    async def evaluate_in_context(self, context_id: str, expression: str) -> Any:
+    async def evaluate_in_context(
+        self,
+        context_id: str,
+        expression: str,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+    ) -> Any:
         """Evaluate a JavaScript expression on the active page in a named context."""
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
         try:
             return await page.evaluate(expression)
         except Exception as exc:
@@ -534,41 +624,65 @@ class BrowserClient:
 
     # ── Cookie / Storage methods ──
 
-    async def get_cookies(self, context_id: str, urls: list[str] | None = None) -> list[dict]:
+    def _require_context(self, context_id: str, session_id: str) -> Any:
+        """Look up a context by ``(session_id, context_id)`` or raise.
+
+        Cross-session lookups raise the same uniform error as missing
+        contexts so a caller cannot distinguish "exists in another
+        session" from "doesn't exist at all" (WEB5-002).
+        """
+        scope = (session_id, context_id)
+        if scope not in self._contexts:
+            raise WebBrowserError(
+                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
+                url="",
+                retryable=False,
+            )
+        return self._contexts[scope]
+
+    async def get_cookies(
+        self,
+        context_id: str,
+        urls: list[str] | None = None,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+    ) -> list[dict]:
         """Get cookies from a named context.
 
         Args:
             context_id: Named context.
             urls: Optional list of URLs to filter cookies by. If omitted, returns all.
+            session_id: Owning session (WEB5-002).
         """
-        if context_id not in self._contexts:
-            raise WebBrowserError(
-                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
-                url="",
-                retryable=False,
-            )
-        context = self._contexts[context_id]
+        context = self._require_context(context_id, session_id)
         if urls:
             return await context.cookies(urls)
         return await context.cookies()
 
-    async def set_cookies(self, context_id: str, cookies: list[dict]) -> None:
+    async def set_cookies(
+        self,
+        context_id: str,
+        cookies: list[dict],
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+    ) -> None:
         """Add cookies to a named context.
 
         Args:
             context_id: Named context.
             cookies: List of cookie dicts (name, value, domain/url required).
+            session_id: Owning session (WEB5-002).
         """
-        if context_id not in self._contexts:
-            raise WebBrowserError(
-                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
-                url="",
-                retryable=False,
-            )
-        context = self._contexts[context_id]
+        context = self._require_context(context_id, session_id)
         await context.add_cookies(cookies)
 
-    async def save_storage_state(self, context_id: str, path: str) -> str:
+    async def save_storage_state(
+        self,
+        context_id: str,
+        path: str,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+    ) -> str:
         """Save the browser context storage state (cookies + localStorage) to a file.
 
         Args:
@@ -576,6 +690,7 @@ class BrowserClient:
             path: File path to save state to (JSON). The caller is
                 responsible for path safety; this is a library API
                 accepting whatever path the in-process caller provides.
+            session_id: Owning session (WEB5-002).
 
         Returns:
             The path where state was saved.
@@ -589,17 +704,13 @@ class BrowserClient:
             authority can still call ``save_storage_state(path)``
             directly.
         """
-        if context_id not in self._contexts:
-            raise WebBrowserError(
-                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
-                url="",
-                retryable=False,
-            )
-        context = self._contexts[context_id]
+        context = self._require_context(context_id, session_id)
         await context.storage_state(path=path)
         return path
 
-    async def get_storage_state(self, context_id: str) -> dict[str, Any]:
+    async def get_storage_state(
+        self, context_id: str, *, session_id: str = ANONYMOUS_SESSION_ID
+    ) -> dict[str, Any]:
         """Return the browser context storage state as an in-memory dict.
 
         Used by ``SaveAuthStateTool`` to capture cookies + localStorage
@@ -607,29 +718,25 @@ class BrowserClient:
         The returned dict is the same Playwright storage_state shape
         (``{"cookies": [...], "origins": [...]}``).
         """
-        if context_id not in self._contexts:
-            raise WebBrowserError(
-                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
-                url="",
-                retryable=False,
-            )
-        context = self._contexts[context_id]
+        context = self._require_context(context_id, session_id)
         # Playwright: storage_state() with no `path` returns the dict.
         state = await context.storage_state()
         return state if isinstance(state, dict) else {}
 
     # ── Network monitoring ──
 
-    def _attach_logging_handlers(self, context_id: str, page: Any) -> None:
+    def _attach_logging_handlers(self, session_id: str, context_id: str, page: Any) -> None:
         """Attach request/response logging handlers to a page.
 
-        Uses the existing ``_request_logs[context_id]`` list and
-        ``_response_bodies[context_id]`` dict (if body capture is enabled).
-        Called by :meth:`enable_request_logging` and by :meth:`fetch` when
-        a page is replaced in a context that already has logging enabled.
+        Uses the ``(session_id, context_id)``-keyed ``_request_logs`` list
+        and ``_response_bodies`` dict (if body capture is enabled).
+        Called by :meth:`enable_request_logging` and by :meth:`fetch`
+        when a page is replaced in a context that already has logging
+        enabled.
         """
-        log = self._request_logs[context_id]
-        config = self._logging_config[context_id]
+        scope = (session_id, context_id)
+        log = self._request_logs[scope]
+        config = self._logging_config[scope]
         capture_bodies: bool = config["capture_bodies"]
         capture_resource_types: frozenset[str] = config["resource_types"]
         max_body_size: int = config["max_body_size"]
@@ -655,7 +762,7 @@ class BrowserClient:
             )
 
         if capture_bodies:
-            bodies = self._response_bodies[context_id]
+            bodies = self._response_bodies[scope]
 
             async def _on_response(response: Any) -> None:
                 # Phase 1: metadata matching (same as sync handler)
@@ -741,6 +848,7 @@ class BrowserClient:
         self,
         context_id: str,
         *,
+        session_id: str = ANONYMOUS_SESSION_ID,
         capture_bodies: bool = False,
         resource_types: frozenset[str] | None = None,
         max_body_size: int = _DEFAULT_MAX_BODY_SIZE,
@@ -753,17 +861,19 @@ class BrowserClient:
 
         Args:
             context_id: Named browser context.
+            session_id: Owning session (WEB5-002).
             capture_bodies: Also capture response bodies for matching requests.
             resource_types: Resource types to capture bodies for (default: fetch, xhr).
             max_body_size: Maximum body size in bytes (default: 1 MB).
         """
-        if context_id not in self._contexts:
+        scope = (session_id, context_id)
+        if scope not in self._contexts:
             raise WebBrowserError(
                 f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
                 url="",
                 retryable=False,
             )
-        page = self._require_page(context_id)
+        page = self._require_page(context_id, session_id=session_id)
 
         resolved_resource_types = resource_types or _DEFAULT_CAPTURE_RESOURCE_TYPES
 
@@ -776,9 +886,7 @@ class BrowserClient:
         redact = KaosWebSettings().redact_observed_traffic
 
         # Store config so fetch() can re-attach handlers on page replacement
-        if not hasattr(self, "_logging_config"):
-            self._logging_config: dict[str, dict[str, Any]] = {}
-        self._logging_config[context_id] = {
+        self._logging_config[scope] = {
             "capture_bodies": capture_bodies,
             "resource_types": resolved_resource_types,
             "max_body_size": max_body_size,
@@ -786,48 +894,55 @@ class BrowserClient:
         }
 
         # Initialize log storage
-        if not hasattr(self, "_request_logs"):
-            self._request_logs: dict[str, list[dict]] = {}
-        self._request_logs[context_id] = []
+        self._request_logs[scope] = []
 
         # Initialize body storage when capture is enabled
         if capture_bodies:
-            if not hasattr(self, "_response_bodies"):
-                self._response_bodies: dict[str, dict[int, dict[str, Any]]] = {}
-            self._response_bodies[context_id] = {}
+            self._response_bodies[scope] = {}
 
-        self._attach_logging_handlers(context_id, page)
+        self._attach_logging_handlers(session_id, context_id, page)
 
-    async def get_request_log(self, context_id: str) -> list[dict]:
+    async def get_request_log(
+        self, context_id: str, *, session_id: str = ANONYMOUS_SESSION_ID
+    ) -> list[dict]:
         """Get recorded network requests for a context."""
-        if not hasattr(self, "_request_logs"):
-            return []
-        return self._request_logs.get(context_id, [])
+        return self._request_logs.get((session_id, context_id), [])
 
-    async def get_request_detail(self, context_id: str, request_id: int) -> dict | None:
+    async def get_request_detail(
+        self,
+        context_id: str,
+        request_id: int,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+    ) -> dict | None:
         """Get details of a specific logged request by ID."""
-        log = await self.get_request_log(context_id)
+        log = await self.get_request_log(context_id, session_id=session_id)
         for entry in log:
             if entry["id"] == request_id:
                 return entry
         return None
 
-    async def get_response_body(self, context_id: str, request_id: int) -> dict[str, Any] | None:
+    async def get_response_body(
+        self,
+        context_id: str,
+        request_id: int,
+        *,
+        session_id: str = ANONYMOUS_SESSION_ID,
+    ) -> dict[str, Any] | None:
         """Get the captured response body for a specific request.
 
         Returns:
             Dict with ``body`` (bytes), ``content_type``, ``size``, ``truncated``,
             or ``None`` if no body was captured for this request.
         """
-        if not hasattr(self, "_response_bodies"):
-            return None
-        ctx_bodies = self._response_bodies.get(context_id, {})
+        ctx_bodies = self._response_bodies.get((session_id, context_id), {})
         return ctx_bodies.get(request_id)
 
     async def get_captured_responses(
         self,
         context_id: str,
         *,
+        session_id: str = ANONYMOUS_SESSION_ID,
         resource_type: str | None = None,
         content_type: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -836,10 +951,8 @@ class BrowserClient:
         Returns summary dicts (no body bytes) for filtering and discovery.
         Use :meth:`get_response_body` to retrieve the actual body.
         """
-        log = await self.get_request_log(context_id)
-        if not hasattr(self, "_response_bodies"):
-            return []
-        ctx_bodies = self._response_bodies.get(context_id, {})
+        log = await self.get_request_log(context_id, session_id=session_id)
+        ctx_bodies = self._response_bodies.get((session_id, context_id), {})
 
         results: list[dict[str, Any]] = []
         for entry in log:
@@ -867,35 +980,41 @@ class BrowserClient:
 
     # ── Lifecycle ──
 
-    async def close_context(self, context_id: str) -> None:
-        """Close a named browser context and its active page."""
-        page = self._pages.pop(context_id, None)
+    async def close_context(
+        self, context_id: str, *, session_id: str = ANONYMOUS_SESSION_ID
+    ) -> None:
+        """Close a named browser context and its active page.
+
+        Cross-session calls silently no-op — the lookup misses and there
+        is nothing to close. The owning session's context is untouched
+        (WEB5-002).
+        """
+        scope = (session_id, context_id)
+        page = self._pages.pop(scope, None)
         if page is not None:
             await page.close()
-        context = self._contexts.pop(context_id, None)
+        context = self._contexts.pop(scope, None)
         if context is not None:
             await context.close()
-        if hasattr(self, "_request_logs"):
-            self._request_logs.pop(context_id, None)
-        if hasattr(self, "_response_bodies"):
-            self._response_bodies.pop(context_id, None)
-        if hasattr(self, "_logging_config"):
-            self._logging_config.pop(context_id, None)
+        self._request_logs.pop(scope, None)
+        self._response_bodies.pop(scope, None)
+        self._logging_config.pop(scope, None)
 
     async def close(self) -> None:
-        """Release browser resources including all named contexts and pages."""
+        """Release browser resources including all named contexts and pages.
+
+        Process-shutdown path: closes every context across every session.
+        Per-session cleanup uses :meth:`close_context`.
+        """
         for page in self._pages.values():
             await page.close()
         self._pages.clear()
         for ctx in self._contexts.values():
             await ctx.close()
         self._contexts.clear()
-        if hasattr(self, "_request_logs"):
-            self._request_logs.clear()
-        if hasattr(self, "_response_bodies"):
-            self._response_bodies.clear()
-        if hasattr(self, "_logging_config"):
-            self._logging_config.clear()
+        self._request_logs.clear()
+        self._response_bodies.clear()
+        self._logging_config.clear()
         if self._browser:
             await self._browser.close()
             self._browser = None
@@ -914,10 +1033,15 @@ class BrowserClient:
         """Current browser configuration."""
         return self._config
 
-    @property
-    def active_contexts(self) -> list[str]:
-        """List of context IDs with active pages."""
-        return list(self._pages.keys())
+    def active_contexts(self, session_id: str = ANONYMOUS_SESSION_ID) -> list[str]:
+        """List the context IDs with active pages owned by ``session_id``.
+
+        WEB5-002: filtered by ``session_id`` — a caller never sees
+        another session's contexts. Use ``ANONYMOUS_SESSION_ID`` (the
+        default) to inspect contexts created by library callers without
+        a runtime context.
+        """
+        return [cid for (sid, cid) in self._pages if sid == session_id]
 
 
 def _check_body_cap(html: str, url: str) -> None:

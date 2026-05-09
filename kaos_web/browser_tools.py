@@ -111,6 +111,24 @@ async def _shutdown_browser_client() -> None:
         _browser_client = None
 
 
+def _session_id(context: KaosContext | None) -> str:
+    """Resolve the session bucket for a tool invocation.
+
+    WEB5-002: every browser-state lookup is keyed by
+    ``(session_id, context_id)``. Tools derive ``session_id`` from
+    ``KaosContext.session_id`` (always present when invoked through an
+    MCP server). Library callers without a runtime context fall back to
+    ``ANONYMOUS_SESSION_ID`` so the surface stays usable for the
+    single-user stdio scenario the BrowserClient was originally built
+    for.
+    """
+    from kaos_web.clients.browser import ANONYMOUS_SESSION_ID
+
+    if context is None or not context.session_id:
+        return ANONYMOUS_SESSION_ID
+    return context.session_id
+
+
 def _context_id_param() -> ParameterSchema:
     """Shared context_id parameter used by all interaction tools."""
     return ParameterSchema(
@@ -203,12 +221,19 @@ class BrowserNavigateTool(KaosTool):
         wait_for_selector = inputs.get("wait_for_selector")
         dismiss_overlays = inputs.get("dismiss_overlays", False)
         wait_for_settled = inputs.get("wait_for_settled", False)
+        session_id = _session_id(context)
 
         try:
             from kaos_web.models import WebRequest
 
             client = await _get_browser_client()
-            extra: dict[str, Any] = {"context_id": context_id, "wait_until": wait_until}
+            # WEB5-002: thread session_id through WebRequest.extra so
+            # BrowserClient.fetch scopes the new context correctly.
+            extra: dict[str, Any] = {
+                "context_id": context_id,
+                "session_id": session_id,
+                "wait_until": wait_until,
+            }
             if wait_for_selector:
                 extra["wait_for_selector"] = wait_for_selector
             if dismiss_overlays:
@@ -271,11 +296,12 @@ class ClickElementTool(KaosTool):
     ) -> ToolResult:
         context_id = inputs["context_id"]
         selector = inputs["selector"]
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            await client.click(context_id, selector)
-            current_url = await client.get_url(context_id)
+            await client.click(context_id, selector, session_id=session_id)
+            current_url = await client.get_url(context_id, session_id=session_id)
 
             return ToolResult.create_success(
                 output={
@@ -332,10 +358,11 @@ class FillInputTool(KaosTool):
         context_id = inputs["context_id"]
         selector = inputs["selector"]
         value = inputs["value"]
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            await client.fill(context_id, selector, value)
+            await client.fill(context_id, selector, value, session_id=session_id)
 
             return ToolResult.create_success(
                 output={
@@ -401,10 +428,11 @@ class TypeTextTool(KaosTool):
         selector = inputs["selector"]
         text = inputs["text"]
         delay = inputs.get("delay", 0)
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            await client.type_text(context_id, selector, text, delay=delay)
+            await client.type_text(context_id, selector, text, session_id=session_id, delay=delay)
 
             return ToolResult.create_success(
                 output={
@@ -460,10 +488,11 @@ class PressKeyTool(KaosTool):
         context_id = inputs["context_id"]
         selector = inputs["selector"]
         key = inputs["key"]
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            await client.press_key(context_id, selector, key)
+            await client.press_key(context_id, selector, key, session_id=session_id)
 
             return ToolResult.create_success(
                 output={
@@ -518,10 +547,13 @@ class SelectOptionTool(KaosTool):
         context_id = inputs["context_id"]
         selector = inputs["selector"]
         value = inputs["value"]
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            selected = await client.select_option(context_id, selector, value)
+            selected = await client.select_option(
+                context_id, selector, value, session_id=session_id
+            )
 
             return ToolResult.create_success(
                 output={
@@ -601,6 +633,7 @@ class ScreenshotTool(KaosTool):
         url = inputs.get("url")
         full_page = inputs.get("full_page", True)
         fmt = inputs.get("format", "png")
+        session_id = _session_id(context)
 
         if not context_id and not url:
             return ToolResult.create_error(
@@ -616,7 +649,10 @@ class ScreenshotTool(KaosTool):
 
             if context_id:
                 img_bytes = await client.screenshot_context(
-                    context_id, full_page=full_page, format=fmt
+                    context_id,
+                    session_id=session_id,
+                    full_page=full_page,
+                    format=fmt,
                 )
                 source = f"context:{context_id}"
             else:
@@ -735,6 +771,7 @@ class EvaluateJSTool(KaosTool):
         context_id = inputs.get("context_id")
         url = inputs.get("url")
         expression = inputs["expression"]
+        session_id = _session_id(context)
 
         if not context_id and not url:
             return ToolResult.create_error(
@@ -746,7 +783,9 @@ class EvaluateJSTool(KaosTool):
             client = await _get_browser_client()
 
             if context_id:
-                result = await client.evaluate_in_context(context_id, expression)
+                result = await client.evaluate_in_context(
+                    context_id, expression, session_id=session_id
+                )
             else:
                 result = await client.evaluate(url, expression)
 
@@ -792,11 +831,12 @@ class GetSnapshotTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         context_id = inputs["context_id"]
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            snapshot = await client.get_snapshot(context_id)
-            current_url = await client.get_url(context_id)
+            snapshot = await client.get_snapshot(context_id, session_id=session_id)
+            current_url = await client.get_url(context_id, session_id=session_id)
 
             if not snapshot:
                 return ToolResult.create_success(
@@ -862,11 +902,12 @@ class GetPageContentTool(KaosTool):
     ) -> ToolResult:
         context_id = inputs["context_id"]
         output_format = inputs.get("output_format", "markdown")
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            html = await client.get_content(context_id)
-            current_url = await client.get_url(context_id)
+            html = await client.get_content(context_id, session_id=session_id)
+            current_url = await client.get_url(context_id, session_id=session_id)
 
             if output_format == "html":
                 return ToolResult.create_success(html)
@@ -965,10 +1006,11 @@ class GetCookiesTool(KaosTool):
         context_id = inputs["context_id"]
         urls_str = inputs.get("urls")
         urls = [u.strip() for u in urls_str.split(",")] if urls_str else None
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            cookies = await client.get_cookies(context_id, urls=urls)
+            cookies = await client.get_cookies(context_id, urls=urls, session_id=session_id)
 
             return ToolResult.create_success(
                 output={
@@ -1087,9 +1129,10 @@ class SetCookieTool(KaosTool):
         if url:
             cookie["url"] = url
 
+        session_id = _session_id(context)
         try:
             client = await _get_browser_client()
-            await client.set_cookies(context_id, [cookie])
+            await client.set_cookies(context_id, [cookie], session_id=session_id)
 
             return ToolResult.create_success(
                 output={
@@ -1187,7 +1230,7 @@ class SaveAuthStateTool(KaosTool):
             from kaos_core.types.enums import ArtifactRole
 
             client = await _get_browser_client()
-            state = await client.get_storage_state(context_id)
+            state = await client.get_storage_state(context_id, session_id=context.session_id)
             payload = json.dumps(state, indent=2).encode("utf-8")
 
             timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -1318,11 +1361,13 @@ class EnableRequestLoggingTool(KaosTool):
         resource_types_str = inputs.get("resource_types", "fetch,xhr")
         resource_types = frozenset(rt.strip() for rt in resource_types_str.split(","))
         max_body_size = inputs.get("max_body_size", 1048576)
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
             await client.enable_request_logging(
                 context_id,
+                session_id=session_id,
                 capture_bodies=capture_bodies,
                 resource_types=resource_types,
                 max_body_size=max_body_size,
@@ -1389,10 +1434,11 @@ class ListRequestsTool(KaosTool):
     ) -> ToolResult:
         context_id = inputs["context_id"]
         resource_type = inputs.get("resource_type")
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            log = await client.get_request_log(context_id)
+            log = await client.get_request_log(context_id, session_id=session_id)
 
             if resource_type:
                 log = [e for e in log if e.get("resource_type") == resource_type]
@@ -1475,10 +1521,11 @@ class GetRequestDetailTool(KaosTool):
         context_id = inputs["context_id"]
         request_id = inputs["request_id"]
         include_body = inputs.get("include_body", True)
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            detail = await client.get_request_detail(context_id, request_id)
+            detail = await client.get_request_detail(context_id, request_id, session_id=session_id)
 
             if detail is None:
                 return ToolResult.create_error(
@@ -1489,7 +1536,9 @@ class GetRequestDetailTool(KaosTool):
 
             # Optionally include captured response body
             if include_body and detail.get("has_body"):
-                body_info = await client.get_response_body(context_id, request_id)
+                body_info = await client.get_response_body(
+                    context_id, request_id, session_id=session_id
+                )
                 if body_info is not None:
                     ct = body_info.get("content_type", "").lower()
                     body_bytes: bytes = body_info["body"]
@@ -1588,11 +1637,13 @@ class ListCapturedResponsesTool(KaosTool):
         resource_type = inputs.get("resource_type")
         content_type = inputs.get("content_type")
         store_artifacts = inputs.get("store_artifacts", False)
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
             responses = await client.get_captured_responses(
                 context_id,
+                session_id=session_id,
                 resource_type=resource_type,
                 content_type=content_type,
             )
@@ -1623,7 +1674,9 @@ class ListCapturedResponsesTool(KaosTool):
                     ct = resp.get("content_type", "")
                     if "json" not in ct.lower():
                         continue
-                    body_info = await client.get_response_body(context_id, resp["id"])
+                    body_info = await client.get_response_body(
+                        context_id, resp["id"], session_id=session_id
+                    )
                     if body_info is None:
                         continue
                     body_bytes: bytes = body_info["body"]
@@ -1721,14 +1774,16 @@ class ListContextsTool(KaosTool):
     async def execute(
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
+        session_id = _session_id(context)
         try:
             client = await _get_browser_client()
-            context_ids = client.active_contexts
+            # WEB5-002: list only the calling session's contexts.
+            context_ids = client.active_contexts(session_id)
 
             contexts = []
             for cid in context_ids:
                 try:
-                    url = await client.get_url(cid)
+                    url = await client.get_url(cid, session_id=session_id)
                 except Exception:
                     url = "(unknown)"
                 contexts.append({"context_id": cid, "url": url})
@@ -1777,22 +1832,26 @@ class CloseContextTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         context_id = inputs["context_id"]
+        session_id = _session_id(context)
 
         try:
             client = await _get_browser_client()
-            if context_id not in client.active_contexts:
+            # WEB5-002: scope the existence check to this session — a
+            # cross-session context_id is uniformly "No active context"
+            # so the caller cannot probe another session's namespace.
+            if context_id not in client.active_contexts(session_id):
                 return ToolResult.create_error(
                     f"No active context '{context_id}'. "
                     "Use 'kaos-web-browser-list-contexts' to see available contexts."
                 )
 
-            await client.close_context(context_id)
+            await client.close_context(context_id, session_id=session_id)
 
             return ToolResult.create_success(
                 output={
                     "context_id": context_id,
                     "message": f"Context '{context_id}' closed.",
-                    "remaining": len(client.active_contexts),
+                    "remaining": len(client.active_contexts(session_id)),
                 }
             )
         except Exception as exc:
