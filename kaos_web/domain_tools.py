@@ -200,9 +200,11 @@ class HttpHeadersTool(KaosTool):
                 "all headers, server software, CDN detection, and security header analysis "
                 "(HSTS, CSP, X-Frame-Options, etc.) with a 0-100 security score. "
                 "For TLS certificate details, use kaos-web-tls-inspect. "
-                "SECURITY: TLS verification is OFF by default (the cert is the subject "
-                "of inspection). Set KAOS_WEB_DOMAIN_VERIFY_TLS=true to require CA "
-                "validation; for verified GETs use kaos-web-fetch-page instead."
+                "SECURITY: TLS verification is ON by default (secure-by-default). "
+                "Set KAOS_WEB_DOMAIN_VERIFY_TLS=false to inspect hosts whose cert is "
+                "itself the subject of inspection (self-signed, expired, mismatched "
+                "SAN, staging environments). For trusted-endpoint GETs use "
+                "kaos-web-fetch-page instead."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.QUERY,
@@ -709,9 +711,11 @@ class ExtractOrgTool(KaosTool):
                 "pattern matching. No LLM required. "
                 "For full domain infrastructure, use kaos-web-domain-profile. "
                 "For GLEIF entity lookup, use kaos-source-gleif-search. "
-                "SECURITY: TLS verification is OFF by default to handle heterogeneous "
-                "corporate cert configs. Set KAOS_WEB_DOMAIN_VERIFY_TLS=true to require "
-                "CA validation; for verified GETs use kaos-web-fetch-page instead."
+                "SECURITY: TLS verification is ON by default (secure-by-default). "
+                "Set KAOS_WEB_DOMAIN_VERIFY_TLS=false when targeting hosts whose "
+                "cert is the subject of inspection — self-signed, expired, or "
+                "mismatched-SAN sites you want to extract entity metadata from "
+                "regardless. For trusted-endpoint GETs use kaos-web-fetch-page."
             ),
             category=ToolCategory.DOCUMENT,
             capability=ToolCapability.EXTRACT,
@@ -742,13 +746,14 @@ class ExtractOrgTool(KaosTool):
 
         settings = KaosWebSettings.from_context(context)
         try:
-            # TLS verification is OFF by default (KAOS_WEB_DOMAIN_VERIFY_TLS=false):
-            # this endpoint targets arbitrary corporate sites whose cert
-            # configurations are heterogeneous and sometimes intentionally
-            # self-signed for staging/legacy reasons. Failing closed on cert
-            # errors would prevent extracting public-record org metadata
-            # (legal name, jurisdiction) which is the entire purpose. Set
-            # KAOS_WEB_DOMAIN_VERIFY_TLS=true to require CA validation.
+            # TLS verification is ON by default (secure-by-default per WEB5-006).
+            # The typical use case is extracting org metadata from healthy public
+            # sites; CA validation is the right behavior. Set
+            # KAOS_WEB_DOMAIN_VERIFY_TLS=false explicitly when you need to scrape
+            # entity metadata from sites whose cert configuration is itself
+            # broken (self-signed, expired, mismatched SAN, staging). Disabling
+            # verification returns metadata you'd otherwise be blocked from
+            # observing; it does NOT make the returned HTML trusted content.
             async with httpx.AsyncClient(
                 timeout=15.0,
                 follow_redirects=True,

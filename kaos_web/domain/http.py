@@ -141,7 +141,7 @@ async def analyze_headers(
     *,
     timeout: float = 10.0,
     follow_redirects: bool = False,
-    verify_tls: bool = False,
+    verify_tls: bool = True,
 ) -> HttpHeadersResult:
     """Fetch HTTP headers and analyze server/security posture.
 
@@ -149,20 +149,23 @@ async def analyze_headers(
         url: Full URL to probe (e.g., ``https://example.com``).
         timeout: Request timeout in seconds.
         follow_redirects: Whether to follow redirects.
-        verify_tls: When ``False`` (default), TLS certificates are NOT
-            verified. This is intentional for domain-intelligence probes —
-            the cert is part of what we're inspecting, and failing closed
-            on an expired or self-signed cert would defeat the purpose of
-            the probe. Pass ``True`` to require standard CA validation.
+        verify_tls: When ``True`` (default — secure-by-default per
+            WEB5-006), TLS certificates are validated against the system
+            CA bundle. Pass ``False`` to skip verification when the cert
+            itself is the *subject* of inspection — self-signed,
+            expired, mismatched SAN, staging environments. Disabling
+            verification returns metadata you'd otherwise be blocked
+            from observing; it does NOT make the returned data trusted.
 
     Returns:
         HttpHeadersResult with headers, server info, and security analysis.
 
     Security note:
-        Default ``verify_tls=False`` accepts any cert presented by the
-        target host — DO NOT use this function as a transport for
-        sensitive data. For verified GETs use the ``kaos-web-fetch-page``
-        / ``HttpClient`` paths which keep TLS verification on.
+        Even with ``verify_tls=True``, do NOT use this function as a
+        transport for sensitive data — its job is observation, not
+        secure GET. For trusted-endpoint GETs use ``HttpClient`` /
+        ``kaos-web-fetch-page``; those paths keep TLS verification on
+        unconditionally.
     """
     try:
         async with httpx.AsyncClient(

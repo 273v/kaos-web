@@ -106,16 +106,26 @@ class KaosWebSettings(ModuleSettings):
     """Factor to multiply max_pages for over-discovery."""
 
     # Domain intelligence
-    domain_verify_tls: bool = False
+    domain_verify_tls: bool = True
     """Whether to verify TLS certificates on domain-intelligence probes
     (``analyze_headers``, ``extract_org_entity``).
 
-    Defaults to ``False`` because these probes target arbitrary third-party
-    hosts whose TLS configuration is the *subject* of inspection — failing
-    closed on an expired or self-signed cert would prevent the very
-    inspection the user requested. Set to ``True`` (or
-    ``KAOS_WEB_DOMAIN_VERIFY_TLS=true``) when you only want results from
-    hosts that pass standard CA validation.
+    Defaults to ``True`` (secure-by-default per WEB5-006 / audit-04
+    finding #6): the typical use case is observing healthy public sites,
+    where CA validation is the right behavior and a MITM-acceptable
+    cert is the abnormal state.
+
+    Set to ``False`` (or ``KAOS_WEB_DOMAIN_VERIFY_TLS=false``) when you
+    explicitly need to inspect hosts whose TLS configuration is the
+    *subject* of inspection — self-signed certs, expired certs,
+    mismatched SANs, or staging environments. Disabling cert
+    verification on these probes returns metadata for hosts you would
+    otherwise be blocked from observing; it does NOT make any returned
+    response trustworthy.
+
+    Note: kaos-web's content-extraction tools (``HttpClient``,
+    ``BrowserClient``) keep TLS verification on independently of this
+    setting; this flag only relaxes the two domain-intel HTTP probes.
     """
 
     # Middleware defaults

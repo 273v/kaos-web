@@ -266,8 +266,9 @@ class TestHttpHeadersExecute:
     async def test_verify_tls_threaded_from_settings_default(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # WEB2-001: HttpHeadersTool must read KaosWebSettings.domain_verify_tls
-        # and pass it to analyze_headers(verify_tls=...). Default is False.
+        # WEB5-006: secure-by-default. HttpHeadersTool reads
+        # KaosWebSettings.domain_verify_tls and passes it to
+        # analyze_headers(verify_tls=...). Default is True.
         monkeypatch.delenv("KAOS_WEB_DOMAIN_VERIFY_TLS", raising=False)
         h = HttpHeadersResult(url="https://x", status_code=200, security_score=0)
         mock_fn = AsyncMock(return_value=h)
@@ -276,19 +277,20 @@ class TestHttpHeadersExecute:
         assert mock_fn.await_count == 1
         assert mock_fn.await_args is not None
         kwargs = mock_fn.await_args.kwargs
-        assert kwargs.get("verify_tls") is False
+        assert kwargs.get("verify_tls") is True
 
-    async def test_verify_tls_threaded_from_settings_env_true(
+    async def test_verify_tls_threaded_from_settings_env_false(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "true")
+        # Explicit opt-out via env var.
+        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "false")
         h = HttpHeadersResult(url="https://x", status_code=200, security_score=0)
         mock_fn = AsyncMock(return_value=h)
         with patch("kaos_web.domain.http.analyze_headers", mock_fn):
             await HttpHeadersTool().execute({"url": "https://x"})
         assert mock_fn.await_args is not None
         kwargs = mock_fn.await_args.kwargs
-        assert kwargs.get("verify_tls") is True
+        assert kwargs.get("verify_tls") is False
 
 
 # ── ServiceDetectTool ────────────────────────────────────────────────
@@ -562,8 +564,9 @@ class TestExtractOrgExecute:
     async def test_verify_tls_threaded_from_settings_default(
         self, monkeypatch: pytest.MonkeyPatch, httpx_mock: Any
     ) -> None:
-        # WEB2-001: ExtractOrgTool reads KaosWebSettings.domain_verify_tls
-        # and passes it to httpx.AsyncClient(verify=...). Default False.
+        # WEB5-006: ExtractOrgTool reads KaosWebSettings.domain_verify_tls
+        # and passes it to httpx.AsyncClient(verify=...). Default True
+        # (secure-by-default).
         monkeypatch.delenv("KAOS_WEB_DOMAIN_VERIFY_TLS", raising=False)
         captured: dict[str, Any] = {}
         import httpx
@@ -579,12 +582,13 @@ class TestExtractOrgExecute:
         )
         with patch("httpx.AsyncClient", side_effect=_spy):
             await ExtractOrgTool().execute({"url": "https://acme.example/"})
-        assert captured.get("verify") is False
+        assert captured.get("verify") is True
 
-    async def test_verify_tls_threaded_from_settings_env_true(
+    async def test_verify_tls_threaded_from_settings_env_false(
         self, monkeypatch: pytest.MonkeyPatch, httpx_mock: Any
     ) -> None:
-        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "true")
+        # Explicit opt-out via env var.
+        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "false")
         captured: dict[str, Any] = {}
         import httpx
 
@@ -599,7 +603,7 @@ class TestExtractOrgExecute:
         )
         with patch("httpx.AsyncClient", side_effect=_spy):
             await ExtractOrgTool().execute({"url": "https://acme.example/"})
-        assert captured.get("verify") is True
+        assert captured.get("verify") is False
 
     async def test_fetch_failure(self, httpx_mock: Any) -> None:
         import httpx

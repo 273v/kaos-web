@@ -194,29 +194,30 @@ class TestAnalyzeHeaders:
         assert result.status_code == 0
         assert result.error is not None and "Request failed" in result.error
 
-    async def test_verify_tls_default_off(self, httpx_mock) -> None:  # type: ignore[no-untyped-def]
-        # WEB2-001: verify_tls defaults to False so probes can succeed
-        # against hosts whose TLS configuration is the *subject* of
-        # inspection (self-signed, expired, mismatched SAN). The test
-        # asserts the call simply succeeds — pytest_httpx's mock transport
-        # ignores `verify`, so the assertion here is on the function
-        # signature contract, not on the underlying TLS behavior.
-        httpx_mock.add_response(
-            method="HEAD",
-            url="https://self-signed.example.invalid/",
-            status_code=200,
-            headers={"Server": "nginx/1.24.0"},
-        )
-        result = await analyze_headers("https://self-signed.example.invalid/")
-        assert result.status_code == 200
-
-    async def test_verify_tls_explicit_true(self, httpx_mock) -> None:  # type: ignore[no-untyped-def]
-        # Confirms the parameter is keyword-accepted; a True value should
-        # not break the happy path.
+    async def test_verify_tls_default_on(self, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        # WEB5-006: verify_tls defaults to True (secure-by-default).
+        # pytest_httpx's mock transport ignores `verify`, so this asserts
+        # the function-signature contract (default + happy path), not the
+        # underlying TLS validation behavior.
         httpx_mock.add_response(
             method="HEAD",
             url="https://verified.example.com/",
             status_code=200,
+            headers={"Server": "nginx/1.24.0"},
         )
-        result = await analyze_headers("https://verified.example.com/", verify_tls=True)
+        result = await analyze_headers("https://verified.example.com/")
+        assert result.status_code == 200
+
+    async def test_verify_tls_explicit_false(self, httpx_mock) -> None:  # type: ignore[no-untyped-def]
+        # Opt-out: explicit verify_tls=False is the documented escape
+        # hatch for inspecting hosts whose cert is the subject of
+        # inspection (self-signed, expired, mismatched SAN).
+        httpx_mock.add_response(
+            method="HEAD",
+            url="https://self-signed.example.invalid/",
+            status_code=200,
+        )
+        result = await analyze_headers(
+            "https://self-signed.example.invalid/", verify_tls=False
+        )
         assert result.status_code == 200

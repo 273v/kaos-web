@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **TLS verification on domain-intelligence probes now defaults to ON**
+  (WEB5-006). The two probes that explicitly disable verification
+  (`kaos-web-http-headers`, `kaos-web-extract-org`) previously
+  defaulted to `KAOS_WEB_DOMAIN_VERIFY_TLS=false` (audit-02 WEB2-001
+  shipped the setting with that default; WEB5-006 flips it to `true`).
+  Secure-by-default: the typical use case is observing healthy public
+  sites where CA validation is correct. Set
+  `KAOS_WEB_DOMAIN_VERIFY_TLS=false` to inspect hosts whose cert is
+  itself the subject of inspection (self-signed, expired, mismatched
+  SAN, staging environments). **Migration**: anyone scraping such
+  hosts will see new TLS errors; explicitly opt out via the env var.
+  Content-extraction tools (`HttpClient` / `BrowserClient`) keep TLS
+  verification on independently of this flag.
+
 - **Browser interaction tools now declare `destructiveHint=True`**
   (WEB5-005). Click / fill / type / press / select / evaluate run
   inside an authenticated browser session and CAN trigger real actions

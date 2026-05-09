@@ -56,31 +56,36 @@ class TestKaosWebSettingsDefaults:
         assert s.serpapi_api_key is None
         assert s.exa_api_key is None
         assert s.brave_api_key is None
-        # WEB2-001: domain-intel TLS verification defaults to OFF
-        assert s.domain_verify_tls is False
+        # WEB5-006: secure-by-default — domain-intel TLS verification ON by default.
+        # (Was False through audit-02 WEB2-001; flipped True for audit-04 WEB5-006.)
+        assert s.domain_verify_tls is True
 
 
 class TestDomainVerifyTls:
-    """WEB2-001: KAOS_WEB_DOMAIN_VERIFY_TLS toggles cert verification on
-    domain-intelligence probes (analyze_headers, ExtractOrgTool)."""
+    """KAOS_WEB_DOMAIN_VERIFY_TLS toggles cert verification on the two
+    domain-intelligence probes (analyze_headers, ExtractOrgTool).
 
-    def test_default_false(self) -> None:
-        s = KaosWebSettings()
-        assert s.domain_verify_tls is False
+    WEB5-006: default flipped True → secure-by-default. Set False
+    explicitly to inspect hosts whose cert is the subject of inspection.
+    """
 
-    def test_env_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "true")
+    def test_default_true(self) -> None:
         s = KaosWebSettings()
         assert s.domain_verify_tls is True
 
-    def test_env_false_explicit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_env_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "false")
         s = KaosWebSettings()
         assert s.domain_verify_tls is False
 
-    def test_constructor_override(self) -> None:
-        s = KaosWebSettings(domain_verify_tls=True)
+    def test_env_true_explicit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "true")
+        s = KaosWebSettings()
         assert s.domain_verify_tls is True
+
+    def test_constructor_override_false(self) -> None:
+        s = KaosWebSettings(domain_verify_tls=False)
+        assert s.domain_verify_tls is False
 
 
 class TestKaosWebSettingsNewEnvVars:

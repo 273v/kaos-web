@@ -196,6 +196,12 @@ via [GitHub Private Vulnerability Reporting](https://github.com/273v/kaos-web/se
 or email **security@273ventures.com**. See [SECURITY.md](SECURITY.md) for the
 full disclosure policy.
 
+### Security-relevant settings
+
+| Env var | Default | Effect |
+|---|---|---|
+| `KAOS_WEB_DOMAIN_VERIFY_TLS` | `true` | Verify TLS certs on the two domain-intelligence HTTP probes (`kaos-web-http-headers`, `kaos-web-extract-org`). Set `false` to inspect hosts whose cert is the *subject* of inspection (self-signed, expired, mismatched SAN). Content-extraction tools (`HttpClient` / `BrowserClient`) keep TLS verification on independently of this flag. |
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
