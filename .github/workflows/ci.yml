@@ -116,6 +116,16 @@ jobs:
         # No-op for stable versions.
         run: uv python install --preview ${{ matrix.python-version }}
 
+      - name: Install system build deps (lxml needs libxml2/libxslt headers)
+        # lxml ships pre-built wheels for stable cp3.X releases. For
+        # pre-release Pythons (currently 3.15) and the free-threaded
+        # variant (3.14t), wheels may not exist yet and uv falls back
+        # to a source build. Install the headers so the source build
+        # actually works rather than failing the whole matrix entry.
+        # Cheap (~5s); skip on non-Linux runners if we ever add them.
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libxml2-dev libxslt1-dev
+
       - name: Install dependencies
         run: uv sync --group dev --python ${{ matrix.python-version }}
 
