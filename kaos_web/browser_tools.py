@@ -649,7 +649,7 @@ class ScreenshotTool(KaosTool):
 
             return ToolResult(
                 content=[ImageContent(data=b64, mimeType=mime)],
-                meta={
+                _meta={
                     "source": source,
                     "format": fmt,
                     "full_page": full_page,
