@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`SaveAuthStateTool` no longer accepts a caller-supplied filesystem
+  path** (WEB5-004). The previous implementation passed an MCP-input
+  ``path`` straight to Playwright's ``context.storage_state(path=...)``
+  — path-traversal / arbitrary-write to anywhere the server process
+  could write, plus a credentials-leak persistence path. Rewritten to:
+  capture the storage state in-memory via new
+  ``BrowserClient.get_storage_state(context_id)``, write to a
+  session-scoped VFS path, and persist as a kaos-core artifact via
+  ``KaosContext.runtime.artifacts.create_from_path`` (auto-bound to
+  the caller's ``session_id``). Returns an ``ArtifactManifest`` the
+  agent retrieves via standard artifact MCP tools. **Breaking change
+  for the MCP tool input schema**: the ``path`` parameter is removed
+  and replaced with an optional ``name`` parameter (artifact name).
+  Library users with their own filesystem authority can still call
+  ``BrowserClient.save_storage_state(path)`` directly.
+
 - **Observed third-party traffic redacts sensitive headers by default**
   (WEB5-003). When ``kaos-web-browser-log-requests`` captures network
   traffic, the recorded request and response headers now mask values

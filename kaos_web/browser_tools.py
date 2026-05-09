@@ -1106,7 +1106,18 @@ class SetCookieTool(KaosTool):
 
 
 class SaveAuthStateTool(KaosTool):
-    """Save browser auth state (cookies + localStorage) to a file."""
+    """Save browser auth state (cookies + localStorage) to a session-scoped artifact.
+
+    WEB5-004 / audit-04 finding #4: previously this tool accepted a
+    caller-supplied filesystem ``path`` and let Playwright write storage
+    state there. With the MCP HTTP server exposed beyond a trusted
+    in-process caller, that's a path-traversal / arbitrary-write bug
+    plus a credentials-leak persistence path. Rewritten to capture the
+    storage state in memory and persist it as a session-scoped artifact
+    via the kaos-core artifact store. The returned ``ArtifactManifest``
+    can be retrieved later via standard artifact MCP tools — and is
+    naturally bounded to the caller's session.
+    """
 
     @property
     def metadata(self) -> ToolMetadata:
@@ -1114,9 +1125,15 @@ class SaveAuthStateTool(KaosTool):
             name="kaos-web-browser-save-auth",
             display_name="Save Auth State",
             description=(
-                "Save the browser context's storage state (cookies and localStorage) "
-                "to a JSON file. Use after logging in to persist authentication. "
-                "To reuse, configure BrowserClientConfig(storage_state='path.json')."
+                "Capture the browser context's storage state (cookies + "
+                "localStorage) and persist it as a session-scoped artifact. "
+                "Returns an ArtifactManifest with body_uri the agent can later "
+                "retrieve. Use after logging in to persist authentication. "
+                "SECURITY: storage state is not written to a caller-supplied "
+                "filesystem path — it lives in the session-scoped artifact "
+                "store and is automatically reaped at session end (or per the "
+                "configured retention policy). Requires a runtime context "
+                "(MCP servers always provide one)."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.EXTRACT,
@@ -1131,9 +1148,15 @@ class SaveAuthStateTool(KaosTool):
             input_schema=[
                 _context_id_param(),
                 ParameterSchema(
-                    name="path",
+                    name="name",
                     type="string",
-                    description="File path to save state to (JSON file).",
+                    description=(
+                        "Optional artifact name (helps the agent identify the "
+                        "saved state later). Defaults to "
+                        "'auth-{context_id}-{timestamp}'."
+                    ),
+                    required=False,
+                    default="",
                 ),
             ],
         )
@@ -1142,26 +1165,78 @@ class SaveAuthStateTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         context_id = inputs["context_id"]
-        path = inputs["path"]
+        artifact_name = inputs.get("name") or ""
+
+        # The artifact path REQUIRES a runtime context — there is no
+        # safe fallback that accepts a caller-supplied filesystem path
+        # (that's exactly the bug WEB5-004 fixes).
+        if context is None or context.runtime is None:
+            return ToolResult.create_error(
+                "kaos-web-browser-save-auth requires a runtime context. "
+                "Run kaos-web through an MCP server (kaos-web-serve, "
+                "kaos-mcp serve) which provides one automatically. Direct "
+                "library callers can use BrowserClient.save_storage_state(path) "
+                "or BrowserClient.get_storage_state() — both bypass this "
+                "tool's safety wrapper."
+            )
 
         try:
-            client = await _get_browser_client()
-            saved_path = await client.save_storage_state(context_id, path)
+            import json
+            from datetime import UTC, datetime
 
+            from kaos_core.types.enums import ArtifactRole
+
+            client = await _get_browser_client()
+            state = await client.get_storage_state(context_id)
+            payload = json.dumps(state, indent=2).encode("utf-8")
+
+            timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            name = artifact_name or f"auth-{context_id}-{timestamp}"
+            vfs_path = f"auth/{name}.json"
+
+            ctx_path = context.get_vfs_path(vfs_path)
+            await ctx_path.write_bytes(payload)
+
+            manifest = await context.runtime.artifacts.create_from_path(
+                vfs_path,
+                context_id=context.session_id,
+                session_id=context.session_id,
+                name=name,
+                description=(
+                    f"Browser storage state (cookies + localStorage) for "
+                    f"context '{context_id}'. Includes any session cookies "
+                    f"and origin-scoped localStorage at the time of capture."
+                ),
+                mime_type="application/json",
+                role=ArtifactRole.BODY,
+                metadata={
+                    "browser_context_id": context_id,
+                    "captured_at": timestamp,
+                    "kind": "playwright_storage_state",
+                },
+            )
             return ToolResult.create_success(
                 output={
                     "context_id": context_id,
-                    "path": saved_path,
+                    "artifact_id": manifest.artifact_id,
+                    "body_uri": manifest.body_uri,
+                    "size_bytes": len(payload),
                     "message": (
-                        f"Auth state saved to '{saved_path}'. "
-                        "Load in future sessions with storage_state config."
+                        f"Auth state saved as artifact '{manifest.artifact_id}'. "
+                        "Retrieve it later via standard artifact tools, or "
+                        "load into a new browser session by reading the body and "
+                        "passing it via BrowserClientConfig.storage_state."
                     ),
-                }
+                },
+                summary=f"saved {len(payload)} bytes → {manifest.body_uri}",
             )
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to save auth state for context '{context_id}': {exc}. "
-                "Ensure a browser context exists and the path is writable."
+                "Ensure a browser context exists (call kaos-web-browser-navigate "
+                "first) and that the runtime artifact store is reachable. "
+                "If you need to persist auth without a runtime, use the "
+                "BrowserClient.save_storage_state(path) library API directly."
             )
 
 

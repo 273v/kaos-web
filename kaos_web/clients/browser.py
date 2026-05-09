@@ -573,10 +573,21 @@ class BrowserClient:
 
         Args:
             context_id: Named context.
-            path: File path to save state to (JSON).
+            path: File path to save state to (JSON). The caller is
+                responsible for path safety; this is a library API
+                accepting whatever path the in-process caller provides.
 
         Returns:
             The path where state was saved.
+
+        Note:
+            The MCP-tool surface (``SaveAuthStateTool``) does NOT use
+            this path-accepting API — it routes through
+            :meth:`get_storage_state` and writes the result to a
+            session-scoped artifact via the kaos-core artifact store
+            (WEB5-004). Library users with their own filesystem
+            authority can still call ``save_storage_state(path)``
+            directly.
         """
         if context_id not in self._contexts:
             raise WebBrowserError(
@@ -587,6 +598,25 @@ class BrowserClient:
         context = self._contexts[context_id]
         await context.storage_state(path=path)
         return path
+
+    async def get_storage_state(self, context_id: str) -> dict[str, Any]:
+        """Return the browser context storage state as an in-memory dict.
+
+        Used by ``SaveAuthStateTool`` to capture cookies + localStorage
+        without writing to a caller-supplied filesystem path (WEB5-004).
+        The returned dict is the same Playwright storage_state shape
+        (``{"cookies": [...], "origins": [...]}``).
+        """
+        if context_id not in self._contexts:
+            raise WebBrowserError(
+                f"No context '{context_id}'. Use kaos-web-browser-navigate first.",
+                url="",
+                retryable=False,
+            )
+        context = self._contexts[context_id]
+        # Playwright: storage_state() with no `path` returns the dict.
+        state = await context.storage_state()
+        return state if isinstance(state, dict) else {}
 
     # ── Network monitoring ──
 

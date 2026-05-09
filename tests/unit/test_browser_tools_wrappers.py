@@ -658,24 +658,93 @@ class TestSetCookieTool:
 
 @pytest.mark.asyncio
 class TestSaveAuthStateTool:
-    async def test_save_success(self, tmp_path: Any) -> None:
+    """WEB5-004: SaveAuthStateTool no longer accepts a caller-supplied
+    ``path`` (path-traversal / arbitrary-write fix). The storage state
+    is captured in-memory via ``BrowserClient.get_storage_state`` and
+    persisted as a session-scoped artifact via
+    ``KaosContext.runtime.artifacts``.
+    """
+
+    async def test_no_path_param_in_input_schema(self) -> None:
+        # Hardens against accidental re-introduction of the path arg.
+        tool = SaveAuthStateTool()
+        param_names = {p.name for p in tool.metadata.input_schema}
+        assert "path" not in param_names
+        # context_id stays; optional 'name' replaces 'path'.
+        assert "context_id" in param_names
+        assert "name" in param_names
+
+    async def test_save_persists_as_artifact(self) -> None:
         client = MagicMock()
-        client.save_storage_state = AsyncMock(return_value=str(tmp_path / "auth.json"))
+        client.get_storage_state = AsyncMock(
+            return_value={
+                "cookies": [{"name": "sid", "value": "abc"}],
+                "origins": [],
+            }
+        )
+        ctx, _manifest = _make_runtime_context(
+            artifact_id="art-auth", body_uri="kaos://artifacts/art-auth/body"
+        )
         with _patch_client(client):
             result = await SaveAuthStateTool().execute(
-                {"context_id": "s1", "path": str(tmp_path / "auth.json")}
+                {"context_id": "s1"}, context=ctx
             )
         assert not result.isError
+        # Manifest fields surfaced in the structured output.
+        out = result.structuredContent
+        assert out is not None
+        assert out["artifact_id"] == "art-auth"
+        assert out["body_uri"] == "kaos://artifacts/art-auth/body"
+        assert out["size_bytes"] > 0
+        # Underlying client was called for the in-memory state, not for
+        # any caller-supplied path.
+        client.get_storage_state.assert_awaited_once_with("s1")
+        # Artifact creation was scoped to the caller's session.
+        ctx.runtime.artifacts.create_from_path.assert_awaited_once()
+        kwargs = ctx.runtime.artifacts.create_from_path.await_args.kwargs
+        assert kwargs["session_id"] == "sess-test"
+        assert kwargs["mime_type"] == "application/json"
 
-    async def test_save_failure(self, tmp_path: Any) -> None:
+    async def test_save_requires_runtime_context(self) -> None:
         client = MagicMock()
-        client.save_storage_state = AsyncMock(side_effect=RuntimeError("io"))
+        client.get_storage_state = AsyncMock(return_value={})
+        with _patch_client(client):
+            # No runtime context provided — must refuse rather than
+            # silently fall back to a filesystem path.
+            result = await SaveAuthStateTool().execute({"context_id": "s1"})
+        assert result.isError
+        text = _err_text(result)
+        assert "runtime context" in text
+        # Suggests the library API as the manual escape hatch.
+        assert "save_storage_state" in text
+        # Did NOT touch the underlying client.
+        client.get_storage_state.assert_not_called()
+
+    async def test_save_failure_propagates_three_part_error(self) -> None:
+        client = MagicMock()
+        client.get_storage_state = AsyncMock(side_effect=RuntimeError("io"))
+        ctx, _ = _make_runtime_context()
         with _patch_client(client):
             result = await SaveAuthStateTool().execute(
-                {"context_id": "s1", "path": str(tmp_path / "auth.json")}
+                {"context_id": "s1"}, context=ctx
             )
         assert result.isError
-        assert "Failed to save auth state" in _err_text(result)
+        text = _err_text(result)
+        assert "Failed to save auth state" in text
+        # 3-part error contract: what + how-to-recover + alternative
+        assert "kaos-web-browser-navigate" in text
+        assert "save_storage_state" in text  # alternative library API
+
+    async def test_save_uses_provided_artifact_name(self) -> None:
+        client = MagicMock()
+        client.get_storage_state = AsyncMock(return_value={})
+        ctx, _ = _make_runtime_context()
+        with _patch_client(client):
+            await SaveAuthStateTool().execute(
+                {"context_id": "s1", "name": "my-named-auth"}, context=ctx
+            )
+        kwargs = ctx.runtime.artifacts.create_from_path.await_args.kwargs
+        assert kwargs["name"] == "my-named-auth"
 
 
 # ── EnableRequestLoggingTool ────────────────────────────────────────
