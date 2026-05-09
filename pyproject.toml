@@ -153,4 +153,3 @@ include = ["kaos_web", "tests"]
 
 [tool.uv]
 package = true
-
