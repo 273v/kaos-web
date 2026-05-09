@@ -1631,7 +1631,14 @@ class ListContextsTool(KaosTool):
                 }
             )
         except Exception as exc:
-            return ToolResult.create_error(f"Failed to list contexts: {exc}.")
+            return ToolResult.create_error(
+                f"Failed to list browser contexts: {exc}. "
+                "The browser client may have disconnected, or a context "
+                "was closed mid-iteration. "
+                "Call 'kaos-web-browser-navigate' to (re)open a session, "
+                "then retry this tool. "
+                "If the issue persists, restart the MCP server."
+            )
 
 
 class CloseContextTool(KaosTool):
@@ -1680,7 +1687,14 @@ class CloseContextTool(KaosTool):
                 }
             )
         except Exception as exc:
-            return ToolResult.create_error(f"Failed to close context '{context_id}': {exc}.")
+            return ToolResult.create_error(
+                f"Failed to close browser context '{context_id}': {exc}. "
+                "The context may already be closed or the browser disconnected. "
+                "Call 'kaos-web-browser-list-contexts' to confirm which contexts "
+                "remain active. If the context is gone, no action is needed; "
+                "otherwise retry, or restart the MCP server to reset all browser "
+                "state."
+            )
 
 
 def register_browser_tools(runtime: KaosRuntime) -> int:
