@@ -1,0 +1,31 @@
+# gitleaks configuration for kaos-web
+#
+# Extends the default ruleset with allowlist entries for known-public
+# strings inside test fixtures. The base ruleset still applies; only the
+# specific fingerprints listed here are skipped.
+#
+# Adding to the allowlist requires (a) confirming the value is genuinely
+# public (no kaos-web or 273 Ventures secret reuse), (b) referencing the
+# upstream source so future maintainers can re-verify, and (c) keeping
+# the entry as narrow as possible (path + rule + fingerprint, not a
+# blanket path skip).
+
+title = "kaos-web gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+tests/fixtures/cornell_law.html is a verbatim snapshot of the public
+LII (Legal Information Institute) page at https://www.law.cornell.edu/.
+The bitly apiKey in the embedded JS config is part of that page's
+public client-side configuration (visible to every visitor in the page
+source), not a kaos-web or 273 Ventures secret. Used as a parser
+fixture for kaos_web.extract.html_to_ast on a real-world legal site.
+"""
+paths = ["tests/fixtures/cornell_law\\.html"]
+regexTarget = "match"
+regexes = [
+  '''apiKey:\s*'R_[a-f0-9]{32}' ''',
+]

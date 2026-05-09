@@ -26,7 +26,10 @@ def _build_tools() -> dict:
 
     runtime = KaosRuntime()
     count = register_domain_tools(runtime)
-    assert count == 11
+    # Bumped from 11 → 14 in the network-intelligence feature commit
+    # (TcpBannerTool + FingerprintServiceTool + UdpProbeTool). Update this
+    # assertion in lockstep when register_domain_tools adds tools.
+    assert count == 14
     return {tool.metadata.name: tool for tool in runtime.tools.list_tool_objects()}
 
 
