@@ -201,6 +201,7 @@ full disclosure policy.
 | Env var | Default | Effect |
 |---|---|---|
 | `KAOS_WEB_DOMAIN_VERIFY_TLS` | `true` | Verify TLS certs on the two domain-intelligence HTTP probes (`kaos-web-http-headers`, `kaos-web-extract-org`). Set `false` to inspect hosts whose cert is the *subject* of inspection (self-signed, expired, mismatched SAN). Content-extraction tools (`HttpClient` / `BrowserClient`) keep TLS verification on independently of this flag. |
+| `KAOS_WEB_MAX_BODY_BYTES` | `50000000` | Maximum response body size accepted from any fetch site. Enforced via streaming with `Content-Length` pre-check + running tally in `HttpClient`, post-check in `BrowserClient`, and bounded gzip-decompress in the sitemap parser (`_decompress_gzip`). Raises `BodyTooLargeError` on overflow. Raise this when working with bulk data (legal corpus pages, large data exports, archival snapshots). |
 
 The `CacheMiddleware` automatically bypasses any request that carries
 `Authorization`, `Proxy-Authorization`, `Cookie`, `X-API-Key`,

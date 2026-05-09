@@ -10,6 +10,7 @@ import httpx
 from kaos_core.logging import get_logger
 from kaos_web.clients.config import HttpClientConfig
 from kaos_web.errors import (
+    BodyTooLargeError,
     WebClientError,
     WebNetworkError,
     WebProxyError,
@@ -168,17 +169,27 @@ class HttpClient:
         return await self._chain.execute(request)
 
     async def _raw_fetch(self, request: WebRequest) -> WebResponse:
-        """Raw HTTP fetch without middleware. Maps httpx exceptions to WebError."""
+        """Raw HTTP fetch without middleware. Maps httpx exceptions to WebError.
+
+        Streams the response body and enforces ``KaosWebSettings.max_body_bytes``
+        (WEB5-007 / audit-04 finding #7) — pre-checks ``Content-Length`` then
+        accumulates chunked bytes with a running tally. Aborts with
+        ``BodyTooLargeError`` before materializing an oversized body.
+        """
+        from kaos_web.settings import KaosWebSettings
+
+        max_body_bytes = KaosWebSettings().max_body_bytes
         url = request.url
         headers = {**request.headers} if request.headers else {}
 
         try:
-            resp = await self._client.request(
+            resp, body_bytes = await self._streamed_request(
                 method=request.method,
                 url=url,
                 headers=headers,
                 timeout=request.timeout,
                 follow_redirects=request.follow_redirects,
+                max_body_bytes=max_body_bytes,
             )
         except httpx.ConnectTimeout as exc:
             raise WebTimeoutError(
@@ -270,15 +281,90 @@ class HttpClient:
                 status_code=status,
             )
 
+        # Decode the streamed body using the response's declared encoding,
+        # falling back to UTF-8 with a replace-error policy so partial /
+        # mis-declared encodings don't crash the pipeline.
+        encoding = resp.encoding or "utf-8"
+        html = body_bytes.decode(encoding, errors="replace")
+
         return WebResponse(
             url=final_url,
             status_code=status,
             content_type=resp.headers.get("content-type", ""),
-            html=resp.text,
+            html=html,
             headers=dict(resp.headers),
             elapsed_ms=resp.elapsed.total_seconds() * 1000 if resp.elapsed else 0.0,
             cookies=dict(resp.cookies.items()),
         )
+
+    async def _streamed_request(
+        self,
+        *,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        timeout: float | None,
+        follow_redirects: bool,
+        max_body_bytes: int,
+    ) -> tuple[httpx.Response, bytes]:
+        """Issue a streamed request and accumulate the body with a size cap.
+
+        Two layers of defense (WEB5-007):
+
+        1. **Pre-check ``Content-Length``** — if the server declares the
+           body size and it exceeds the cap, raise immediately without
+           reading any body bytes. Catches the well-behaved-but-large
+           case efficiently.
+        2. **Streamed accumulation with running tally** — for chunked
+           responses (no ``Content-Length``) or responses that lie about
+           their size, accumulate ``aiter_bytes()`` chunks and abort as
+           soon as the total exceeds the cap.
+
+        Either path raises ``BodyTooLargeError`` with the URL, observed
+        size, and the configured cap so the agent can adjust.
+        """
+        async with self._client.stream(
+            method=method,
+            url=url,
+            headers=headers,
+            timeout=timeout,
+            follow_redirects=follow_redirects,
+        ) as resp:
+            declared = resp.headers.get("content-length")
+            if declared is not None:
+                try:
+                    declared_int = int(declared)
+                except ValueError:
+                    declared_int = -1
+                if declared_int > max_body_bytes:
+                    raise BodyTooLargeError(
+                        f"Response body for {url} declares "
+                        f"Content-Length: {declared_int} bytes (cap: "
+                        f"{max_body_bytes}). Aborting before body read. "
+                        f"Increase KAOS_WEB_MAX_BODY_BYTES if you intend "
+                        f"to fetch payloads of this size.",
+                        url=url,
+                        size_bytes=declared_int,
+                        max_bytes=max_body_bytes,
+                    )
+
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in resp.aiter_bytes():
+                total += len(chunk)
+                if total > max_body_bytes:
+                    raise BodyTooLargeError(
+                        f"Response body for {url} streamed past "
+                        f"{max_body_bytes} bytes (no Content-Length, or "
+                        f"server lied). Aborted at {total} bytes. "
+                        f"Increase KAOS_WEB_MAX_BODY_BYTES if you intend "
+                        f"to fetch payloads of this size.",
+                        url=url,
+                        size_bytes=total,
+                        max_bytes=max_body_bytes,
+                    )
+                chunks.append(chunk)
+            return resp, b"".join(chunks)
 
     async def close(self) -> None:
         """Release client resources."""

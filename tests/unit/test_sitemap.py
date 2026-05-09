@@ -351,3 +351,60 @@ class TestDiscoverSitemaps:
         )
         urls = await discover_sitemaps("example.com", fetch)
         assert len(urls) == 2
+
+
+# --- WEB5-007: gzip cap ---
+
+
+class TestGzipBodyCap:
+    """``_decompress_gzip`` must enforce ``KAOS_WEB_MAX_BODY_BYTES`` so a
+    small gzipped payload cannot decompress into multi-gigabyte memory
+    pressure (gzip-bomb pattern).
+    """
+
+    def test_under_cap_decompresses_normally(self) -> None:
+        import gzip
+
+        from kaos_web.discover.sitemap import _decompress_gzip
+
+        payload = b"<urlset></urlset>"
+        gzipped = gzip.compress(payload)
+        assert _decompress_gzip(gzipped, max_bytes=4096) == payload
+
+    def test_over_cap_raises(self) -> None:
+        import gzip
+
+        from kaos_web.discover.sitemap import _decompress_gzip
+        from kaos_web.errors import BodyTooLargeError
+
+        # 1 MB of zeros compresses to ~1 KB but decompresses to 1 MB.
+        # Cap to 1024 → must raise.
+        payload = b"\x00" * 1_000_000
+        gzipped = gzip.compress(payload)
+        assert len(gzipped) < 5_000  # Confirm we have a gzip-bomb-shape payload
+        with pytest.raises(BodyTooLargeError) as exc:
+            _decompress_gzip(gzipped, max_bytes=1024)
+        assert exc.value.size_bytes is not None
+        assert exc.value.size_bytes > 1024
+        assert exc.value.max_bytes == 1024
+
+    def test_non_gzip_returns_original(self) -> None:
+        from kaos_web.discover.sitemap import _decompress_gzip
+
+        payload = b"<urlset></urlset>"  # plain XML, not gzip
+        assert _decompress_gzip(payload, max_bytes=4096) == payload
+
+    def test_uses_settings_default_when_no_cap_provided(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When ``max_bytes=None``, look up the cap from KaosWebSettings."""
+        import gzip
+
+        from kaos_web.discover.sitemap import _decompress_gzip
+        from kaos_web.errors import BodyTooLargeError
+
+        monkeypatch.setenv("KAOS_WEB_MAX_BODY_BYTES", "512")
+        payload = b"\x00" * 100_000
+        gzipped = gzip.compress(payload)
+        with pytest.raises(BodyTooLargeError):
+            _decompress_gzip(gzipped)  # max_bytes=None → settings default

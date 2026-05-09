@@ -10,6 +10,7 @@ Uses lxml (already a dependency) and stdlib gzip. No third-party sitemap library
 from __future__ import annotations
 
 import gzip
+import io
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -167,10 +168,40 @@ def _parse_text_sitemap(content: bytes) -> list[SitemapEntry]:
     return entries
 
 
-def _decompress_gzip(content: bytes) -> bytes:
-    """Decompress gzip content, return original if not gzip."""
+def _decompress_gzip(content: bytes, *, max_bytes: int | None = None) -> bytes:
+    """Decompress gzip content with a bounded output size, return original if not gzip.
+
+    A small (~1 KB) gzip header can decompress to gigabytes (the
+    "gzip bomb" pattern). WEB5-007 / audit-04 finding #7: cap the
+    decompressed output at ``max_bytes`` (defaults to
+    ``KaosWebSettings.max_body_bytes`` when None — resolved lazily so
+    tests can override).
+    """
+    if max_bytes is None:
+        from kaos_web.settings import KaosWebSettings
+
+        max_bytes = KaosWebSettings().max_body_bytes
+
     try:
-        return gzip.decompress(content)
+        with gzip.GzipFile(fileobj=io.BytesIO(content)) as gz:
+            # Read one byte past the cap — if there's anything beyond,
+            # we know the payload exceeds the limit and we abort. This
+            # is bounded memory regardless of the underlying gzip-bomb
+            # ratio.
+            decompressed = gz.read(max_bytes + 1)
+        if len(decompressed) > max_bytes:
+            from kaos_web.errors import BodyTooLargeError
+
+            raise BodyTooLargeError(
+                f"Gzip-decompressed sitemap exceeds "
+                f"KAOS_WEB_MAX_BODY_BYTES={max_bytes} bytes. "
+                f"Either the sitemap is genuinely large (raise the cap) "
+                f"or this looks like a gzip bomb (the source URL declares "
+                f"a small payload that explodes on decompression).",
+                size_bytes=len(decompressed),
+                max_bytes=max_bytes,
+            )
+        return decompressed
     except (gzip.BadGzipFile, OSError):
         return content
 

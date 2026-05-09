@@ -94,3 +94,30 @@ class WebBrowserError(WebError):
 
     def __init__(self, message: str, *, url: str = "", retryable: bool = False) -> None:
         super().__init__(message, url=url, retryable=retryable)
+
+
+class BodyTooLargeError(WebError):
+    """Response body exceeded the configured ``KAOS_WEB_MAX_BODY_BYTES`` cap.
+
+    Raised by ``HttpClient.fetch`` (when ``Content-Length`` declares a body
+    over the cap, OR when streamed bytes accumulate past it),
+    ``BrowserClient.fetch`` (when ``page.content()`` returns oversized HTML),
+    and the sitemap gzip decompressor (when the decompressed payload would
+    exceed the cap).
+
+    The cap is a memory-safety boundary, not a quality signal. If you're
+    legitimately working with large bodies (data exports, large sitemaps,
+    archival pages), raise ``KAOS_WEB_MAX_BODY_BYTES`` for the run.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        url: str = "",
+        size_bytes: int | None = None,
+        max_bytes: int | None = None,
+    ) -> None:
+        self.size_bytes = size_bytes
+        self.max_bytes = max_bytes
+        super().__init__(message, url=url, retryable=False)

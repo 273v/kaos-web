@@ -105,6 +105,32 @@ class KaosWebSettings(ModuleSettings):
     crawl_over_discover_factor: int = 3
     """Factor to multiply max_pages for over-discovery."""
 
+    # Response-size memory-safety cap (WEB5-007 / audit-04 finding #7)
+    max_body_bytes: int = 50_000_000
+    """Maximum response body size accepted from any fetch site.
+
+    A hostile or misconfigured endpoint can stream gigabytes of content.
+    Without a cap, ``HttpClient.fetch`` materializes ``resp.text``,
+    ``BrowserClient.fetch`` materializes ``page.content()``, and
+    ``sitemap`` gzip decompression all run unbounded — OOM territory.
+
+    Default 50 MB is generous for typical web pages (a large news
+    article HTML is ~200 KB; a feature-rich SPA HTML is ~5 MB; a
+    competitive sitemap.xml is ~5-10 MB; a gzipped sitemap-index can
+    decompress to ~30 MB). Raise the cap explicitly when working with
+    bulk data (legal corpus pages, large data exports, archival
+    snapshots).
+
+    Enforced at three sites:
+    - ``HttpClient._raw_fetch``: pre-checks ``Content-Length``, then
+      streams via ``client.stream() + aiter_bytes()`` with a running
+      tally; raises ``BodyTooLargeError`` on overflow.
+    - ``BrowserClient.fetch``: post-checks ``len(page.content())``.
+    - ``kaos_web.discover.sitemap._decompress_gzip``: bounded read.
+
+    Env var: ``KAOS_WEB_MAX_BODY_BYTES``.
+    """
+
     # Domain intelligence
     domain_verify_tls: bool = True
     """Whether to verify TLS certificates on domain-intelligence probes

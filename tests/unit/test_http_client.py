@@ -9,6 +9,7 @@ from pytest_httpx import HTTPXMock
 from kaos_web.clients.config import HttpClientConfig
 from kaos_web.clients.http import HttpClient
 from kaos_web.errors import (
+    BodyTooLargeError,
     WebClientError,
     WebNetworkError,
     WebRateLimitError,
@@ -228,6 +229,75 @@ class TestErrorMapping:
             f"Expected retry_after=30.0, got {exc_info.value.retry_after}"
         )
         assert exc_info.value.retryable is True, "Rate limit errors should be retryable"
+
+
+class TestMaxBodyBytes:
+    """WEB5-007: HttpClient enforces KaosWebSettings.max_body_bytes via
+    streamed requests with a running tally + Content-Length pre-check.
+
+    A hostile endpoint can stream gigabytes; without the cap, ``resp.text``
+    materializes the whole thing and OOMs.
+    """
+
+    async def test_pre_check_aborts_on_declared_oversize(
+        self, monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+    ) -> None:
+        # Cap to 1 KB; declare 2 KB via Content-Length.
+        monkeypatch.setenv("KAOS_WEB_MAX_BODY_BYTES", "1024")
+        httpx_mock.add_response(
+            url="https://oversize.example/",
+            status_code=200,
+            content=b"x" * 2048,
+            headers={"Content-Length": "2048"},
+        )
+
+        async with HttpClient(_NO_MIDDLEWARE) as client:
+            with pytest.raises(BodyTooLargeError) as exc:
+                await client.fetch(WebRequest(url="https://oversize.example/"))
+        assert exc.value.size_bytes == 2048
+        assert exc.value.max_bytes == 1024
+        assert "Content-Length" in str(exc.value)
+
+    async def test_streamed_accumulation_aborts_when_exceeded(
+        self, monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+    ) -> None:
+        # No Content-Length declared; raw body is over cap.
+        monkeypatch.setenv("KAOS_WEB_MAX_BODY_BYTES", "1024")
+        httpx_mock.add_response(
+            url="https://stream-bomb.example/",
+            status_code=200,
+            content=b"x" * 4096,
+            # no Content-Length header
+        )
+
+        async with HttpClient(_NO_MIDDLEWARE) as client:
+            with pytest.raises(BodyTooLargeError) as exc:
+                await client.fetch(WebRequest(url="https://stream-bomb.example/"))
+        assert exc.value.size_bytes is not None
+        assert exc.value.size_bytes > 1024
+        assert exc.value.max_bytes == 1024
+
+    async def test_under_cap_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch, httpx_mock: HTTPXMock
+    ) -> None:
+        monkeypatch.setenv("KAOS_WEB_MAX_BODY_BYTES", "8192")
+        httpx_mock.add_response(
+            url="https://small.example/",
+            status_code=200,
+            content=b"<html><body>tiny</body></html>",
+        )
+        async with HttpClient(_NO_MIDDLEWARE) as client:
+            resp = await client.fetch(WebRequest(url="https://small.example/"))
+        assert resp.status_code == 200
+        assert "tiny" in resp.html
+
+    async def test_default_cap_is_50mb(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Default 50 MB doesn't trip on normal pages — sanity check the
+        # default value, not behavior. Settings test mirror.
+        monkeypatch.delenv("KAOS_WEB_MAX_BODY_BYTES", raising=False)
+        from kaos_web.settings import KaosWebSettings
+
+        assert KaosWebSettings().max_body_bytes == 50_000_000
 
 
 class TestContextManager:

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Response-body size cap enforced at every fetch site** (WEB5-007).
+  New `KaosWebSettings.max_body_bytes` (env: `KAOS_WEB_MAX_BODY_BYTES`,
+  default 50 MB) bounds memory usage on hostile or misconfigured
+  endpoints. Enforced at three sites:
+  - `HttpClient._raw_fetch` switched to `client.stream() +
+    aiter_bytes()` with a pre-check on the declared `Content-Length`
+    header and a running tally over the streamed bytes. Aborts with
+    `BodyTooLargeError` before materialization.
+  - `BrowserClient.fetch` post-checks `len(page.content())` (Playwright
+    has no streaming variant) — protects downstream parsers and
+    artifact storage from operating on absurd strings.
+  - `kaos_web.discover.sitemap._decompress_gzip` switched to
+    `gzip.GzipFile.read(max_bytes + 1)` (gzip-bomb protection — a
+    small gzipped payload can decompress to gigabytes; bounded read
+    is the only memory-safe pattern).
+  New `BodyTooLargeError(WebError)` carries `size_bytes`,
+  `max_bytes`, and an agent-friendly recovery hint pointing at the
+  env var.
+
 - **URL filter regexes now use the Rust regex engine when available**
   (WEB5-008). `kaos_web.discover.discovery._compile_patterns` previously
   built `re.compile(...)` patterns from caller-supplied include /

@@ -20,7 +20,12 @@ from typing import Any, Never, Self
 
 from kaos_core.logging import get_logger
 from kaos_web.clients.config import BrowserClientConfig
-from kaos_web.errors import WebBrowserError, WebNetworkError, WebTimeoutError
+from kaos_web.errors import (
+    BodyTooLargeError,
+    WebBrowserError,
+    WebNetworkError,
+    WebTimeoutError,
+)
 from kaos_web.models import WebRequest, WebResponse
 
 logger = get_logger(__name__)
@@ -244,8 +249,9 @@ class BrowserClient:
                     except Exception as exc:
                         _raise_browser_error(exc, request.url, "wait_for_selector")
 
-                # Extract content
+                # Extract content (cap-checked per WEB5-007).
                 html = await page.content()
+                _check_body_cap(html, request.url)
                 title = await page.title()
 
                 # Screenshot if requested
@@ -817,6 +823,42 @@ class BrowserClient:
     def active_contexts(self) -> list[str]:
         """List of context IDs with active pages."""
         return list(self._pages.keys())
+
+
+def _check_body_cap(html: str, url: str) -> None:
+    """Raise BodyTooLargeError if rendered HTML exceeds the configured cap.
+
+    Playwright's ``page.content()`` materializes the full DOM HTML as a
+    Python string, so by the time we measure it we've already paid the
+    memory cost. The check still defends downstream parsers and
+    serializers from running on a 5 GB string. WEB5-007 / audit-04
+    finding #7.
+
+    A streaming variant is not available in Playwright; the next-best
+    defense (request-level Content-Length or chunked-byte cap) lives in
+    ``HttpClient`` for the non-browser path. For browser fetches, the
+    cap is purely a post-render guard.
+    """
+    from kaos_web.settings import KaosWebSettings
+
+    cap = KaosWebSettings().max_body_bytes
+    # Approximate byte size as 4x character count (UTF-8 worst case for
+    # non-ASCII). Cheap upper bound; if we're under the cap on this
+    # estimate we're definitely safe. If we're over, do the precise
+    # encoded-length check before raising.
+    approx = len(html) * 4
+    if approx <= cap:
+        return
+    actual = len(html.encode("utf-8", errors="replace"))
+    if actual > cap:
+        raise BodyTooLargeError(
+            f"Browser-rendered HTML for {url} is {actual} bytes (cap: "
+            f"{cap}). Increase KAOS_WEB_MAX_BODY_BYTES if you intend "
+            f"to fetch payloads of this size.",
+            url=url,
+            size_bytes=actual,
+            max_bytes=cap,
+        )
 
 
 def _raise_browser_error(exc: Exception, url: str, operation: str = "navigation") -> Never:
