@@ -5,41 +5,59 @@ build-backend = "hatchling.build"
 [project]
 name = "kaos-web"
 dynamic = ["version"]
-description = "Web content extraction for KAOS — HTML to ContentDocument AST with provenance"
+description = "Web extraction, browser automation, search, and domain intelligence for KAOS"
 readme = "README.md"
 requires-python = ">=3.13"
-license = { text = "LicenseRef-Proprietary" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [
   { name = "273 Ventures LLC", email = "it@273ventures.com" },
+]
+maintainers = [
+  { name = "Michael Bommarito", email = "mike@273ventures.com" },
+]
+keywords = [
+  "mcp",
+  "web-extraction",
+  "playwright",
+  "domain-intelligence",
+  "kaos",
+  "agentic",
+  "html",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: Implementation :: CPython",
+  "Topic :: Internet :: WWW/HTTP :: Browsers",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
   "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Text Processing :: Markup :: HTML",
   "Typing :: Typed",
 ]
 dependencies = [
-  "kaos-content>=0.1.0",
-  "kaos-core>=0.1.0",
+  # PEP 440: pin to alpha because 0.1.0aN sorts BEFORE 0.1.0; >=0.1.0
+  # would EXCLUDE the only published versions of these siblings.
+  "kaos-content>=0.1.0a2,<0.2",
+  "kaos-core>=0.1.0a4,<0.2",
   "httpx[http2]>=0.28.0",
   "lxml>=5.0.0",
 ]
 
-[project.scripts]
-kaos-web = "kaos_web.cli:main"
-kaos-web-serve = "kaos_web.serve:main"
-
 [project.optional-dependencies]
 browser = ["playwright>=1.50.0"]
 dns = ["dnspython>=2.6.0"]
-mcp = ["kaos-mcp>=0.1.0"]
-nlp = ["kaos-nlp-core>=0.1.0"]
+mcp = ["kaos-mcp>=0.1.0a2,<0.2"]
+nlp = ["kaos-nlp-core>=0.1.0a2,<0.2"]
 
 [dependency-groups]
+# ty is pre-1.0 and changes inference between minor versions; pinning
+# to a tight range avoids surprise drift between dev environments and
+# CI. Bumps go through dependabot.
 dev = [
   "dnspython>=2.8.0",
   "kaos-mcp>=0.1.0",
@@ -50,14 +68,20 @@ dev = [
   "pytest-benchmark>=5.2.3",
   "pytest-cov>=6.0.0",
   "pytest-httpx>=0.36.0",
-  "ruff>=0.11.0",
-  "ty>=0.0.1a17",
+  "ruff>=0.15.12",
+  "ty>=0.0.34,<0.1",
 ]
 
+[project.scripts]
+kaos-web = "kaos_web.cli:main"
+kaos-web-serve = "kaos_web.serve:main"
+
 [project.urls]
-Homepage = "https://273ventures.com"
-Documentation = "https://docs.273ventures.com"
-Repository = "https://github.com/273v/kaos-modules"
+Homepage = "https://kelvin.legal"
+Documentation = "https://docs.kelvin.legal"
+Repository = "https://github.com/273v/kaos-web"
+Issues = "https://github.com/273v/kaos-web/issues"
+Changelog = "https://github.com/273v/kaos-web/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "kaos_web/_version.py"
@@ -66,8 +90,9 @@ path = "kaos_web/_version.py"
 include = [
   "/kaos_web",
   "/README.md",
-  "/CLAUDE.md",
-  "/docs",
+  "/CHANGELOG.md",
+  "/LICENSE",
+  "/NOTICE",
   "/tests",
 ]
 
