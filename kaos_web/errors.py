@@ -96,6 +96,28 @@ class WebBrowserError(WebError):
         super().__init__(message, url=url, retryable=retryable)
 
 
+class UrlPolicyError(WebError):
+    """A URL or host was blocked by the kaos-web URL policy gate.
+
+    Raised by ``kaos_web.security.validate_url`` /
+    ``kaos_web.security.validate_host`` (themselves wrapping
+    ``kaos_core.security.validate_outbound_url`` and the IP-range
+    primitives) before any network I/O. The message includes the
+    specific policy field that triggered the rejection plus the env
+    var the operator can flip to relax it.
+
+    Threat model (WEB5-001): a misconfigured caller — especially an
+    HTTP-mode MCP server fronting multiple agents — must not be able
+    to reach link-local cloud-metadata services
+    (``169.254.169.254``), loopback, RFC1918 private networks, or
+    block-listed schemes (``file://``, ``javascript:``). Strict by
+    default; operators relax via ``KAOS_SECURITY_*`` env vars.
+    """
+
+    def __init__(self, message: str, *, url: str = "") -> None:
+        super().__init__(message, url=url, retryable=False)
+
+
 class BodyTooLargeError(WebError):
     """Response body exceeded the configured ``KAOS_WEB_MAX_BODY_BYTES`` cap.
 

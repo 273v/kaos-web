@@ -244,20 +244,22 @@ class TestProbeDns:
         assert transport.closed is True
 
     async def test_timeout(self) -> None:
+        # WEB5-001: hostname avoids the SSRF gate; the mocked endpoint
+        # is the side-effect under test.
         with _patch_datagram_endpoint(response_bytes=None):
-            r = await probe_dns("10.255.255.1", timeout=0.05)
+            r = await probe_dns("slow.example", timeout=0.05)
         assert r.status == UdpProbeStatus.TIMEOUT
         assert r.error is not None and "no response" in r.error
 
     async def test_icmp_unreachable(self) -> None:
         with _patch_datagram_endpoint(error=ConnectionRefusedError("port unreachable")):
-            r = await probe_dns("127.0.0.1", timeout=2.0)
+            r = await probe_dns("unreachable.example", timeout=2.0)
         assert r.status == UdpProbeStatus.ICMP_UNREACHABLE
         assert r.error is not None and "unreachable" in r.error
 
     async def test_local_oserror(self) -> None:
         with _patch_datagram_endpoint(factory_raises=OSError("address family not supported")):
-            r = await probe_dns("::1", timeout=1.0)
+            r = await probe_dns("ipv6-error.example", timeout=1.0)
         assert r.status == UdpProbeStatus.ERROR
         assert r.error is not None and "address family" in r.error
 
@@ -346,13 +348,14 @@ class TestProbeNtp:
         assert r.error is not None and "short response" in r.error
 
     async def test_timeout(self) -> None:
+        # WEB5-001: hostname avoids the SSRF gate.
         with _patch_datagram_endpoint(response_bytes=None):
-            r = await probe_ntp("10.255.255.1", timeout=0.05)
+            r = await probe_ntp("slow.example", timeout=0.05)
         assert r.status == UdpProbeStatus.TIMEOUT
 
     async def test_icmp_unreachable(self) -> None:
         with _patch_datagram_endpoint(error=ConnectionRefusedError("port unreachable")):
-            r = await probe_ntp("127.0.0.1", timeout=1.0)
+            r = await probe_ntp("unreachable.example", timeout=1.0)
         assert r.status == UdpProbeStatus.ICMP_UNREACHABLE
 
     async def test_oserror(self) -> None:
@@ -444,13 +447,14 @@ class TestProbeSnmp:
         assert r.extra["community"] == "private"
 
     async def test_timeout(self) -> None:
+        # WEB5-001: hostname avoids the SSRF gate.
         with _patch_datagram_endpoint(response_bytes=None):
-            r = await probe_snmp("10.255.255.1", timeout=0.05)
+            r = await probe_snmp("slow.example", timeout=0.05)
         assert r.status == UdpProbeStatus.TIMEOUT
 
     async def test_icmp_unreachable(self) -> None:
         with _patch_datagram_endpoint(error=ConnectionRefusedError("unreachable")):
-            r = await probe_snmp("127.0.0.1", timeout=1.0)
+            r = await probe_snmp("unreachable.example", timeout=1.0)
         assert r.status == UdpProbeStatus.ICMP_UNREACHABLE
 
     async def test_oserror(self) -> None:
@@ -474,8 +478,9 @@ class TestProbeSyslog:
         assert transport.sent[0].startswith(b"<14>")
 
     async def test_icmp_unreachable_when_kernel_signals(self) -> None:
+        # WEB5-001: hostname avoids the SSRF gate.
         with _patch_datagram_endpoint(error=ConnectionRefusedError("unreachable")):
-            r = await probe_syslog("127.0.0.1", timeout=0.5)
+            r = await probe_syslog("unreachable.example", timeout=0.5)
         assert r.status == UdpProbeStatus.ICMP_UNREACHABLE
 
     async def test_oserror(self) -> None:
@@ -541,3 +546,23 @@ class TestBerEncoders:
 
         with pytest.raises(ValueError):
             _ber_oid("1")
+
+
+# --- WEB5-001: SSRF gate wired into UDP probes ---
+
+
+@pytest.mark.asyncio
+class TestUrlPolicyGate:
+    """Regression: ``probe_dns`` (and the other UDP probes that share the
+    same gate) MUST refuse a private/loopback/metadata IP literal
+    BEFORE constructing the datagram endpoint.
+    """
+
+    async def test_probe_dns_blocks_private_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kaos_web.domain.udp import probe_dns
+        from kaos_web.errors import UrlPolicyError
+
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        with pytest.raises(UrlPolicyError) as info:
+            await probe_dns("10.0.0.1", 53)
+        assert "KAOS_SECURITY_" in str(info.value)

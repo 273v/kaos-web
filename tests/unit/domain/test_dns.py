@@ -530,3 +530,26 @@ class TestAttemptZoneTransfer:
             result = await attempt_zone_transfer("example.com", "ns1.example.com", timeout=1.0)
         assert called.get("fn") is not None
         assert result.status is ZoneTransferStatus.FAILED
+
+
+# --- WEB5-001: SSRF gate wired into DNS lookup ---
+
+
+@pytest.mark.asyncio
+class TestUrlPolicyGate:
+    """Regression: ``lookup`` MUST refuse a private/loopback/metadata IP
+    literal BEFORE configuring the resolver. Hostname inputs (the
+    typical case) pass through; the gate only fires on IP literals,
+    where it catches policy violations like
+    ``lookup("169.254.169.254", "A")``.
+    """
+
+    async def test_lookup_blocks_ip_literal_in_private_range(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kaos_web.errors import UrlPolicyError
+
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        with pytest.raises(UrlPolicyError) as info:
+            await lookup("10.0.0.1", "A")
+        assert "KAOS_SECURITY_" in str(info.value)

@@ -160,3 +160,27 @@ class TestBrowserClientBodyCap:
         monkeypatch.setenv("KAOS_WEB_MAX_BODY_BYTES", "1000000")
         # 100 KB string — fast path fires (100k * 4 = 400k <= 1M).
         _check_body_cap("y" * 100_000, "https://x")
+
+
+# --- WEB5-001: SSRF gate wired into BrowserClient.fetch ---
+
+
+class TestUrlPolicyGate:
+    """Regression: ``BrowserClient.fetch`` MUST refuse a private/loopback/
+    metadata target BEFORE launching a context (the gate fires before
+    ``_ensure_browser`` so no real browser is needed for this test).
+    The autouse Playwright-launch blocker in ``conftest.py`` would
+    raise an AssertionError if the gate let the request through.
+    """
+
+    async def test_fetch_url_policy_blocks_private_network(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kaos_web.clients.browser import BrowserClient
+        from kaos_web.errors import UrlPolicyError
+
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        client = BrowserClient()
+        with pytest.raises(UrlPolicyError) as info:
+            await client.fetch(WebRequest(url="http://10.0.0.1/"))
+        assert "KAOS_SECURITY_" in str(info.value)

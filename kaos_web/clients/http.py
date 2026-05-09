@@ -175,11 +175,20 @@ class HttpClient:
         (WEB5-007 / audit-04 finding #7) — pre-checks ``Content-Length`` then
         accumulates chunked bytes with a running tally. Aborts with
         ``BodyTooLargeError`` before materializing an oversized body.
+
+        WEB5-001: gate the outbound URL through ``validate_url`` BEFORE
+        any socket I/O. Strict by default — blocks link-local metadata,
+        loopback, RFC1918 private ranges, and non-(http|https) schemes.
+        Note: ``follow_redirects=True`` only validates the original URL;
+        the redirect target is NOT re-validated (httpx auto-follows
+        without a per-hop hook). Closing this gap requires a connect-
+        time hook on the HTTP client (kaos-core follow-up).
         """
+        from kaos_web.security import validate_url
         from kaos_web.settings import KaosWebSettings
 
         max_body_bytes = KaosWebSettings().max_body_bytes
-        url = request.url
+        url = validate_url(request.url)
         headers = {**request.headers} if request.headers else {}
 
         try:

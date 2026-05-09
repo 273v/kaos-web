@@ -166,7 +166,15 @@ async def analyze_headers(
         secure GET. For trusted-endpoint GETs use ``HttpClient`` /
         ``kaos-web-fetch-page``; those paths keep TLS verification on
         unconditionally.
+
+    WEB5-001: gates the URL through ``validate_url`` BEFORE the HEAD
+    request is dispatched. Strict by default — blocks link-local
+    metadata, loopback, RFC1918 private ranges, and non-(http|https)
+    schemes.
     """
+    from kaos_web.security import validate_url
+
+    validate_url(url)
     try:
         async with httpx.AsyncClient(
             timeout=timeout,

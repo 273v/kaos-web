@@ -149,7 +149,10 @@ class TestProbeBannerErrors:
             raise TimeoutError()
 
         with patch("asyncio.open_connection", side_effect=_slow):
-            r = await probe_banner("10.255.255.1", 22, timeout=0.05)
+            # WEB5-001: use a hostname (not a private IP literal) so the
+            # SSRF gate doesn't fire. The mocked open_connection is the
+            # side-effect under test.
+            r = await probe_banner("slow.example", 22, timeout=0.05)
         assert r.status == PortStatus.TIMEOUT
         assert r.error == "connect timeout"
         assert r.banner is None
@@ -176,20 +179,22 @@ class TestProbeBannerErrors:
 
     async def test_connection_refused(self) -> None:
         with patch("asyncio.open_connection", side_effect=ConnectionRefusedError()):
-            r = await probe_banner("127.0.0.1", 1, timeout=1.0)
+            # Hostname avoids the WEB5-001 SSRF gate; the mock is the
+            # actual side-effect under test.
+            r = await probe_banner("refused.example", 1, timeout=1.0)
         assert r.status == PortStatus.CLOSED
         # Some platforms supply no message — accept either
         assert r.error is not None
 
     async def test_connection_reset(self) -> None:
         with patch("asyncio.open_connection", side_effect=ConnectionResetError("RST")):
-            r = await probe_banner("127.0.0.1", 22, timeout=1.0)
+            r = await probe_banner("reset.example", 22, timeout=1.0)
         assert r.status == PortStatus.CLOSED
         assert r.error == "RST"
 
     async def test_oserror_filtered(self) -> None:
         with patch("asyncio.open_connection", side_effect=OSError("no route to host")):
-            r = await probe_banner("0.0.0.0", 22, timeout=1.0)
+            r = await probe_banner("filtered.example", 22, timeout=1.0)
         assert r.status == PortStatus.FILTERED
         assert r.error is not None and "no route to host" in r.error
 

@@ -425,3 +425,14 @@ class TestWhoisLookup:
         with patch("kaos_web.domain.whois._raw_whois_query", side_effect=_fake_query):
             await whois_lookup("EXAMPLE.COM.", follow_referrals=False)
         assert captured[0] == "example.com"
+
+    async def test_url_policy_blocks_private_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """WEB5-001: ``whois_lookup`` MUST refuse a private-IP literal
+        (treats domain string as host) BEFORE opening a TCP socket.
+        """
+        from kaos_web.errors import UrlPolicyError
+
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        with pytest.raises(UrlPolicyError) as info:
+            await whois_lookup("10.0.0.1")
+        assert "KAOS_SECURITY_" in str(info.value)

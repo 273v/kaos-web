@@ -311,3 +311,25 @@ class TestContextManager:
 
         # After exiting context, the underlying client should be closed
         assert client._client.is_closed, "Client should be closed after context manager exit"
+
+
+# --- WEB5-001: SSRF gate wired into HttpClient._raw_fetch ---
+
+
+class TestUrlPolicyGate:
+    """Regression: ``HttpClient._raw_fetch`` MUST refuse a private/loopback/
+    metadata target even when the underlying httpx mock would happily
+    answer. Proves the WEB5-001 wiring fires before any socket I/O.
+    """
+
+    async def test_url_policy_blocks_private_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kaos_web.errors import UrlPolicyError
+
+        # Strict-default policy is on by default; setting it explicitly
+        # makes the test robust against env contamination from other tests.
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        async with HttpClient(_NO_MIDDLEWARE) as client:
+            with pytest.raises(UrlPolicyError) as info:
+                await client.fetch(WebRequest(url="http://10.0.0.1/"))
+        # Recovery hint must point the operator at the env var.
+        assert "KAOS_SECURITY_" in str(info.value)

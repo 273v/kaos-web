@@ -241,3 +241,15 @@ class TestInspectTls:
             info = await inspect_tls("example.com", 443, timeout=1.0)
         assert info.host == "example.com"
         assert info.subject["commonName"] == "www.example.org"
+
+    async def test_url_policy_blocks_private_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """WEB5-001: ``inspect_tls`` MUST refuse a private-IP target
+        BEFORE the TLS handshake. Gate fires before
+        ``asyncio.to_thread``, so no socket / SSL mock is needed.
+        """
+        from kaos_web.errors import UrlPolicyError
+
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        with pytest.raises(UrlPolicyError) as info:
+            await inspect_tls("10.0.0.1", 443)
+        assert "KAOS_SECURITY_" in str(info.value)

@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **SSRF gate at every outbound URL/host site** (WEB5-001). Wires
+  ``kaos_core.security.validate_outbound_url`` (and the host-only
+  ``is_loopback`` / ``is_private_ip`` / ``is_metadata_service``
+  primitives) into every kaos-web fetch site so a misconfigured
+  caller — especially the HTTP-mode MCP server fronting multiple
+  agents — cannot reach link-local cloud-metadata services
+  (``169.254.169.254``), loopback, RFC1918 private networks, or
+  block-listed schemes (``file://``, ``javascript:``, ``data:``,
+  ``vbscript:``). New ``kaos_web.security`` module exposes
+  ``validate_url(url)`` and ``validate_host(host)`` thin wrappers
+  that translate ``UnsafeURLError`` into a new
+  ``UrlPolicyError(WebError)`` whose message includes the specific
+  policy field that fired plus the env var the operator can flip to
+  relax it. **Strict by default**: blocks private/loopback/metadata
+  and limits schemes to ``http``/``https``. Operators relax via
+  ``KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS=0`` /
+  ``KAOS_SECURITY_BLOCK_LOOPBACK=0`` /
+  ``KAOS_SECURITY_BLOCK_METADATA_SERVICES=0`` /
+  ``KAOS_SECURITY_ALLOWED_HOSTS=["host","10.0.0.0/24",".example.com"]``.
+  Sites wired (4 URL gates + 12 host gates):
+  - URL: ``HttpClient._raw_fetch``, ``BrowserClient.fetch`` /
+    ``screenshot`` / ``evaluate``, ``analyze_headers``,
+    ``ExtractOrgTool.execute``.
+  - Host: ``probe_port`` / ``probe_ports`` / ``probe_banner`` /
+    ``probe_banners``, ``inspect_tls``, ``probe_dns`` / ``probe_ntp``
+    / ``probe_snmp`` / ``probe_syslog``, ``whois_lookup``, ``lookup``
+    / ``lookup_many`` / ``enumerate_dns`` / ``attempt_zone_transfer``
+    / ``reverse_ptr``.
+  Known gap: ``follow_redirects=True`` on httpx only validates the
+  original URL — the redirect target is not re-validated. Closing
+  this requires a connect-time hook on the HTTP client (kaos-core
+  follow-up). Hostname-only inputs (most DNS / WHOIS use cases)
+  pass through; the gate fires on IP literals where the policy
+  classification is unambiguous.
+
 - **Browser contexts are now session-scoped** (WEB5-002). Every entry
   in ``BrowserClient._contexts`` / ``_pages`` / ``_request_logs`` /
   ``_response_bodies`` / ``_logging_config`` is keyed by the tuple

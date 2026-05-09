@@ -734,6 +734,8 @@ class ExtractOrgTool(KaosTool):
     async def execute(
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
+        from kaos_web.errors import UrlPolicyError
+        from kaos_web.security import validate_url
         from kaos_web.settings import KaosWebSettings
 
         url = inputs.get("url", "")
@@ -741,6 +743,12 @@ class ExtractOrgTool(KaosTool):
             return ToolResult.create_error(
                 "Parameter 'url' is required (e.g. 'https://273ventures.com')."
             )
+
+        # WEB5-001: gate the URL before issuing the httpx request.
+        try:
+            validate_url(url)
+        except UrlPolicyError as exc:
+            return ToolResult.create_error(str(exc))
 
         import httpx
 

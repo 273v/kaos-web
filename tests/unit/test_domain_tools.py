@@ -612,6 +612,20 @@ class TestExtractOrgExecute:
         result = await ExtractOrgTool().execute({"url": "https://broken.example/"})
         assert _is_error(result)
 
+    async def test_url_policy_blocks_private_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """WEB5-001: ``ExtractOrgTool.execute`` MUST refuse a private-IP
+        target — translates ``UrlPolicyError`` into a ``ToolResult.create_error``
+        with the recovery message embedded (vs. a stack trace).
+        """
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        result = await ExtractOrgTool().execute({"url": "http://10.0.0.1/"})
+        assert _is_error(result)
+        # Recovery hint must be in the error TextContent for the agent.
+        # The result.content[0] is always a TextContent for create_error.
+        first = result.content[0] if result.content else None
+        text = getattr(first, "text", "") if first is not None else ""
+        assert "KAOS_SECURITY_" in text
+
 
 # ── TcpBannerTool ──────────────────────────────────────────────────
 

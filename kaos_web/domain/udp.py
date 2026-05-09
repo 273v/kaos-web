@@ -207,7 +207,15 @@ async def probe_dns(
     Returns:
         UdpProbeResult with status RESPONDED on success, TIMEOUT if no
         response within ``timeout``, ERROR on local socket errors.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (private/loopback/
+        metadata host, when the input is an IP literal).
     """
+    # WEB5-001: gate the target host before sending the datagram.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     # Map type string → numeric rdtype for the fallback path
     rdtype_map = {"A": 1, "AAAA": 28, "TXT": 16, "MX": 15, "NS": 2, "SOA": 6}
     rdclass_chaos = 3
@@ -341,7 +349,15 @@ async def probe_ntp(
 
     Returns:
         UdpProbeResult with stratum / refid / poll in ``extra`` on success.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (private/loopback/
+        metadata host, when the input is an IP literal).
     """
+    # WEB5-001: gate the target host before sending the datagram.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     try:
         protocol, duration_ms = await _send_and_wait(
             host, port, _NTP_CLIENT_PACKET, timeout=timeout
@@ -580,7 +596,15 @@ async def probe_snmp(
     Returns:
         UdpProbeResult with the sysDescr OctetString in ``payload`` on
         success.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (private/loopback/
+        metadata host, when the input is an IP literal).
     """
+    # WEB5-001: gate the target host before sending the datagram.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     import secrets
 
     request_id = secrets.randbits(31) + 1
@@ -658,7 +682,15 @@ async def probe_syslog(
         UdpProbeResult with status SENT_NO_RESPONSE_EXPECTED on the happy
         path, ICMP_UNREACHABLE if the kernel surfaced one, ERROR on local
         socket errors.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (private/loopback/
+        metadata host, when the input is an IP literal).
     """
+    # WEB5-001: gate the target host before sending the datagram.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     payload = b"<14>kaos-web-probe"
     try:
         protocol, duration_ms = await _send_and_wait(host, port, payload, timeout=timeout)

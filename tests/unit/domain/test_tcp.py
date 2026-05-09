@@ -77,19 +77,25 @@ class TestProbePort:
             raise TimeoutError()
 
         with patch("asyncio.open_connection", side_effect=_slow):
-            r = await probe_port("10.255.255.1", 443, timeout=0.01)
+            # Use a hostname (not a private IP literal) so the WEB5-001
+            # SSRF gate doesn't fire — the mocked open_connection is
+            # already the side-effect under test.
+            r = await probe_port("slow.example", 443, timeout=0.01)
         assert r.status == PortStatus.TIMEOUT
         assert r.latency_ms is not None
 
     async def test_refused(self) -> None:
+        # Use a hostname (not a private IP literal) so the WEB5-001 SSRF
+        # gate doesn't fire — the mocked open_connection captures the
+        # actual side-effect under test.
         with patch("asyncio.open_connection", side_effect=ConnectionRefusedError()):
-            r = await probe_port("127.0.0.1", 1, timeout=1.0)
+            r = await probe_port("refused.example", 1, timeout=1.0)
         assert r.status == PortStatus.CLOSED
         assert r.latency_ms is not None
 
     async def test_oserror(self) -> None:
         with patch("asyncio.open_connection", side_effect=OSError("network unreachable")):
-            r = await probe_port("0.0.0.0", 80, timeout=1.0)
+            r = await probe_port("unreachable.example", 80, timeout=1.0)
         assert r.status == PortStatus.ERROR
         assert r.error is not None
         assert "network unreachable" in r.error
@@ -143,3 +149,20 @@ class TestProbePorts:
         assert t.open_count == 1
         assert t.closed_count == 1
         assert t.timeout_count == 1
+
+
+@pytest.mark.asyncio
+class TestUrlPolicyGate:
+    """Regression: WEB5-001 — TCP probes MUST refuse a private/loopback/
+    metadata IP literal BEFORE opening a socket. We patch
+    ``asyncio.open_connection`` to a never-call sentinel so the test
+    fails loudly if the gate is ever silently removed.
+    """
+
+    async def test_probe_port_blocks_private_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kaos_web.errors import UrlPolicyError
+
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        with pytest.raises(UrlPolicyError) as info:
+            await probe_port("10.0.0.1", 80, timeout=0.1)
+        assert "KAOS_SECURITY_" in str(info.value)

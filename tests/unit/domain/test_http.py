@@ -219,3 +219,15 @@ class TestAnalyzeHeaders:
         )
         result = await analyze_headers("https://self-signed.example.invalid/", verify_tls=False)
         assert result.status_code == 200
+
+    async def test_url_policy_blocks_private_network(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """WEB5-001: ``analyze_headers`` MUST refuse a private-IP target
+        BEFORE the HEAD request hits the wire. The gate fires before
+        ``httpx.AsyncClient`` is constructed, so no mock is needed.
+        """
+        from kaos_web.errors import UrlPolicyError
+
+        monkeypatch.setenv("KAOS_SECURITY_BLOCK_PRIVATE_NETWORKS", "1")
+        with pytest.raises(UrlPolicyError) as info:
+            await analyze_headers("http://10.0.0.1/")
+        assert "KAOS_SECURITY_" in str(info.value)

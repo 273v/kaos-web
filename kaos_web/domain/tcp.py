@@ -61,6 +61,14 @@ async def probe_port(
     Returns:
         PortResult with status and latency.
     """
+    # WEB5-001: gate the target host BEFORE opening the socket. Strict
+    # by default — blocks link-local metadata, loopback, RFC1918
+    # private ranges (when the host is an IP literal). Hostname-only
+    # inputs that don't parse as IP literals fall through to the actual
+    # connect; closing that gap requires connect-time DNS interception.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     start = time.perf_counter()
     banner: str | None = None
 
@@ -141,6 +149,13 @@ async def probe_ports(
     Returns:
         TcpProbeResult with per-port results.
     """
+    # WEB5-001: gate once at the front of the fan-out (probe_port also
+    # gates per-call but doing it here too short-circuits the whole
+    # batch on policy rejection rather than spawning tasks that all
+    # raise the same UrlPolicyError).
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     if ports is None:
         preset_name = preset or "default"
         ports = COMMON_PORTS.get(preset_name, COMMON_PORTS["default"])
@@ -203,7 +218,16 @@ async def probe_banner(
         connection errors. ``status`` is OPEN on successful read,
         CLOSED on RST/refused, TIMEOUT on connect or read timeout,
         FILTERED on ``OSError`` that suggests a firewall.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (private/loopback/
+        metadata host, when the input is an IP literal). Other
+        connection errors produce a value, not an exception.
     """
+    # WEB5-001: gate the target host before opening the socket.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     start = time.perf_counter()
     writer = None
 
@@ -333,6 +357,12 @@ async def probe_banners(
     Returns:
         List of BannerProbeResult in the same order as ``ports``.
     """
+    # WEB5-001: gate once at the front of the fan-out — probe_banner
+    # also gates per-call, but short-circuiting here avoids spawning
+    # N tasks that all raise the same UrlPolicyError.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     semaphore = asyncio.Semaphore(concurrency)
 
     async def _limited(p: int) -> BannerProbeResult:

@@ -133,7 +133,17 @@ async def inspect_tls(
 
     Returns:
         TlsCertInfo with certificate details or error.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (private/loopback/
+        metadata host, when the input is an IP literal). Network /
+        TLS errors are returned as a TlsCertInfo with ``error`` set,
+        not raised.
     """
+    # WEB5-001: gate the target host before launching the thread.
+    from kaos_web.security import validate_host
+
+    validate_host(host)
     return await asyncio.to_thread(_extract_cert_info, host, port, timeout=timeout)
 
 

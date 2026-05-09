@@ -262,6 +262,12 @@ class BrowserClient:
         - ``wait_for_selector``: CSS selector to wait for after navigation
         - ``dismiss_overlays``: Auto-dismiss known cookie consent banners
         """
+        # WEB5-001: gate the navigation URL BEFORE launching the browser
+        # context. Strict by default — blocks link-local metadata,
+        # loopback, RFC1918 private ranges, and non-(http|https) schemes.
+        from kaos_web.security import validate_url
+
+        validate_url(request.url)
         browser = await self._ensure_browser()
         context_id = request.extra.get("context_id")
         session_id = request.extra.get("session_id", ANONYMOUS_SESSION_ID)
@@ -586,6 +592,10 @@ class BrowserClient:
         quality: int | None = None,
     ) -> bytes:
         """Take a screenshot of a URL. Returns PNG or JPEG bytes."""
+        # WEB5-001: gate the URL before any browser I/O.
+        from kaos_web.security import validate_url
+
+        validate_url(url)
         browser = await self._ensure_browser()
         cfg = self._config
 
@@ -612,6 +622,10 @@ class BrowserClient:
 
     async def evaluate(self, url: str, expression: str) -> Any:
         """Navigate to URL and evaluate a JavaScript expression."""
+        # WEB5-001: gate the URL before any browser I/O.
+        from kaos_web.security import validate_url
+
+        validate_url(url)
         browser = await self._ensure_browser()
 
         context = await browser.new_context()

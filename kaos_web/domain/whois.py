@@ -337,7 +337,20 @@ async def whois_lookup(
 
     Returns:
         WhoisRecord with parsed registration data.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (when ``domain`` parses
+        as a private/loopback/metadata IP literal). Network and TCP
+        errors are returned as a WhoisRecord with ``error`` set, not
+        raised.
     """
+    # WEB5-001: gate the target before opening the WHOIS TCP socket.
+    # Treats the domain string as a host — for IP literals this catches
+    # link-local metadata / loopback / RFC1918 routing; hostname-only
+    # inputs fall through to the TCP connect.
+    from kaos_web.security import validate_host
+
+    validate_host(domain)
     domain = domain.strip().lower().rstrip(".")
     server = _get_whois_server(domain)
 

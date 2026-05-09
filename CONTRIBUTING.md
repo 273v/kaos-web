@@ -91,6 +91,15 @@ Before requesting review, confirm:
   context isolation, response size caps, TLS-verification toggles, and
   WHOIS/DNS parsing must test both accepted and rejected cases with
   realistic inputs.
+- **Any new outbound fetch site** (HTTP, browser, raw socket, datagram
+  endpoint, …) MUST call `kaos_web.security.validate_url(url)` (or
+  `validate_host(host)` for host-only inputs) at the boundary BEFORE
+  any I/O, and ship a regression test that proves the gate fires for
+  a private-IP target. The gate is the single defence against a
+  misconfigured caller (typically the HTTP-mode MCP server fronting
+  multiple agents) reaching cloud metadata, loopback, or RFC1918
+  internal hosts. See `kaos_web/security.py` and the per-site
+  `TestUrlPolicyGate` regression classes for the wiring pattern.
 - Tests that hit live network must be marked `integration`, `network`,
   or `live` so CI's unit gate (`-m "not live and not network and not
   slow"`) does not collect them.

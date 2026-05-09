@@ -265,7 +265,21 @@ async def lookup(
 
     Returns:
         DnsQueryResult with records or error status.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection. Asymmetric: the typical
+        input is a hostname (which is what's being resolved) — the
+        ``validate_host`` IP-literal check only fires when ``domain`` is
+        an IP literal like ``"169.254.169.254"`` (which would actually
+        be a reverse-PTR-style query, not a forward A lookup, but also
+        a clear policy violation we want to block). Hostname-only
+        inputs fall through to the resolver.
     """
+    # WEB5-001: gate the query target. Pass-through for hostnames;
+    # rejects IP-literal queries that hit private/loopback/metadata.
+    from kaos_web.security import validate_host
+
+    validate_host(domain)
     import dns.asyncresolver
     import dns.exception
     import dns.flags
@@ -364,7 +378,18 @@ async def lookup_many(
 
     Returns:
         List of DnsQueryResult, one per record type.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (when ``domain`` is an
+        IP literal in a private/loopback/metadata range). Hostname-only
+        inputs fall through; see :func:`lookup` for the asymmetry note.
     """
+    # WEB5-001: gate once at the front of the fan-out — lookup() also
+    # gates per-call but short-circuiting here avoids spawning N tasks
+    # that all raise the same UrlPolicyError.
+    from kaos_web.security import validate_host
+
+    validate_host(domain)
     sem = asyncio.Semaphore(concurrency)
 
     async def _limited(rt: str) -> DnsQueryResult:
@@ -386,7 +411,16 @@ async def reverse_ptr(
 
     Returns:
         DnsRecord with PTR value, or None if lookup fails.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection. ``ip_address`` is
+        always an IP literal here (it's a reverse PTR), so the gate
+        always fires when the input is private/loopback/metadata.
     """
+    # WEB5-001: gate the IP literal before constructing the reverse name.
+    from kaos_web.security import validate_host
+
+    validate_host(ip_address)
     import dns.asyncresolver
     import dns.reversename
     from dns.resolver import NXDOMAIN, NoAnswer, NoNameservers
@@ -442,7 +476,16 @@ async def enumerate_dns(
 
     Returns:
         DnsProfile with all results.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (when ``domain`` is an
+        IP literal in a private/loopback/metadata range). See
+        :func:`lookup` for the hostname-vs-IP-literal asymmetry note.
     """
+    # WEB5-001: gate the query target before fan-out.
+    from kaos_web.security import validate_host
+
+    validate_host(domain)
     record_types = list(DEFAULT_RECORD_TYPES)
     if include_dnssec:
         record_types.extend(DNSSEC_RECORD_TYPES)
@@ -530,7 +573,17 @@ async def attempt_zone_transfer(
 
     Returns:
         ZoneTransferResult with status and optional record count.
+
+    Raises:
+        UrlPolicyError: WEB5-001 gate rejection (when ``domain`` or
+        ``nameserver`` is an IP literal in a private/loopback/metadata
+        range).
     """
+    # WEB5-001: gate both the zone target and the nameserver.
+    from kaos_web.security import validate_host
+
+    validate_host(domain)
+    validate_host(nameserver)
     import dns.name
     import dns.query
     import dns.rdatatype
