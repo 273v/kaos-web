@@ -70,6 +70,143 @@ class TestCacheHitMiss:
         assert len(calls) == 2
 
 
+class TestAuthHeaderBypass:
+    """WEB5-009: requests bearing auth-shaped headers must NEVER hit the
+    shared cache (no LOOKUP, no STORE).
+
+    The cache key is ``method:url`` only — without this bypass, an
+    authenticated request would either:
+      - return another caller's cached response (if the URL was cached
+        anonymously first), or
+      - poison the cache for subsequent anonymous callers (if cached
+        with auth-varied content).
+
+    The conservative fix: bypass cache entirely on any auth-shaped
+    header. Test every documented header name + assert no cross-leak.
+    """
+
+    async def test_request_with_authorization_bypasses_cache(self):
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        request = WebRequest(url="https://example.com", headers={"Authorization": "Bearer t1"})
+        await cache.process(request, handler)
+        await cache.process(request, handler)
+        # No cache → both calls hit handler
+        assert len(calls) == 2
+
+    async def test_request_with_cookie_bypasses_cache(self):
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        request = WebRequest(url="https://example.com", headers={"Cookie": "sid=abc"})
+        await cache.process(request, handler)
+        await cache.process(request, handler)
+        assert len(calls) == 2
+
+    async def test_request_with_x_api_key_bypasses_cache(self):
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        request = WebRequest(url="https://example.com", headers={"X-Api-Key": "k1"})
+        await cache.process(request, handler)
+        await cache.process(request, handler)
+        assert len(calls) == 2
+
+    async def test_request_with_x_auth_token_bypasses_cache(self):
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        request = WebRequest(url="https://example.com", headers={"X-Auth-Token": "t1"})
+        await cache.process(request, handler)
+        await cache.process(request, handler)
+        assert len(calls) == 2
+
+    async def test_request_with_x_csrf_token_bypasses_cache(self):
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        request = WebRequest(url="https://example.com", headers={"X-CSRF-Token": "c1"})
+        await cache.process(request, handler)
+        await cache.process(request, handler)
+        assert len(calls) == 2
+
+    async def test_request_with_proxy_authorization_bypasses_cache(self):
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        request = WebRequest(url="https://example.com", headers={"Proxy-Authorization": "Basic xx"})
+        await cache.process(request, handler)
+        await cache.process(request, handler)
+        assert len(calls) == 2
+
+    async def test_header_check_is_case_insensitive(self):
+        # AUTHORIZATION, authorization, Authorization should all bypass.
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        for variant in ("AUTHORIZATION", "authorization", "Authorization"):
+            req = WebRequest(url="https://example.com", headers={variant: "v"})
+            await cache.process(req, handler)
+        assert len(calls) == 3
+
+    async def test_no_cross_leak_between_callers(self):
+        """The actual exfil scenario the bypass is meant to prevent.
+
+        Caller A (anonymous) fetches /me → caches "guest" response.
+        Caller B (authenticated) fetches /me → MUST get a fresh fetch
+        (their bearer token), not Caller A's "guest" response.
+        """
+        guest_response = _make_response(url="https://example.com/me")
+        guest_response = WebResponse(
+            url="https://example.com/me", status_code=200, html='{"user":"guest"}'
+        )
+        auth_response = WebResponse(
+            url="https://example.com/me", status_code=200, html='{"user":"alice"}'
+        )
+
+        served: list[WebResponse] = []
+
+        async def handler(request: WebRequest) -> WebResponse:
+            if request.headers and any(h.lower() == "authorization" for h in request.headers):
+                served.append(auth_response)
+                return auth_response
+            served.append(guest_response)
+            return guest_response
+
+        cache = CacheMiddleware()
+        anon = WebRequest(url="https://example.com/me")
+        authd = WebRequest(url="https://example.com/me", headers={"Authorization": "Bearer alice"})
+
+        # Anon fetch — caches the guest response under URL key.
+        r1 = await cache.process(anon, handler)
+        assert r1.html == '{"user":"guest"}'
+
+        # Authenticated fetch must bypass cache and return alice's view,
+        # NOT the cached guest payload.
+        r2 = await cache.process(authd, handler)
+        assert r2.html == '{"user":"alice"}'
+        assert len(served) == 2  # both hit upstream
+
+    async def test_no_auth_header_uses_cache(self):
+        """Sanity: requests WITHOUT any auth header still benefit from the cache."""
+        calls: list = []
+        handler, calls = _make_handler(call_count=calls)
+        cache = CacheMiddleware()
+
+        request = WebRequest(url="https://example.com", headers={"User-Agent": "test"})
+        await cache.process(request, handler)
+        await cache.process(request, handler)
+        assert len(calls) == 1  # second call is a cache hit
+
+
 class TestCacheExpiration:
     async def test_ttl_expiration(self):
         import asyncio

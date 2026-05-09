@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **CacheMiddleware bypasses any request bearing auth-shaped headers**
+  (WEB5-009). Cache key is `method:url` only — without this gate, an
+  authenticated request would either return another caller's cached
+  anonymous response (read-leak) or poison the cache for subsequent
+  anonymous callers (write-leak). The bypass is conservative: if the
+  request includes any of `Authorization`, `Proxy-Authorization`,
+  `Cookie`, `X-API-Key`, `X-Auth-Token`, `X-CSRF-Token`
+  (case-insensitive), the cache is skipped entirely (no LOOKUP, no
+  STORE) and the request always hits upstream. Anonymous requests
+  still benefit from the cache normally.
+
 - **TLS verification on domain-intelligence probes now defaults to ON**
   (WEB5-006). The two probes that explicitly disable verification
   (`kaos-web-http-headers`, `kaos-web-extract-org`) previously

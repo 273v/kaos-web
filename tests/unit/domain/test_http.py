@@ -217,7 +217,5 @@ class TestAnalyzeHeaders:
             url="https://self-signed.example.invalid/",
             status_code=200,
         )
-        result = await analyze_headers(
-            "https://self-signed.example.invalid/", verify_tls=False
-        )
+        result = await analyze_headers("https://self-signed.example.invalid/", verify_tls=False)
         assert result.status_code == 200

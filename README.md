@@ -202,6 +202,11 @@ full disclosure policy.
 |---|---|---|
 | `KAOS_WEB_DOMAIN_VERIFY_TLS` | `true` | Verify TLS certs on the two domain-intelligence HTTP probes (`kaos-web-http-headers`, `kaos-web-extract-org`). Set `false` to inspect hosts whose cert is the *subject* of inspection (self-signed, expired, mismatched SAN). Content-extraction tools (`HttpClient` / `BrowserClient`) keep TLS verification on independently of this flag. |
 
+The `CacheMiddleware` automatically bypasses any request that carries
+`Authorization`, `Proxy-Authorization`, `Cookie`, `X-API-Key`,
+`X-Auth-Token`, or `X-CSRF-Token` headers, so authenticated responses
+cannot leak across callers via the shared cache.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

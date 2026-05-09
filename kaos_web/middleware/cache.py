@@ -29,6 +29,28 @@ _CACHEABLE_STATUS_CODES = frozenset({200, 203, 204, 206, 300, 301, 404, 405, 410
 # HTTP methods that are cacheable
 _CACHEABLE_METHODS = frozenset({"GET", "HEAD"})
 
+# WEB5-009: any request bearing one of these headers is treated as
+# auth-varied and bypasses the cache entirely (no LOOKUP, no STORE).
+# Comparison is case-insensitive on the header NAME — values aren't
+# inspected (a present-but-empty header still triggers bypass; cheaper
+# and more conservative than parsing).
+_AUTH_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+    }
+)
+
+
+def _has_auth_header(request: WebRequest) -> bool:
+    """Return True if the request carries any auth-shaped header."""
+    headers = request.headers or {}
+    return any(name.lower() in _AUTH_HEADER_NAMES for name in headers)
+
 
 class CacheConfig(BaseModel):
     """Cache middleware configuration."""
@@ -101,6 +123,17 @@ class CacheMiddleware:
 
         # Only cache GET/HEAD
         if request.method.upper() not in _CACHEABLE_METHODS:
+            return await next_handler(request)
+
+        # WEB5-009: requests carrying auth-shaped headers vary the
+        # response by caller and must NEVER hit the shared cache —
+        # neither LOOKUP (would return another caller's response) nor
+        # STORE (would later poison the same key for another caller).
+        # The conservative policy is to bypass cache entirely for any
+        # request whose headers include Authorization, Cookie,
+        # X-API-Key, X-Auth-Token, X-CSRF-Token, or Proxy-Authorization.
+        if _has_auth_header(request):
+            logger.debug("Cache BYPASS for %s — request carries auth-shaped headers", request.url)
             return await next_handler(request)
 
         key = self._cache_key(request)
