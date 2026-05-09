@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Browser interaction tools now declare `destructiveHint=True`**
+  (WEB5-005). Click / fill / type / press / select / evaluate run
+  inside an authenticated browser session and CAN trigger real actions
+  (form submit, settings change, JS-driven side effects). The prior
+  shared `_BROWSER_WRITE_ANNOTATIONS` annotation said
+  `destructiveHint=False` for all of them, which weakened any MCP
+  client that gates auto-approval on the annotation. Split into
+  `_BROWSER_INTERACT_ANNOTATIONS` (destructive=True for the 6
+  interaction tools) and the existing `_BROWSER_WRITE_ANNOTATIONS`
+  (destructive=False for local-state tools that do not trigger remote
+  actions: set-cookie, save-auth-state, enable-request-logging,
+  close-context, navigate). No behavior change — annotation
+  correctness only.
+
 ### Changed
 
 - **Refactored package layout** for better cohesion (per

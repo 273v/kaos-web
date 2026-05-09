@@ -466,9 +466,30 @@ class TestBrowserToolMetadata:
                     f"{tool.metadata.name} should be openWorld"
                 )
 
-    def test_no_tools_are_destructive(self, all_tools):
+    def test_interaction_tools_are_destructive(self, all_tools):
+        # WEB5-005: click/fill/type/press/select/evaluate run inside an
+        # authenticated browser session and CAN trigger real actions
+        # (form submission, settings changes, JS-driven side effects).
+        # MCP clients use destructiveHint to gate auto-approval; we must
+        # not lie about it. Local-state tools (set-cookie, save-auth,
+        # log-requests, close-context, navigate) and pure read tools
+        # (snapshot, content, screenshot, list-cookies, requests,
+        # captured-responses) keep destructiveHint=False because they
+        # don't trigger remote actions on the target site.
+        interact_tools = {
+            "kaos-web-browser-click",
+            "kaos-web-browser-fill",
+            "kaos-web-browser-type",
+            "kaos-web-browser-press",
+            "kaos-web-browser-select",
+            "kaos-web-browser-evaluate",
+        }
         for tool in all_tools:
-            assert tool.metadata.annotations.destructiveHint is False
+            expected = tool.metadata.name in interact_tools
+            assert tool.metadata.annotations.destructiveHint is expected, (
+                f"{tool.metadata.name} destructiveHint={tool.metadata.annotations.destructiveHint} "
+                f"(expected {expected})"
+            )
 
     def test_tool_count(self, all_tools):
         assert len(all_tools) == 19

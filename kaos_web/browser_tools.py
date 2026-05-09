@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 _MODULE = "kaos-web"
 _VERSION = "0.1.0"
 
-# Annotations for read-only browser tools (screenshot, snapshot).
+# Annotations for read-only browser tools (screenshot, snapshot, list-cookies).
 _BROWSER_READ_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=True,
     destructiveHint=False,
@@ -32,7 +32,25 @@ _BROWSER_READ_ANNOTATIONS = ToolAnnotations(
     openWorldHint=True,
 )
 
-# Annotations for state-changing browser tools (click, fill, evaluate).
+# Annotations for INTERACTION tools — click / fill / type / press / select /
+# evaluate. These can submit forms, change account settings, trigger
+# purchases, or run arbitrary JS inside an authenticated browser session.
+# ``destructiveHint=True`` so MCP clients (Claude Code, etc.) ask for
+# confirmation rather than auto-approving. Audit-04 finding #5 (WEB5-005):
+# the prior shared ``destructiveHint=False`` annotation was a misleading
+# signal that downstream policy / confirmation systems relied on.
+_BROWSER_INTERACT_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=False,
+    destructiveHint=True,
+    idempotentHint=False,
+    openWorldHint=True,
+)
+
+# Annotations for state-changing browser tools that modify LOCAL session
+# state but do not (by themselves) trigger remote actions on the target
+# site — set-cookie, save-auth-state, enable-request-logging,
+# close-context, navigate. Reversible / scoped to the local browser
+# context. ``destructiveHint=False`` is honest here.
 _BROWSER_WRITE_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=False,
     destructiveHint=False,
@@ -237,7 +255,7 @@ class ClickElementTool(KaosTool):
             capability=ToolCapability.TRANSFORM,
             module_name=_MODULE,
             version=_VERSION,
-            annotations=_BROWSER_WRITE_ANNOTATIONS,
+            annotations=_BROWSER_INTERACT_ANNOTATIONS,
             input_schema=[
                 _context_id_param(),
                 ParameterSchema(
@@ -292,7 +310,7 @@ class FillInputTool(KaosTool):
             capability=ToolCapability.TRANSFORM,
             module_name=_MODULE,
             version=_VERSION,
-            annotations=_BROWSER_WRITE_ANNOTATIONS,
+            annotations=_BROWSER_INTERACT_ANNOTATIONS,
             input_schema=[
                 _context_id_param(),
                 ParameterSchema(
@@ -353,7 +371,7 @@ class TypeTextTool(KaosTool):
             capability=ToolCapability.TRANSFORM,
             module_name=_MODULE,
             version=_VERSION,
-            annotations=_BROWSER_WRITE_ANNOTATIONS,
+            annotations=_BROWSER_INTERACT_ANNOTATIONS,
             input_schema=[
                 _context_id_param(),
                 ParameterSchema(
@@ -420,7 +438,7 @@ class PressKeyTool(KaosTool):
             capability=ToolCapability.TRANSFORM,
             module_name=_MODULE,
             version=_VERSION,
-            annotations=_BROWSER_WRITE_ANNOTATIONS,
+            annotations=_BROWSER_INTERACT_ANNOTATIONS,
             input_schema=[
                 _context_id_param(),
                 ParameterSchema(
@@ -478,7 +496,7 @@ class SelectOptionTool(KaosTool):
             capability=ToolCapability.TRANSFORM,
             module_name=_MODULE,
             version=_VERSION,
-            annotations=_BROWSER_WRITE_ANNOTATIONS,
+            annotations=_BROWSER_INTERACT_ANNOTATIONS,
             input_schema=[
                 _context_id_param(),
                 ParameterSchema(
@@ -682,7 +700,7 @@ class EvaluateJSTool(KaosTool):
             capability=ToolCapability.QUERY,
             module_name=_MODULE,
             version=_VERSION,
-            annotations=_BROWSER_WRITE_ANNOTATIONS,
+            annotations=_BROWSER_INTERACT_ANNOTATIONS,
             input_schema=[
                 ParameterSchema(
                     name="context_id",
