@@ -24,12 +24,18 @@ from kaos_web.domain.dns import (
     DEFAULT_RECORD_TYPES,
     DNSSEC_RECORD_TYPES,
     _derive_apex_domain,
+    attempt_zone_transfer,
     enumerate_dns,
     lookup,
     lookup_many,
     reverse_ptr,
 )
-from kaos_web.domain.models import DnsProfile, DnsQueryResult, DnsRecordStatus
+from kaos_web.domain.models import (
+    DnsProfile,
+    DnsQueryResult,
+    DnsRecordStatus,
+    ZoneTransferStatus,
+)
 
 # ── Apex domain derivation ──────────────────────────────────────────
 
@@ -332,3 +338,150 @@ class TestEnumerateDns:
                 include_dnssec=False,
             )
         assert profile.apex_domain == "example.co.uk"
+
+
+# ── attempt_zone_transfer (WEB2-003) ────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestAttemptZoneTransfer:
+    """Cover the 5 control-flow branches of ``attempt_zone_transfer``:
+
+    1. ``socket.getaddrinfo`` raises ``gaierror`` → FAILED, "Cannot resolve…"
+    2. ``dns.query.xfr`` raises ``TransferError`` containing "refused" → REFUSED
+    3. ``dns.query.xfr`` raises another ``TransferError`` (e.g. "timeout") → FAILED
+    4. ``dns.query.xfr``/``dns.zone.from_xfr`` raises a generic exception → FAILED
+    5. Happy path: ``dns.zone.from_xfr`` returns a fake zone → SUCCESS with
+       ``record_count`` and ``serial``.
+    """
+
+    async def test_resolution_failure(self) -> None:
+        import socket
+
+        with patch("socket.getaddrinfo", side_effect=socket.gaierror("name resolution failed")):
+            result = await attempt_zone_transfer(
+                "example.com", "ns1.unresolvable.example", timeout=1.0
+            )
+        assert result.status is ZoneTransferStatus.FAILED
+        assert result.nameserver == "ns1.unresolvable.example"
+        assert result.address is None  # resolution never succeeded
+        assert result.error is not None and "Cannot resolve" in result.error
+        assert result.duration_ms is not None and result.duration_ms >= 0.0
+
+    async def test_transfer_error_refused(self) -> None:
+        from dns.query import TransferError  # type: ignore[import-untyped]
+
+        # TransferError.__init__ requires an integer rcode; "refused" RCODE is 5.
+        # Per dnspython, TransferError stringifies as "Zone transfer error: <name>".
+        # Our matching is on str(exc).lower() containing "refused", so we patch
+        # str(exc) via a subclass with a custom __str__.
+        class _RefusedError(TransferError):
+            def __str__(self) -> str:
+                return "transfer refused by server"
+
+        with (
+            patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("203.0.113.1", 53))]),
+            patch("dns.query.xfr", side_effect=_RefusedError(5)),
+        ):
+            result = await attempt_zone_transfer("example.com", "ns1.example.com", timeout=1.0)
+        assert result.status is ZoneTransferStatus.REFUSED
+        assert result.address == "203.0.113.1"
+        assert result.error is not None and "refused" in result.error.lower()
+
+    async def test_transfer_error_other(self) -> None:
+        from dns.query import TransferError  # type: ignore[import-untyped]
+
+        class _TimeoutError(TransferError):
+            def __str__(self) -> str:
+                return "transfer timed out"
+
+        with (
+            patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("203.0.113.1", 53))]),
+            patch("dns.query.xfr", side_effect=_TimeoutError(2)),
+        ):
+            result = await attempt_zone_transfer("example.com", "ns1.example.com", timeout=1.0)
+        assert result.status is ZoneTransferStatus.FAILED
+        assert result.address == "203.0.113.1"
+        assert result.error is not None and "timed out" in result.error.lower()
+
+    async def test_generic_exception(self) -> None:
+        with (
+            patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("203.0.113.1", 53))]),
+            patch("dns.query.xfr", side_effect=RuntimeError("socket exploded")),
+        ):
+            result = await attempt_zone_transfer("example.com", "ns1.example.com", timeout=1.0)
+        assert result.status is ZoneTransferStatus.FAILED
+        assert result.address == "203.0.113.1"
+        # Generic-path error includes the exception class name
+        assert result.error is not None and "RuntimeError" in result.error
+        assert "socket exploded" in result.error
+
+    async def test_happy_path_success(self) -> None:
+        # Build a fake zone with one SOA + a few A records and a stub
+        # iterate_rdatas() generator. The function calls:
+        #   record_count = sum(1 for _ in zone.iterate_rdatas())
+        #   soa = zone.get_rdataset(dns.name.from_text(domain), dns.rdatatype.SOA)
+        #   serial = soa[0].serial if soa else None
+        fake_soa_rdata = MagicMock()
+        fake_soa_rdata.serial = 2026050801
+        fake_soa = [fake_soa_rdata]  # supports soa[0].serial
+
+        fake_zone = MagicMock()
+        fake_zone.iterate_rdatas = MagicMock(
+            return_value=iter([("a", "b"), ("c", "d"), ("e", "f"), ("g", "h"), ("i", "j")])
+        )
+        fake_zone.get_rdataset = MagicMock(return_value=fake_soa)
+
+        # dns.query.xfr returns a generator of messages — the function
+        # passes that straight to dns.zone.from_xfr which we mock.
+        with (
+            patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("198.51.100.1", 53))]),
+            patch("dns.query.xfr", return_value=iter([MagicMock()])),
+            patch("dns.zone.from_xfr", return_value=fake_zone),
+        ):
+            result = await attempt_zone_transfer("example.com", "ns1.example.com", timeout=1.0)
+
+        assert result.status is ZoneTransferStatus.SUCCESS
+        assert result.address == "198.51.100.1"
+        assert result.record_count == 5
+        assert result.serial == 2026050801
+        assert result.error is None
+        assert result.duration_ms is not None and result.duration_ms >= 0.0
+
+    async def test_happy_path_no_soa(self) -> None:
+        # Edge: zone missing an SOA rdataset → serial should be None.
+        fake_zone = MagicMock()
+        fake_zone.iterate_rdatas = MagicMock(return_value=iter([("a", "b"), ("c", "d")]))
+        fake_zone.get_rdataset = MagicMock(return_value=None)
+
+        with (
+            patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("198.51.100.1", 53))]),
+            patch("dns.query.xfr", return_value=iter([MagicMock()])),
+            patch("dns.zone.from_xfr", return_value=fake_zone),
+        ):
+            result = await attempt_zone_transfer("example.com", "ns1.example.com", timeout=1.0)
+
+        assert result.status is ZoneTransferStatus.SUCCESS
+        assert result.record_count == 2
+        assert result.serial is None
+
+    async def test_passes_through_to_thread(self) -> None:
+        # Sanity: the function awaits asyncio.to_thread, so it must not
+        # block the event loop. Spy on to_thread to confirm it was used.
+        import asyncio as _asyncio
+
+        called: dict[str, Any] = {}
+        original = _asyncio.to_thread
+
+        async def _spy(fn, /, *args: Any, **kwargs: Any) -> Any:  # type: ignore[no-untyped-def]
+            called["fn"] = fn
+            return await original(fn, *args, **kwargs)
+
+        with (
+            patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("198.51.100.1", 53))]),
+            patch("dns.query.xfr", side_effect=RuntimeError("stop here")),
+            patch("kaos_web.domain.dns.asyncio.to_thread", new=_spy),
+        ):
+            result = await attempt_zone_transfer("example.com", "ns1.example.com", timeout=1.0)
+        assert called.get("fn") is not None
+        assert result.status is ZoneTransferStatus.FAILED
