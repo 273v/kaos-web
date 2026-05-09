@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from kaos_web.domain.org import (
+    _ENTITY_FORM_PATTERNS,
     OrgAddress,
     OrgEntity,
     _extract_from_footer,
@@ -57,6 +58,13 @@ class TestExtractFromFooter:
         text = "Foo Bar Inc., a California corporation, is headquartered in San Francisco."
         result = _extract_from_footer(text)
         assert result["jurisdiction"] == "California"
+        # _JURISDICTION_PATTERNS[0] declares ``field2 = "entity_form"`` but
+        # the entity-form alternative inside the regex is a non-capturing
+        # group, so the jurisdiction pattern itself does not set
+        # entity_form. Fallback _ENTITY_FORM_PATTERNS catches "Inc." from
+        # the company name. (WEB2-002 fix made this fallback actually work
+        # for dotted forms.)
+        assert result.get("entity_form") == "Inc."
 
     def test_organized_under_state_law(self) -> None:
         text = "We are organized under the laws of the State of Nevada."
@@ -96,6 +104,112 @@ class TestExtractFromFooter:
         result = _extract_from_footer("Just some random page text without legal info.")
         assert result.get("jurisdiction") is None
         assert result.get("registration_number") is None
+
+    def test_entity_form_fallback_inc(self) -> None:
+        # No jurisdiction pattern matches → fallback to _ENTITY_FORM_PATTERNS.
+        # WEB2-002: prior to the regex fix, "Acme Inc." returned None here
+        # because the trailing \b couldn't match between "." and " " (both
+        # non-word). This test guards the fix.
+        text = "Acme Inc. is a worldwide leader."
+        result = _extract_from_footer(text)
+        assert result.get("entity_form") == "Inc."
+
+    def test_entity_form_fallback_corp(self) -> None:
+        text = "Beta Corp. ships worldwide."
+        result = _extract_from_footer(text)
+        assert result.get("entity_form") == "Corp."
+
+    def test_entity_form_fallback_ltd(self) -> None:
+        text = "Gamma Ltd. (the company) operates from London."
+        result = _extract_from_footer(text)
+        assert result.get("entity_form") == "Ltd."
+
+    def test_entity_form_fallback_pa(self) -> None:
+        text = "Smith & Jones P.A. is a professional association."
+        result = _extract_from_footer(text)
+        assert result.get("entity_form") == "P.A."
+
+    def test_entity_form_fallback_sa(self) -> None:
+        text = "Société Générale S.A. operates in many countries."
+        result = _extract_from_footer(text)
+        assert result.get("entity_form") == "S.A."
+
+
+# ── _ENTITY_FORM_PATTERNS (WEB2-002) ────────────────────────────────
+
+
+class TestEntityFormPatterns:
+    """Direct coverage of the entity-form regex.
+
+    WEB2-002 (audit-02 follow-up): the original pattern used a trailing
+    ``\\b`` after every dotted alternative (``Inc.``, ``Corp.``, ``Ltd.``,
+    ``P.A.``, ``S.A.``, ``L.L.C.``, ``S.r.l.``, ``PLLC``…). ``\\b`` cannot
+    match between ``.`` (non-word) and a following space, comma, or
+    end-of-string (also non-word), so 8 of 14 alternatives were silently
+    broken. The fix replaces ``\\b`` with a ``(?![A-Za-z])`` lookahead.
+    """
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            # Dotted forms — these were ALL broken before the fix.
+            ("Acme Inc.", "Inc."),
+            ("Acme Inc. and friends", "Inc."),
+            ("Beta Corp.", "Corp."),
+            ("Beta Corp. is great", "Corp."),
+            ("Gamma Ltd.", "Ltd."),
+            ("Gamma Ltd. operates", "Ltd."),
+            ("Tech L.L.C.", "L.L.C."),
+            ("Tech L.L.C., LLC", "L.L.C."),
+            ("Smith P.A.", "P.A."),
+            ("Smith P.A. associates", "P.A."),
+            ("ACME P.L.C.", "P.L.C."),
+            ("Foo S.A.", "S.A."),
+            ("Bar S.r.l.", "S.r.l."),
+            ("Quux L.L.P.", "L.L.P."),
+            # Non-dotted forms — were already working, retain as guards.
+            ("Foo LLC", "LLC"),
+            ("Bar LLP", "LLP"),
+            ("Baz Corporation", "Corporation"),
+            ("Qux Limited", "Limited"),
+            ("Plc PLC operates", "PLC"),
+            ("Tech GmbH", "GmbH"),
+            ("Group AG", "AG"),
+            ("Pro PLLC", "PLLC"),
+            ("Acme Incorporated", "Incorporated"),
+            ("Smith Professional Association", "Professional Association"),
+        ],
+    )
+    def test_matches(self, text: str, expected: str) -> None:
+        m = _ENTITY_FORM_PATTERNS.search(text)
+        assert m is not None, f"{text!r} should match {expected!r}"
+        # Case-insensitive compare — pattern uses re.IGNORECASE.
+        assert m.group(1).lower() == expected.lower()
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # Substring-of-word should NOT match — the (?![A-Za-z]) trailing
+            # lookahead and the leading \b together exclude these.
+            "IncorporatedX",  # 'Incorporated' followed by letter
+            "LLCfoo",  # 'LLC' followed by letter
+            "Corporationsomething",
+            "CorpX",  # 'Corp' (no dot) is not in the alternation; CorpX has no match
+            "Justrandomtext",
+            "ltd",  # bare 'ltd' (no dot) — pattern requires "Ltd\." or "Limited"
+        ],
+    )
+    def test_no_match(self, text: str) -> None:
+        m = _ENTITY_FORM_PATTERNS.search(text)
+        assert m is None, f"{text!r} should NOT match (got {m.group(0) if m else None!r})"
+
+    def test_alternation_picks_first_winner(self) -> None:
+        # `LLC|L.L.C.` ordering: for input "L.L.C." the first alternative
+        # ``LLC`` cannot match (next char is "."), so the regex falls
+        # through to ``L.L.C.``.
+        m = _ENTITY_FORM_PATTERNS.search("Tech L.L.C., Inc.")
+        assert m is not None
+        assert m.group(1) == "L.L.C."
 
 
 # ── _extract_from_jsonld ────────────────────────────────────────────

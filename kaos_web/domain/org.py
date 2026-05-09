@@ -155,7 +155,7 @@ _JURISDICTION_PATTERNS: list[tuple[re.Pattern[str], str, str | None]] = [
 _ENTITY_FORM_PATTERNS = re.compile(
     r"\b(LLC|L\.L\.C\.|LLP|L\.L\.P\.|Inc\.|Incorporated|Ltd\.|Limited|Corp\.|"
     r"Corporation|PLC|P\.L\.C\.|GmbH|AG|S\.A\.|S\.r\.l\.|PLLC|P\.A\.|"
-    r"Professional Association)\b",
+    r"Professional Association)(?![A-Za-z])",
     re.IGNORECASE,
 )
 
