@@ -21,31 +21,13 @@ from kaos_web.clients.browser import (
     BrowserClient,
 )
 
-
-@pytest.fixture(autouse=True)
-def _block_real_playwright_launch():
-    """Hard-fail any test in this module that reaches a real Playwright launch.
-
-    Why: three tests in this file call ``BrowserClient.fetch()``, which
-    routes through ``_ensure_browser()``. The audit (WEB-001) flagged that
-    those tests would launch real Chromium when ``_browser`` was unset. The
-    helper now seeds ``_browser``/``_playwright``; this fixture is the
-    belt-and-suspenders guard that turns any regression into an immediate,
-    obvious failure instead of a silent Chromium launch.
-    """
-    with patch(
-        "playwright.async_api.async_playwright",
-        side_effect=AssertionError(
-            "unit test reached real playwright.async_api.async_playwright(); "
-            "seed BrowserClient._browser with a MagicMock in test setup"
-        ),
-    ):
-        yield
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+# NOTE: The autouse `_block_real_playwright_launch` guard that used to live
+# here was promoted to `tests/unit/conftest.py` per audit-03 WEB3-003 so it
+# covers the whole unit tier. Setup helpers in this file still must seed
+# `client._browser = MagicMock()` to short-circuit `_ensure_browser()`.
 
 
 def _mock_page(url: str = "https://example.com") -> MagicMock:
