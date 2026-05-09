@@ -97,6 +97,15 @@ jobs:
           # Pre-release of 3.15 (expected GA October 2026). Catches
           # ecosystem incompatibilities (deferred annotations, removed
           # APIs) before consumers hit them.
+          #
+          # CURRENT STATE: this leg is expected to be RED. ``rpds-py``
+          # (transitive via ``jsonschema``) source-builds against
+          # ``pyo3 0.27.x``, which caps at Python 3.14 — 3.15 support
+          # lands in a future pyo3 release that rpds-py then re-builds
+          # against. ``continue-on-error: true`` means the X here does
+          # NOT block the workflow conclusion; it's informational
+          # tracking of upstream ecosystem readiness. Re-evaluate when
+          # ``pyo3 >= 0.28`` ships with 3.15 support.
           - python-version: "3.15"
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
