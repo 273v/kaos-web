@@ -1423,7 +1423,14 @@ class GetRequestDetailTool(KaosTool):
 
         except Exception as exc:
             return ToolResult.create_error(
-                f"Failed to get request {request_id} in context '{context_id}': {exc}."
+                f"Failed to get request {request_id} in context '{context_id}': {exc}. "
+                "The context may have been closed, or request logging may not have "
+                "been enabled before the request was issued. "
+                "Call 'kaos-web-browser-list-contexts' to confirm the context is "
+                "still active, then 'kaos-web-browser-requests' to re-list valid "
+                "request IDs. If logging was off, re-enable it with "
+                "'kaos-web-browser-log-requests' and re-issue the request before "
+                "querying again."
             )
 
 
@@ -1581,7 +1588,16 @@ class ListCapturedResponsesTool(KaosTool):
 
         except Exception as exc:
             return ToolResult.create_error(
-                f"Failed to list captured responses for context '{context_id}': {exc}."
+                f"Failed to list captured responses for context '{context_id}': {exc}. "
+                "The context may have been closed, or response-body capture may not "
+                "have been enabled (it requires 'capture_bodies=true' on "
+                "'kaos-web-browser-log-requests'). "
+                "Call 'kaos-web-browser-list-contexts' to confirm the context is "
+                "active, then re-enable capture with "
+                "'kaos-web-browser-log-requests' (capture_bodies=true) before "
+                "issuing requests. For metadata-only network traces, use "
+                "'kaos-web-browser-requests' instead — it does not require body "
+                "capture to be on."
             )
 
 

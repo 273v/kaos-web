@@ -1079,3 +1079,72 @@ class TestListCapturedResponsesTool:
             assert not result.isError
             # No artifacts created for non-JSON
             mock_context.runtime.artifacts.create_from_path.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests — Error-message 3-part contract (WEB2-004)
+# ---------------------------------------------------------------------------
+
+
+def _error_text(result) -> str:
+    """Best-effort extract human-readable error text from a ToolResult."""
+    # ToolResult.create_error stores the message in .content[0].text
+    if result.content:
+        for block in result.content:
+            if hasattr(block, "text"):
+                return block.text  # type: ignore[no-any-return]
+    return ""
+
+
+class TestGetRequestDetailErrorContract:
+    """WEB2-004: GetRequestDetailTool's catch-all error must include
+    what failed, how to recover, and an alternative tool."""
+
+    @pytest.mark.asyncio
+    async def test_error_includes_recovery_guidance(self):
+        from kaos_web.browser_tools import GetRequestDetailTool
+
+        tool = GetRequestDetailTool()
+        with patch("kaos_web.browser_tools._get_browser_client") as mock_get:
+            mock_client = AsyncMock()
+            mock_client.get_request_detail = AsyncMock(side_effect=RuntimeError("boom"))
+            mock_get.return_value = mock_client
+
+            result = await tool.execute({"context_id": "s1", "request_id": 0})
+            assert result.isError
+            text = _error_text(result)
+            # What failed
+            assert "Failed to get request" in text
+            assert "boom" in text
+            # How to recover (lists active contexts, re-enables logging)
+            assert "kaos-web-browser-list-contexts" in text
+            assert "kaos-web-browser-log-requests" in text
+            # Alternative tool
+            assert "kaos-web-browser-requests" in text
+
+
+class TestListCapturedResponsesErrorContract:
+    """WEB2-004: ListCapturedResponsesTool's catch-all error must include
+    what failed, how to recover, and an alternative tool."""
+
+    @pytest.mark.asyncio
+    async def test_error_includes_recovery_guidance(self):
+        from kaos_web.browser_tools import ListCapturedResponsesTool
+
+        tool = ListCapturedResponsesTool()
+        with patch("kaos_web.browser_tools._get_browser_client") as mock_get:
+            mock_client = AsyncMock()
+            mock_client.get_captured_responses = AsyncMock(side_effect=RuntimeError("boom"))
+            mock_get.return_value = mock_client
+
+            result = await tool.execute({"context_id": "s1"})
+            assert result.isError
+            text = _error_text(result)
+            assert "Failed to list captured responses" in text
+            assert "boom" in text
+            # Recovery: confirm context, re-enable capture
+            assert "kaos-web-browser-list-contexts" in text
+            assert "kaos-web-browser-log-requests" in text
+            assert "capture_bodies" in text
+            # Alternative
+            assert "kaos-web-browser-requests" in text
