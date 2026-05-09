@@ -21,7 +21,9 @@ class PortStatus(StrEnum):
     OPEN = "open"
     CLOSED = "closed"
     TIMEOUT = "timeout"
+    FILTERED = "filtered"
     ERROR = "error"
+    UNKNOWN = "unknown"
 
 
 class PortResult(BaseModel):
@@ -303,3 +305,76 @@ class DomainProfile(BaseModel):
     mail_security: MailSecurityReport | None = None
     sitemap_urls: list[str] = Field(default_factory=list)
     robots_txt: str | None = Field(None, description="URL to robots.txt if found")
+
+
+# ── TCP banner grab ────────────────────────────────────────────────
+
+
+class BannerProbeResult(BaseModel):
+    """Result of a TCP banner-grab probe."""
+
+    model_config = _STRICT
+
+    host: str
+    port: int
+    status: PortStatus
+    banner: str | None = Field(
+        None, description="Decoded banner text (UTF-8, latin-1, or repr fallback)."
+    )
+    banner_bytes: bytes | None = Field(
+        None, description="Raw bytes captured from the socket (lossless)."
+    )
+    duration_ms: float | None = None
+    error: str | None = None
+
+
+# ── Service fingerprinting ─────────────────────────────────────────
+
+
+class ServiceIdentity(BaseModel):
+    """Fingerprinted service identity from a banner string.
+
+    ``confidence`` is in [0.0, 1.0]: 0.0 for unknown / port-only guess, ~0.5
+    for port-based heuristics, 0.8-1.0 for banner regex matches.
+    """
+
+    model_config = _STRICT
+
+    service: str = Field(description="Generic service name (ssh, smtp, http, ...)")
+    product: str | None = Field(None, description="Product name (OpenSSH, Postfix, nginx, ...)")
+    version: str | None = None
+    extra: dict[str, str] = Field(
+        default_factory=dict, description="Additional fingerprint fields (protocol, host, ...)"
+    )
+    confidence: float = Field(0.0, ge=0.0, le=1.0)
+
+
+# ── UDP probing ────────────────────────────────────────────────────
+
+
+class UdpProbeStatus(StrEnum):
+    RESPONDED = "responded"
+    TIMEOUT = "timeout"
+    ICMP_UNREACHABLE = "icmp_unreachable"
+    SENT_NO_RESPONSE_EXPECTED = "sent_no_response_expected"
+    ERROR = "error"
+
+
+class UdpProbeResult(BaseModel):
+    """Result of a UDP protocol-aware probe."""
+
+    model_config = _STRICT
+
+    host: str
+    port: int
+    protocol: str = Field(description="dns, ntp, snmp, syslog, ...")
+    status: UdpProbeStatus
+    payload: str | None = Field(None, description="Decoded protocol response (text form).")
+    raw_response: bytes | None = Field(
+        None, description="Raw bytes captured from the wire (lossless)."
+    )
+    duration_ms: float | None = None
+    extra: dict[str, Any] = Field(
+        default_factory=dict, description="Protocol-specific decoded fields."
+    )
+    error: str | None = None

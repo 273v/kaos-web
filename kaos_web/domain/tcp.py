@@ -13,9 +13,32 @@ import time
 from collections.abc import Sequence
 
 from kaos_core.logging import get_logger
-from kaos_web.domain.models import COMMON_PORTS, PortResult, PortStatus, TcpProbeResult
+from kaos_web.domain.models import (
+    COMMON_PORTS,
+    BannerProbeResult,
+    PortResult,
+    PortStatus,
+    TcpProbeResult,
+)
 
 logger = get_logger(__name__)
+
+
+def _decode_banner(raw: bytes) -> str:
+    """Decode a banner byte string with progressive fallback.
+
+    Tries UTF-8 first (most modern protocols), then latin-1 (legacy ASCII
+    extended), and finally Python ``repr()`` of the bytes (lossless,
+    always succeeds, e.g. for binary handshakes like MySQL).
+    """
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    try:
+        return raw.decode("latin-1")
+    except UnicodeDecodeError:  # pragma: no cover - latin-1 is total
+        return repr(raw)
 
 
 async def probe_port(
@@ -141,3 +164,185 @@ async def probe_ports(
         closed_count=closed_count,
         timeout_count=timeout_count,
     )
+
+
+# ── Banner grabbing ─────────────────────────────────────────────────
+
+
+async def probe_banner(
+    host: str,
+    port: int,
+    *,
+    timeout: float = 5.0,
+    send_probe: bytes | None = None,
+    max_bytes: int = 4096,
+) -> BannerProbeResult:
+    """Open a TCP connection and capture the service's banner.
+
+    Many services greet on connect (SSH, SMTP, FTP, POP3, IMAP) — leave
+    ``send_probe`` as ``None`` to wait for the unsolicited banner. For
+    request/response protocols (HTTP, Redis), pass a probe payload such
+    as ``b"HEAD / HTTP/1.0\\r\\n\\r\\n"``.
+
+    The connect+read budget is bounded by ``timeout`` seconds:
+    ``asyncio.wait_for`` is applied to both the ``open_connection`` and the
+    subsequent ``reader.read(max_bytes)`` calls.
+
+    The decoded banner uses UTF-8 → latin-1 → ``repr()`` fallback so this
+    function never raises on undecodable bytes.
+
+    Args:
+        host: Target hostname or IP.
+        port: TCP port number.
+        timeout: Per-stage timeout (connect, send, read) in seconds.
+        send_probe: Optional probe bytes to send after connection.
+        max_bytes: Maximum bytes to read from the socket.
+
+    Returns:
+        BannerProbeResult — always a value, never raises for normal
+        connection errors. ``status`` is OPEN on successful read,
+        CLOSED on RST/refused, TIMEOUT on connect or read timeout,
+        FILTERED on ``OSError`` that suggests a firewall.
+    """
+    start = time.perf_counter()
+    writer = None
+
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=timeout,
+        )
+
+        if send_probe:
+            writer.write(send_probe)
+            try:
+                await asyncio.wait_for(writer.drain(), timeout=timeout)
+            except TimeoutError:
+                duration_ms = (time.perf_counter() - start) * 1000
+                return BannerProbeResult(
+                    host=host,
+                    port=port,
+                    status=PortStatus.TIMEOUT,
+                    duration_ms=round(duration_ms, 2),
+                    error="timeout sending probe payload",
+                )
+
+        try:
+            raw = await asyncio.wait_for(reader.read(max_bytes), timeout=timeout)
+        except TimeoutError:
+            duration_ms = (time.perf_counter() - start) * 1000
+            return BannerProbeResult(
+                host=host,
+                port=port,
+                status=PortStatus.TIMEOUT,
+                duration_ms=round(duration_ms, 2),
+                error="timeout reading banner",
+            )
+
+        duration_ms = (time.perf_counter() - start) * 1000
+
+        if not raw:
+            # Connection succeeded but peer sent nothing (and we didn't probe)
+            return BannerProbeResult(
+                host=host,
+                port=port,
+                status=PortStatus.OPEN,
+                banner=None,
+                banner_bytes=None,
+                duration_ms=round(duration_ms, 2),
+            )
+
+        return BannerProbeResult(
+            host=host,
+            port=port,
+            status=PortStatus.OPEN,
+            banner=_decode_banner(raw),
+            banner_bytes=raw,
+            duration_ms=round(duration_ms, 2),
+        )
+
+    except TimeoutError:
+        duration_ms = (time.perf_counter() - start) * 1000
+        return BannerProbeResult(
+            host=host,
+            port=port,
+            status=PortStatus.TIMEOUT,
+            duration_ms=round(duration_ms, 2),
+            error="connect timeout",
+        )
+
+    except ConnectionRefusedError as exc:
+        duration_ms = (time.perf_counter() - start) * 1000
+        return BannerProbeResult(
+            host=host,
+            port=port,
+            status=PortStatus.CLOSED,
+            duration_ms=round(duration_ms, 2),
+            error=str(exc) or "connection refused",
+        )
+
+    except ConnectionResetError as exc:
+        duration_ms = (time.perf_counter() - start) * 1000
+        return BannerProbeResult(
+            host=host,
+            port=port,
+            status=PortStatus.CLOSED,
+            duration_ms=round(duration_ms, 2),
+            error=str(exc) or "connection reset",
+        )
+
+    except OSError as exc:
+        duration_ms = (time.perf_counter() - start) * 1000
+        # EHOSTUNREACH / ENETUNREACH commonly indicate a firewall drop
+        # rather than an explicit RST. Map to FILTERED.
+        return BannerProbeResult(
+            host=host,
+            port=port,
+            status=PortStatus.FILTERED,
+            duration_ms=round(duration_ms, 2),
+            error=str(exc),
+        )
+
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+
+
+async def probe_banners(
+    host: str,
+    ports: Sequence[int],
+    *,
+    timeout: float = 5.0,
+    concurrency: int = 10,
+    send_probe: bytes | None = None,
+    max_bytes: int = 4096,
+) -> list[BannerProbeResult]:
+    """Run :func:`probe_banner` against many ports concurrently.
+
+    Args:
+        host: Target hostname or IP.
+        ports: Sequence of TCP ports to probe.
+        timeout: Per-port connect/read timeout.
+        concurrency: Maximum concurrent probes (asyncio.Semaphore).
+        send_probe: Optional probe payload (same for every port).
+        max_bytes: Maximum bytes to read per port.
+
+    Returns:
+        List of BannerProbeResult in the same order as ``ports``.
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _limited(p: int) -> BannerProbeResult:
+        async with semaphore:
+            return await probe_banner(
+                host,
+                p,
+                timeout=timeout,
+                send_probe=send_probe,
+                max_bytes=max_bytes,
+            )
+
+    return list(await asyncio.gather(*[_limited(p) for p in ports]))

@@ -14,6 +14,7 @@ import pytest
 
 from kaos_core import ToolResult
 from kaos_web.domain.models import (
+    BannerProbeResult,
     DnsProfile,
     DnsQueryResult,
     DnsRecord,
@@ -29,6 +30,8 @@ from kaos_web.domain.models import (
     ServiceProfile,
     TcpProbeResult,
     TlsCertInfo,
+    UdpProbeResult,
+    UdpProbeStatus,
     WhoisRecord,
     ZoneTransferResult,
     ZoneTransferStatus,
@@ -40,10 +43,13 @@ from kaos_web.domain_tools import (
     DnsZoneTransferTool,
     DomainProfileTool,
     ExtractOrgTool,
+    FingerprintServiceTool,
     HttpHeadersTool,
     ServiceDetectTool,
+    TcpBannerTool,
     TcpProbeTool,
     TlsInspectTool,
+    UdpProbeTool,
     WhoisLookupTool,
     register_domain_tools,
 )
@@ -66,6 +72,9 @@ class TestToolMetadata:
             (WhoisLookupTool, "kaos-web-whois-lookup"),
             (DomainProfileTool, "kaos-web-domain-profile"),
             (ExtractOrgTool, "kaos-web-extract-org"),
+            (TcpBannerTool, "kaos-web-tcp-banner"),
+            (FingerprintServiceTool, "kaos-web-fingerprint-service"),
+            (UdpProbeTool, "kaos-web-udp-probe"),
         ],
     )
     def test_names(self, tool_cls: type, expected_name: str) -> None:
@@ -86,6 +95,8 @@ class TestToolMetadata:
             WhoisLookupTool,
             DomainProfileTool,
             ExtractOrgTool,
+            TcpBannerTool,
+            UdpProbeTool,
         ],
     )
     def test_annotations(self, tool_cls: type) -> None:
@@ -96,6 +107,16 @@ class TestToolMetadata:
         assert ann.destructiveHint is False
         assert ann.openWorldHint is True
         assert ann.idempotentHint is True
+
+    def test_fingerprint_service_annotations_pure(self) -> None:
+        # FingerprintServiceTool is the ONLY domain tool with openWorldHint=False
+        # because it does no network I/O — pure transform.
+        ann = FingerprintServiceTool().metadata.annotations
+        assert ann is not None
+        assert ann.readOnlyHint is True
+        assert ann.openWorldHint is False
+        assert ann.idempotentHint is True
+        assert ann.destructiveHint is False
 
     @pytest.mark.parametrize(
         "tool_cls",
@@ -111,6 +132,9 @@ class TestToolMetadata:
             WhoisLookupTool,
             DomainProfileTool,
             ExtractOrgTool,
+            TcpBannerTool,
+            FingerprintServiceTool,
+            UdpProbeTool,
         ],
     )
     def test_input_schema_present(self, tool_cls: type) -> None:
@@ -127,8 +151,8 @@ class TestRegister:
         runtime = MagicMock()
         runtime.tools.register_tool = MagicMock()
         count = register_domain_tools(runtime)
-        assert count == 11
-        assert runtime.tools.register_tool.call_count == 11
+        assert count == 14
+        assert runtime.tools.register_tool.call_count == 14
 
 
 def _is_error(r: ToolResult) -> bool:
@@ -582,4 +606,214 @@ class TestExtractOrgExecute:
 
         httpx_mock.add_exception(httpx.ConnectError("nope"))
         result = await ExtractOrgTool().execute({"url": "https://broken.example/"})
+        assert _is_error(result)
+
+
+# ── TcpBannerTool ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestTcpBannerExecute:
+    async def test_missing_host(self) -> None:
+        assert _is_error(await TcpBannerTool().execute({"port": 22}))
+
+    async def test_missing_port(self) -> None:
+        assert _is_error(await TcpBannerTool().execute({"host": "example.com"}))
+
+    async def test_invalid_port_string(self) -> None:
+        result = await TcpBannerTool().execute({"host": "example.com", "port": "abc"})
+        assert _is_error(result)
+
+    async def test_port_out_of_range(self) -> None:
+        result = await TcpBannerTool().execute({"host": "example.com", "port": 70000})
+        assert _is_error(result)
+
+    async def test_success_no_probe(self) -> None:
+        probe = BannerProbeResult(
+            host="example.com",
+            port=22,
+            status=PortStatus.OPEN,
+            banner="SSH-2.0-OpenSSH_8.9p1",
+            banner_bytes=b"SSH-2.0-OpenSSH_8.9p1",
+            duration_ms=12.3,
+        )
+        with patch("kaos_web.domain.tcp.probe_banner", AsyncMock(return_value=probe)):
+            result = await TcpBannerTool().execute({"host": "example.com", "port": 22})
+        assert not _is_error(result)
+
+    async def test_success_with_probe(self) -> None:
+        probe = BannerProbeResult(
+            host="example.com",
+            port=80,
+            status=PortStatus.OPEN,
+            banner="HTTP/1.1 200 OK\r\nServer: nginx",
+            duration_ms=8.0,
+        )
+        captured: dict[str, Any] = {}
+
+        async def _spy(host: str, port: int, **kwargs: Any) -> BannerProbeResult:
+            captured.update({"host": host, "port": port, **kwargs})
+            return probe
+
+        with patch("kaos_web.domain.tcp.probe_banner", _spy):
+            result = await TcpBannerTool().execute(
+                {
+                    "host": "example.com",
+                    "port": 80,
+                    "send_probe": "HEAD / HTTP/1.0\\r\\n\\r\\n",
+                    "timeout": 2.0,
+                    "max_bytes": 1024,
+                }
+            )
+        assert not _is_error(result)
+        # Escape sequences decoded into real CRLF bytes
+        assert captured["send_probe"] == b"HEAD / HTTP/1.0\r\n\r\n"
+        assert captured["timeout"] == 2.0
+        assert captured["max_bytes"] == 1024
+
+    async def test_unexpected_exception(self) -> None:
+        with patch(
+            "kaos_web.domain.tcp.probe_banner",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        ):
+            result = await TcpBannerTool().execute({"host": "example.com", "port": 22})
+        assert _is_error(result)
+
+
+# ── FingerprintServiceTool ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestFingerprintServiceExecute:
+    async def test_ssh_banner(self) -> None:
+        result = await FingerprintServiceTool().execute(
+            {"banner": "SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.10"}
+        )
+        assert not _is_error(result)
+
+    async def test_empty_banner_with_port_hint(self) -> None:
+        result = await FingerprintServiceTool().execute({"banner": "", "port": 22})
+        assert not _is_error(result)
+
+    async def test_empty_everything(self) -> None:
+        # Empty banner + no port → service=unknown, confidence=0 — still a success
+        result = await FingerprintServiceTool().execute({"banner": ""})
+        assert not _is_error(result)
+
+    async def test_invalid_port_type(self) -> None:
+        result = await FingerprintServiceTool().execute(
+            {"banner": "SSH-2.0-foo", "port": "not-a-number"}
+        )
+        assert _is_error(result)
+
+    async def test_pure_no_network(self) -> None:
+        # Sanity: this tool does not call any network function; verify
+        # nothing under kaos_web.domain.* gets touched.
+        with patch("asyncio.open_connection") as oc:
+            await FingerprintServiceTool().execute(
+                {"banner": "HTTP/1.1 200 OK\r\nServer: nginx/1.24.0\r\n", "port": 80}
+            )
+        oc.assert_not_called()
+
+    async def test_unexpected_exception(self) -> None:
+        with patch(
+            "kaos_web.domain.fingerprint.fingerprint_banner",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = await FingerprintServiceTool().execute({"banner": "x"})
+        assert _is_error(result)
+
+
+# ── UdpProbeTool ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestUdpProbeExecute:
+    async def test_missing_host(self) -> None:
+        result = await UdpProbeTool().execute({"protocol": "dns"})
+        assert _is_error(result)
+
+    async def test_invalid_protocol(self) -> None:
+        result = await UdpProbeTool().execute({"host": "x", "protocol": "tcp"})
+        assert _is_error(result)
+
+    async def test_invalid_port(self) -> None:
+        result = await UdpProbeTool().execute({"host": "x", "protocol": "dns", "port": "abc"})
+        assert _is_error(result)
+
+    async def test_dns_success(self) -> None:
+        probe = UdpProbeResult(
+            host="8.8.8.8",
+            port=53,
+            protocol="dns",
+            status=UdpProbeStatus.RESPONDED,
+            payload="BIND 9.18.24",
+        )
+        with patch("kaos_web.domain.udp.probe_dns", AsyncMock(return_value=probe)):
+            result = await UdpProbeTool().execute(
+                {"host": "8.8.8.8", "protocol": "dns", "query_name": "version.bind"}
+            )
+        assert not _is_error(result)
+
+    async def test_ntp_success_with_explicit_port(self) -> None:
+        probe = UdpProbeResult(
+            host="ntp.example",
+            port=1123,
+            protocol="ntp",
+            status=UdpProbeStatus.RESPONDED,
+            payload="stratum=2 refid=192.168.1.1",
+        )
+        captured: dict[str, Any] = {}
+
+        async def _spy(host: str, port: int, **kw: Any) -> UdpProbeResult:
+            captured.update({"host": host, "port": port, **kw})
+            return probe
+
+        with patch("kaos_web.domain.udp.probe_ntp", _spy):
+            result = await UdpProbeTool().execute(
+                {"host": "ntp.example", "protocol": "ntp", "port": 1123, "timeout": 1.0}
+            )
+        assert not _is_error(result)
+        assert captured["port"] == 1123
+        assert captured["timeout"] == 1.0
+
+    async def test_snmp_success_with_community(self) -> None:
+        probe = UdpProbeResult(
+            host="snmp.example",
+            port=161,
+            protocol="snmp",
+            status=UdpProbeStatus.RESPONDED,
+            payload="Linux router 5.15",
+        )
+        captured: dict[str, Any] = {}
+
+        async def _spy(host: str, port: int, **kw: Any) -> UdpProbeResult:
+            captured.update({"host": host, "port": port, **kw})
+            return probe
+
+        with patch("kaos_web.domain.udp.probe_snmp", _spy):
+            result = await UdpProbeTool().execute(
+                {"host": "snmp.example", "protocol": "snmp", "community": "private"}
+            )
+        assert not _is_error(result)
+        assert captured["community"] == "private"
+
+    async def test_syslog_success(self) -> None:
+        probe = UdpProbeResult(
+            host="syslog.example",
+            port=514,
+            protocol="syslog",
+            status=UdpProbeStatus.SENT_NO_RESPONSE_EXPECTED,
+            payload="datagram sent",
+        )
+        with patch("kaos_web.domain.udp.probe_syslog", AsyncMock(return_value=probe)):
+            result = await UdpProbeTool().execute({"host": "syslog.example", "protocol": "syslog"})
+        assert not _is_error(result)
+
+    async def test_unexpected_exception(self) -> None:
+        with patch(
+            "kaos_web.domain.udp.probe_dns",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        ):
+            result = await UdpProbeTool().execute({"host": "x", "protocol": "dns"})
         assert _is_error(result)

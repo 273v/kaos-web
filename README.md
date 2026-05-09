@@ -27,7 +27,7 @@ kaos-web extract page.html --format text
 kaos-web metadata https://example.com --json
 kaos-web serve                               # MCP server (stdio)
 kaos-web serve --http --port 8000            # MCP server (HTTP)
-kaos-web serve --browser --crawl --domain    # all 42 tools
+kaos-web serve --browser --crawl --domain    # all 45 tools
 ```
 
 ## MCP Integration
@@ -68,7 +68,7 @@ kaos-web-serve --browser --crawl --debug
 
 The `--browser` flag adds 18 browser interaction tools (requires `kaos-web[browser]`).
 The `--crawl` flag adds 3 multi-page crawl/discovery tools.
-The `--domain` flag adds 11 domain-intelligence tools (DNS, WHOIS, TLS, HTTP probing, org-entity extraction).
+The `--domain` flag adds 14 domain-intelligence tools (DNS, WHOIS, TLS, HTTP/UDP probing, TCP banner-grab, service fingerprint, org-entity extraction).
 Without flags, only the 7 core extraction tools are registered.
 
 ### Security note — domain-intelligence TLS verification

@@ -1,10 +1,12 @@
-"""MCP tools for domain intelligence: TCP, TLS, HTTP, DNS, WHOIS, and profiling.
+"""MCP tools for domain intelligence: TCP, TLS, HTTP, DNS, UDP, WHOIS, and profiling.
 
-10 tools organized by dependency tier:
+14 tools organized by dependency tier:
 - Pure stdlib (1-4): tcp-probe, tls-inspect, http-headers, service-detect
 - Requires dnspython (5-8): dns-lookup, dns-enumerate, dns-zone-transfer, dns-security
 - Stdlib WHOIS (9): whois-lookup
 - Composite (10): domain-profile
+- HTML/JSON-LD (11): extract-org
+- Pure stdlib (12-14): tcp-banner, fingerprint-service, udp-probe
 """
 
 from __future__ import annotations
@@ -782,6 +784,363 @@ class ExtractOrgTool(KaosTool):
         return ToolResult.create_success(output, summary=summary)
 
 
+# ── 12. kaos-web-tcp-banner ─────────────────────────────────────────
+
+
+class TcpBannerTool(KaosTool):
+    """Grab a TCP banner from a single (host, port)."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-tcp-banner",
+            display_name="TCP Banner Grab",
+            description=(
+                "Open a TCP connection and capture the service's banner. "
+                "Many services greet on connect (SSH, SMTP, FTP, POP3, IMAP) — "
+                "leave 'send_probe' empty to wait for the unsolicited greeting. "
+                "Request/response protocols (HTTP, Redis) need a probe — for "
+                "HTTP, send 'HEAD / HTTP/1.0\\r\\n\\r\\n'. The connection is "
+                "closed after the first read. To identify the service from the "
+                "captured banner, pass it to kaos-web-fingerprint-service. "
+                "For full-port sweeps, use kaos-web-tcp-probe first."
+            ),
+            category=ToolCategory.INTEGRATION,
+            capability=ToolCapability.QUERY,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_DOMAIN_LOCAL,
+            input_schema=[
+                ParameterSchema(name="host", type="string", description="Hostname or IP address."),
+                ParameterSchema(name="port", type="integer", description="TCP port number."),
+                ParameterSchema(
+                    name="send_probe",
+                    type="string",
+                    description=(
+                        "Optional probe payload sent as UTF-8 bytes after connect. "
+                        "Use '' (empty) for greet-on-connect services."
+                    ),
+                    required=False,
+                ),
+                ParameterSchema(
+                    name="timeout",
+                    type="number",
+                    description="Per-stage timeout (connect, send, read) in seconds.",
+                    required=False,
+                    default=5.0,
+                ),
+                ParameterSchema(
+                    name="max_bytes",
+                    type="integer",
+                    description="Maximum bytes to read from the socket.",
+                    required=False,
+                    default=4096,
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        from kaos_web.domain.tcp import probe_banner
+
+        host = inputs.get("host", "")
+        if not host:
+            return ToolResult.create_error(
+                "Parameter 'host' is required. "
+                "Try kaos-web-dns-lookup to resolve a domain to an IP first, or "
+                "kaos-web-tcp-probe to scan a host's open ports."
+            )
+
+        port_raw = inputs.get("port")
+        if port_raw is None:
+            return ToolResult.create_error(
+                "Parameter 'port' is required (e.g. 22 for SSH, 80 for HTTP). "
+                "Try kaos-web-tcp-probe to discover open ports first."
+            )
+        try:
+            port = int(port_raw)
+        except (TypeError, ValueError):
+            return ToolResult.create_error(
+                f"Invalid port {port_raw!r}: must be an integer 1-65535. "
+                "Try kaos-web-tcp-probe to discover open ports."
+            )
+        if not (1 <= port <= 65535):
+            return ToolResult.create_error(f"Port {port} out of range: must be 1-65535.")
+
+        send_probe_str = inputs.get("send_probe")
+        send_probe: bytes | None = None
+        if send_probe_str:
+            try:
+                # Allow common escape sequences in the input string
+                send_probe = (
+                    send_probe_str.encode("utf-8").decode("unicode_escape").encode("latin-1")
+                )
+            except (UnicodeDecodeError, UnicodeEncodeError) as exc:
+                return ToolResult.create_error(
+                    f"Could not encode send_probe as bytes: {exc}. "
+                    "Pass plain ASCII (e.g. 'HEAD / HTTP/1.0\\r\\n\\r\\n') or omit "
+                    "to wait for an unsolicited banner."
+                )
+
+        timeout = float(inputs.get("timeout", 5.0))
+        max_bytes = int(inputs.get("max_bytes", 4096))
+
+        try:
+            result = await probe_banner(
+                host,
+                port,
+                timeout=timeout,
+                send_probe=send_probe,
+                max_bytes=max_bytes,
+            )
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Banner probe failed for {host}:{port}: {exc}. "
+                "Try kaos-web-tcp-probe to verify port reachability, or "
+                "kaos-web-tls-inspect for TLS-wrapped ports."
+            )
+
+        # Drop banner_bytes from output (already encoded as banner string)
+        output = result.model_dump(mode="json", exclude={"banner_bytes"})
+        snippet = (result.banner or "").strip().splitlines()[0:1]
+        snippet_text = snippet[0][:80] if snippet else "(empty)"
+        return ToolResult.create_success(
+            output,
+            summary=f"{host}:{port} {result.status.value} — {snippet_text}",
+        )
+
+
+# ── 13. kaos-web-fingerprint-service ────────────────────────────────
+
+
+_DOMAIN_PURE = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+
+
+class FingerprintServiceTool(KaosTool):
+    """Identify a service from a banner string. Pure transform, no network."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-fingerprint-service",
+            display_name="Service Banner Fingerprint",
+            description=(
+                "Identify a service from its banner text. Returns ServiceIdentity "
+                "(service, product, version, extra, confidence). Recognises SSH, "
+                "SMTP, FTP, POP3, IMAP, HTTP, Redis with regex signatures; falls "
+                "back to a port-based hint when the banner doesn't match. Pure "
+                "transform — no network. Capture banners with kaos-web-tcp-banner "
+                "first."
+            ),
+            category=ToolCategory.INTEGRATION,
+            capability=ToolCapability.ANALYZE,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_DOMAIN_PURE,
+            input_schema=[
+                ParameterSchema(
+                    name="banner",
+                    type="string",
+                    description="Banner text captured from a TCP connection.",
+                ),
+                ParameterSchema(
+                    name="port",
+                    type="integer",
+                    description=(
+                        "Optional TCP port for fallback hinting when the banner "
+                        "doesn't match any signature."
+                    ),
+                    required=False,
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        from kaos_web.domain.fingerprint import fingerprint_banner
+
+        banner = inputs.get("banner", "")
+        port_raw = inputs.get("port")
+        port: int | None = None
+        if port_raw is not None:
+            try:
+                port = int(port_raw)
+            except (TypeError, ValueError):
+                return ToolResult.create_error(
+                    f"Invalid port {port_raw!r}: must be an integer or omitted."
+                )
+
+        try:
+            ident = fingerprint_banner(banner, port=port)
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Fingerprinting failed: {exc}. "
+                "Verify the banner is a string; for raw bytes use the Python API "
+                "kaos_web.domain.fingerprint.fingerprint_banner_bytes()."
+            )
+
+        output = ident.model_dump(mode="json")
+        parts = [ident.service]
+        if ident.product:
+            parts.append(ident.product)
+        if ident.version:
+            parts.append(f"v{ident.version}")
+        return ToolResult.create_success(
+            output,
+            summary=f"{' '.join(parts)} (confidence {ident.confidence:.2f})",
+        )
+
+
+# ── 14. kaos-web-udp-probe ──────────────────────────────────────────
+
+
+class UdpProbeTool(KaosTool):
+    """Protocol-aware UDP probe (DNS / NTP / SNMP / syslog)."""
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-udp-probe",
+            display_name="UDP Protocol Probe",
+            description=(
+                "Send a protocol-aware UDP probe and decode the response. "
+                "protocol='dns' sends a DNS query (default version.bind CHAOS TXT — "
+                "works on BIND/Unbound/PowerDNS); 'ntp' sends a 48-byte NTPv4 client "
+                "packet and decodes stratum/refid; 'snmp' sends an SNMPv1 GET for "
+                "sysDescr.0 (community defaults to 'public'); 'syslog' sends a "
+                "fire-and-forget '<14>kaos-web-probe' datagram and reports if the "
+                "kernel surfaced ICMP-unreachable. For TCP banners, use "
+                "kaos-web-tcp-banner instead."
+            ),
+            category=ToolCategory.INTEGRATION,
+            capability=ToolCapability.QUERY,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_DOMAIN_LOCAL,
+            input_schema=[
+                ParameterSchema(name="host", type="string", description="Target hostname or IP."),
+                ParameterSchema(
+                    name="protocol",
+                    type="string",
+                    description="UDP protocol to speak: dns, ntp, snmp, syslog.",
+                    constraints={"enum": ["dns", "ntp", "snmp", "syslog"]},
+                ),
+                ParameterSchema(
+                    name="port",
+                    type="integer",
+                    description=("UDP port. Defaults: dns=53, ntp=123, snmp=161, syslog=514."),
+                    required=False,
+                ),
+                ParameterSchema(
+                    name="timeout",
+                    type="number",
+                    description="Per-probe timeout in seconds.",
+                    required=False,
+                    default=5.0,
+                ),
+                ParameterSchema(
+                    name="community",
+                    type="string",
+                    description="SNMP v1 community string (snmp protocol only).",
+                    required=False,
+                    default="public",
+                ),
+                ParameterSchema(
+                    name="query_name",
+                    type="string",
+                    description="DNS query name (dns protocol only).",
+                    required=False,
+                    default="version.bind",
+                ),
+                ParameterSchema(
+                    name="query_type",
+                    type="string",
+                    description="DNS record type (dns protocol only).",
+                    required=False,
+                    default="TXT",
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        from kaos_web.domain.udp import probe_dns, probe_ntp, probe_snmp, probe_syslog
+
+        host = inputs.get("host", "")
+        if not host:
+            return ToolResult.create_error(
+                "Parameter 'host' is required. "
+                "Try kaos-web-dns-lookup to resolve a name to an IP first."
+            )
+        protocol = inputs.get("protocol", "")
+        if protocol not in ("dns", "ntp", "snmp", "syslog"):
+            return ToolResult.create_error(
+                f"Invalid protocol {protocol!r}: must be one of dns, ntp, snmp, syslog. "
+                "For TCP services use kaos-web-tcp-banner instead."
+            )
+
+        timeout = float(inputs.get("timeout", 5.0))
+        port_raw = inputs.get("port")
+        port: int | None = None
+        if port_raw is not None:
+            try:
+                port = int(port_raw)
+            except (TypeError, ValueError):
+                return ToolResult.create_error(
+                    f"Invalid port {port_raw!r}: must be an integer or omitted to use the default."
+                )
+
+        try:
+            if protocol == "dns":
+                result = await probe_dns(
+                    host,
+                    port if port is not None else 53,
+                    query_name=inputs.get("query_name", "version.bind"),
+                    query_type=inputs.get("query_type", "TXT"),
+                    timeout=timeout,
+                )
+            elif protocol == "ntp":
+                result = await probe_ntp(
+                    host,
+                    port if port is not None else 123,
+                    timeout=timeout,
+                )
+            elif protocol == "snmp":
+                result = await probe_snmp(
+                    host,
+                    port if port is not None else 161,
+                    community=inputs.get("community", "public"),
+                    timeout=timeout,
+                )
+            else:  # syslog
+                result = await probe_syslog(
+                    host,
+                    port if port is not None else 514,
+                    timeout=timeout,
+                )
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"UDP {protocol} probe failed for {host}:{port}: {exc}. "
+                "Try kaos-web-tcp-probe to verify host reachability, or "
+                "kaos-web-dns-lookup if querying a nameserver."
+            )
+
+        # Drop raw_response from output (binary, large)
+        output = result.model_dump(mode="json", exclude={"raw_response"})
+        return ToolResult.create_success(
+            output,
+            summary=f"{host}:{result.port}/udp {protocol} — {result.status.value}",
+        )
+
+
 # ── Registration ────────────────────────────────────────────────────
 
 
@@ -799,6 +1158,9 @@ def register_domain_tools(runtime: KaosRuntime) -> int:
         WhoisLookupTool(),
         DomainProfileTool(),
         ExtractOrgTool(),
+        TcpBannerTool(),
+        FingerprintServiceTool(),
+        UdpProbeTool(),
     ]
     for tool in tools:
         runtime.tools.register_tool(tool)
