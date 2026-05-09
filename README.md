@@ -68,4 +68,21 @@ kaos-web-serve --browser --crawl --debug
 
 The `--browser` flag adds 18 browser interaction tools (requires `kaos-web[browser]`).
 The `--crawl` flag adds 3 multi-page crawl/discovery tools.
+The `--domain` flag adds 11 domain-intelligence tools (DNS, WHOIS, TLS, HTTP probing, org-entity extraction).
 Without flags, only the 7 core extraction tools are registered.
+
+### Security note — domain-intelligence TLS verification
+
+The domain-intelligence tools (`kaos-web-http-headers`, `kaos-web-extract-org`)
+run with TLS certificate verification **disabled by default**. These tools
+target arbitrary third-party hosts whose cert configurations are the
+*subject* of inspection — failing closed on an expired or self-signed cert
+would defeat the purpose of the probe. To require standard CA validation
+on these probes, set:
+
+```bash
+export KAOS_WEB_DOMAIN_VERIFY_TLS=true
+```
+
+For verified GETs of trusted endpoints, use `kaos-web-fetch-page` (or the
+underlying `HttpClient`) — those paths keep TLS verification on.

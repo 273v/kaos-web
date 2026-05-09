@@ -56,6 +56,31 @@ class TestKaosWebSettingsDefaults:
         assert s.serpapi_api_key is None
         assert s.exa_api_key is None
         assert s.brave_api_key is None
+        # WEB2-001: domain-intel TLS verification defaults to OFF
+        assert s.domain_verify_tls is False
+
+
+class TestDomainVerifyTls:
+    """WEB2-001: KAOS_WEB_DOMAIN_VERIFY_TLS toggles cert verification on
+    domain-intelligence probes (analyze_headers, ExtractOrgTool)."""
+
+    def test_default_false(self) -> None:
+        s = KaosWebSettings()
+        assert s.domain_verify_tls is False
+
+    def test_env_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "true")
+        s = KaosWebSettings()
+        assert s.domain_verify_tls is True
+
+    def test_env_false_explicit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAOS_WEB_DOMAIN_VERIFY_TLS", "false")
+        s = KaosWebSettings()
+        assert s.domain_verify_tls is False
+
+    def test_constructor_override(self) -> None:
+        s = KaosWebSettings(domain_verify_tls=True)
+        assert s.domain_verify_tls is True
 
 
 class TestKaosWebSettingsNewEnvVars:

@@ -105,6 +105,19 @@ class KaosWebSettings(ModuleSettings):
     crawl_over_discover_factor: int = 3
     """Factor to multiply max_pages for over-discovery."""
 
+    # Domain intelligence
+    domain_verify_tls: bool = False
+    """Whether to verify TLS certificates on domain-intelligence probes
+    (``analyze_headers``, ``extract_org_entity``).
+
+    Defaults to ``False`` because these probes target arbitrary third-party
+    hosts whose TLS configuration is the *subject* of inspection — failing
+    closed on an expired or self-signed cert would prevent the very
+    inspection the user requested. Set to ``True`` (or
+    ``KAOS_WEB_DOMAIN_VERIFY_TLS=true``) when you only want results from
+    hosts that pass standard CA validation.
+    """
+
     # Middleware defaults
     middleware_retry_max_retries: int = 3
     middleware_retry_initial_delay: float = 1.0

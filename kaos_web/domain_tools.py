@@ -197,7 +197,10 @@ class HttpHeadersTool(KaosTool):
                 "Send a HEAD request and analyze response headers. Returns status code, "
                 "all headers, server software, CDN detection, and security header analysis "
                 "(HSTS, CSP, X-Frame-Options, etc.) with a 0-100 security score. "
-                "For TLS certificate details, use kaos-web-tls-inspect."
+                "For TLS certificate details, use kaos-web-tls-inspect. "
+                "SECURITY: TLS verification is OFF by default (the cert is the subject "
+                "of inspection). Set KAOS_WEB_DOMAIN_VERIFY_TLS=true to require CA "
+                "validation; for verified GETs use kaos-web-fetch-page instead."
             ),
             category=ToolCategory.INTEGRATION,
             capability=ToolCapability.QUERY,
@@ -215,6 +218,7 @@ class HttpHeadersTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         from kaos_web.domain.http import analyze_headers
+        from kaos_web.settings import KaosWebSettings
 
         url = inputs.get("url", "")
         if not url:
@@ -222,7 +226,8 @@ class HttpHeadersTool(KaosTool):
                 "Parameter 'url' is required (e.g. 'https://example.com')."
             )
 
-        result = await analyze_headers(url)
+        settings = KaosWebSettings.from_context(context)
+        result = await analyze_headers(url, verify_tls=settings.domain_verify_tls)
         if result.error:
             return ToolResult.create_error(
                 f"HTTP request failed: {result.error}. "
@@ -701,7 +706,10 @@ class ExtractOrgTool(KaosTool):
                 "Uses JSON-LD structured data, OpenGraph, meta tags, and footer text "
                 "pattern matching. No LLM required. "
                 "For full domain infrastructure, use kaos-web-domain-profile. "
-                "For GLEIF entity lookup, use kaos-source-gleif-search."
+                "For GLEIF entity lookup, use kaos-source-gleif-search. "
+                "SECURITY: TLS verification is OFF by default to handle heterogeneous "
+                "corporate cert configs. Set KAOS_WEB_DOMAIN_VERIFY_TLS=true to require "
+                "CA validation; for verified GETs use kaos-web-fetch-page instead."
             ),
             category=ToolCategory.DOCUMENT,
             capability=ToolCapability.EXTRACT,
@@ -720,6 +728,8 @@ class ExtractOrgTool(KaosTool):
     async def execute(
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
+        from kaos_web.settings import KaosWebSettings
+
         url = inputs.get("url", "")
         if not url:
             return ToolResult.create_error(
@@ -728,11 +738,19 @@ class ExtractOrgTool(KaosTool):
 
         import httpx
 
+        settings = KaosWebSettings.from_context(context)
         try:
+            # TLS verification is OFF by default (KAOS_WEB_DOMAIN_VERIFY_TLS=false):
+            # this endpoint targets arbitrary corporate sites whose cert
+            # configurations are heterogeneous and sometimes intentionally
+            # self-signed for staging/legacy reasons. Failing closed on cert
+            # errors would prevent extracting public-record org metadata
+            # (legal name, jurisdiction) which is the entire purpose. Set
+            # KAOS_WEB_DOMAIN_VERIFY_TLS=true to require CA validation.
             async with httpx.AsyncClient(
                 timeout=15.0,
                 follow_redirects=True,
-                verify=False,
+                verify=settings.domain_verify_tls,
             ) as client:
                 resp = await client.get(url)
                 html = resp.text

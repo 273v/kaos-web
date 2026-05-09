@@ -141,6 +141,7 @@ async def analyze_headers(
     *,
     timeout: float = 10.0,
     follow_redirects: bool = False,
+    verify_tls: bool = False,
 ) -> HttpHeadersResult:
     """Fetch HTTP headers and analyze server/security posture.
 
@@ -148,15 +149,26 @@ async def analyze_headers(
         url: Full URL to probe (e.g., ``https://example.com``).
         timeout: Request timeout in seconds.
         follow_redirects: Whether to follow redirects.
+        verify_tls: When ``False`` (default), TLS certificates are NOT
+            verified. This is intentional for domain-intelligence probes —
+            the cert is part of what we're inspecting, and failing closed
+            on an expired or self-signed cert would defeat the purpose of
+            the probe. Pass ``True`` to require standard CA validation.
 
     Returns:
         HttpHeadersResult with headers, server info, and security analysis.
+
+    Security note:
+        Default ``verify_tls=False`` accepts any cert presented by the
+        target host — DO NOT use this function as a transport for
+        sensitive data. For verified GETs use the ``kaos-web-fetch-page``
+        / ``HttpClient`` paths which keep TLS verification on.
     """
     try:
         async with httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=follow_redirects,
-            verify=False,
+            verify=verify_tls,
         ) as client:
             response = await client.head(url)
 
