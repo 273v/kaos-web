@@ -1,15 +1,19 @@
 """Performance benchmarks for HTML extraction pipeline.
 
-Run with: uv run pytest tests/unit/test_benchmarks.py -v --benchmark-only
+Run with: uv run pytest tests/benchmarks/ -v --benchmark-only
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from kaos_web.extract.html_to_ast import html_to_document
 from kaos_web.extract.metadata import extract_metadata
 from kaos_web.extract.readability import extract_content
+
+pytestmark = pytest.mark.benchmark
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 ARTICLE_HTML = (FIXTURES / "article.html").read_text()

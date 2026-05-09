@@ -90,6 +90,7 @@ addopts = [
 markers = [
   "integration: tests that hit real HTTP servers (require network)",
   "live: tests that require API keys (SERPAPI, BRAVE, EXA, etc.)",
+  "benchmark: pytest-benchmark performance tests (tests/benchmarks/)",
 ]
 
 [tool.ruff]
