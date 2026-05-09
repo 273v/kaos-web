@@ -21,6 +21,28 @@ from kaos_web.clients.browser import (
     BrowserClient,
 )
 
+
+@pytest.fixture(autouse=True)
+def _block_real_playwright_launch():
+    """Hard-fail any test in this module that reaches a real Playwright launch.
+
+    Why: three tests in this file call ``BrowserClient.fetch()``, which
+    routes through ``_ensure_browser()``. The audit (WEB-001) flagged that
+    those tests would launch real Chromium when ``_browser`` was unset. The
+    helper now seeds ``_browser``/``_playwright``; this fixture is the
+    belt-and-suspenders guard that turns any regression into an immediate,
+    obvious failure instead of a silent Chromium launch.
+    """
+    with patch(
+        "playwright.async_api.async_playwright",
+        side_effect=AssertionError(
+            "unit test reached real playwright.async_api.async_playwright(); "
+            "seed BrowserClient._browser with a MagicMock in test setup"
+        ),
+    ):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -45,12 +67,19 @@ def _mock_context(page: MagicMock | None = None) -> MagicMock:
 def _setup_client_with_context(
     context_id: str = "s1",
 ) -> tuple[BrowserClient, MagicMock]:
-    """Create a BrowserClient with a mock context and page."""
+    """Create a BrowserClient with a fully-mocked browser, context, and page.
+
+    Seeds ``_browser`` and ``_playwright`` so ``_ensure_browser()`` short-
+    circuits and never reaches ``async_playwright().start()`` — keeping these
+    tests offline and bounded.
+    """
     client = BrowserClient()
     page = _mock_page()
     ctx = _mock_context(page)
     client._contexts[context_id] = ctx
     client._pages[context_id] = page
+    client._browser = MagicMock()
+    client._playwright = MagicMock()
     return client, page
 
 
