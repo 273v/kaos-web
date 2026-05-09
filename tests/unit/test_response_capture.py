@@ -1130,3 +1130,159 @@ class TestListCapturedResponsesErrorContract:
             assert "capture_bodies" in text
             # Alternative
             assert "kaos-web-browser-requests" in text
+
+
+# --- WEB5-003: observed-traffic redaction ---
+
+
+class TestRedactObservedTraffic:
+    """``KAOS_WEB_REDACT_OBSERVED_TRAFFIC=true`` (default) masks
+    auth-shaped headers in CAPTURED request/response logs.
+
+    Distinguishes:
+    - Agent's OWN session cookies (returned by GetCookiesTool) — NOT
+      masked. (See ``test_get_cookies_returns_unredacted`` in
+      test_browser_interaction.py for that contract.)
+    - Headers OBSERVED via request logging on third-party sites —
+      MASKED by default; opt-out via env var.
+    """
+
+    def test_should_redact_authorization(self) -> None:
+        from kaos_web.clients.browser import _should_redact_header
+
+        assert _should_redact_header("Authorization") is True
+        assert _should_redact_header("authorization") is True
+        assert _should_redact_header("AUTHORIZATION") is True
+
+    def test_should_redact_cookie_variants(self) -> None:
+        from kaos_web.clients.browser import _should_redact_header
+
+        assert _should_redact_header("Cookie") is True
+        assert _should_redact_header("Set-Cookie") is True
+        assert _should_redact_header("Proxy-Authorization") is True
+
+    def test_should_redact_api_key_variants(self) -> None:
+        from kaos_web.clients.browser import _should_redact_header
+
+        assert _should_redact_header("X-API-Key") is True
+        assert _should_redact_header("X-Auth-Token") is True
+        assert _should_redact_header("X-CSRF-Token") is True
+
+    def test_should_redact_pattern_catchall(self) -> None:
+        from kaos_web.clients.browser import _should_redact_header
+
+        # Defensive regex catches arbitrary token/secret/auth headers.
+        assert _should_redact_header("X-Custom-Bearer-Token") is True
+        assert _should_redact_header("My-Secret-Header") is True
+        assert _should_redact_header("X-Service-Auth") is True
+
+    def test_should_not_redact_normal_headers(self) -> None:
+        from kaos_web.clients.browser import _should_redact_header
+
+        assert _should_redact_header("Content-Type") is False
+        assert _should_redact_header("User-Agent") is False
+        assert _should_redact_header("Accept") is False
+        assert _should_redact_header("Cache-Control") is False
+
+    def test_redact_format_preserves_byte_count(self) -> None:
+        from kaos_web.clients.browser import _maybe_redact_headers
+
+        out = _maybe_redact_headers(
+            {"Authorization": "Bearer abcdef", "User-Agent": "Mozilla/5.0"},
+            enabled=True,
+        )
+        assert out["Authorization"] == "<redacted: 13 bytes>"
+        assert out["User-Agent"] == "Mozilla/5.0"
+
+    def test_redact_disabled_returns_raw(self) -> None:
+        from kaos_web.clients.browser import _maybe_redact_headers
+
+        raw = {"Authorization": "Bearer alice"}
+        out = _maybe_redact_headers(raw, enabled=False)
+        assert out == raw
+        assert out is not raw  # Always a copy, never alias
+
+    @pytest.mark.asyncio
+    async def test_request_log_redacts_by_default(self):
+        """End-to-end: enable_request_logging then a captured request
+        with auth-shaped headers stores them as masked values."""
+        client, page = _setup_client_with_context()
+        await client.enable_request_logging("s1")
+        request_handler = page.on.call_args_list[0][0][1]
+
+        mock_req = MagicMock()
+        mock_req.url = "https://api.example.com/data"
+        mock_req.method = "GET"
+        mock_req.resource_type = "fetch"
+        mock_req.headers = {
+            "Authorization": "Bearer secret-token-12345",
+            "Cookie": "sid=verysecret",
+            "User-Agent": "Mozilla/5.0",
+        }
+        mock_req.post_data = None
+        mock_req.is_navigation_request = MagicMock(return_value=False)
+        request_handler(mock_req)
+
+        log = client._request_logs["s1"]
+        assert log[0]["headers"]["Authorization"].startswith("<redacted:")
+        assert "secret-token" not in log[0]["headers"]["Authorization"]
+        assert log[0]["headers"]["Cookie"].startswith("<redacted:")
+        assert log[0]["headers"]["User-Agent"] == "Mozilla/5.0"
+
+    @pytest.mark.asyncio
+    async def test_request_log_no_redact_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Opt-out via env var returns raw header values for security
+        research / debugging workflows."""
+        monkeypatch.setenv("KAOS_WEB_REDACT_OBSERVED_TRAFFIC", "false")
+
+        client, page = _setup_client_with_context()
+        await client.enable_request_logging("s1")
+        request_handler = page.on.call_args_list[0][0][1]
+
+        mock_req = MagicMock()
+        mock_req.url = "https://api.example.com/data"
+        mock_req.method = "GET"
+        mock_req.resource_type = "fetch"
+        mock_req.headers = {"Authorization": "Bearer raw-token"}
+        mock_req.post_data = None
+        mock_req.is_navigation_request = MagicMock(return_value=False)
+        request_handler(mock_req)
+
+        log = client._request_logs["s1"]
+        assert log[0]["headers"]["Authorization"] == "Bearer raw-token"
+
+    @pytest.mark.asyncio
+    async def test_response_headers_redacted_by_default(self):
+        """End-to-end: response headers go through the same masking."""
+        client, page = _setup_client_with_context()
+        await client.enable_request_logging("s1", capture_bodies=True)
+        request_handler = page.on.call_args_list[0][0][1]
+        response_handler = page.on.call_args_list[1][0][1]
+
+        # Pre-record the request so the response handler matches it.
+        mock_req = MagicMock()
+        mock_req.url = "https://api.example.com/login"
+        mock_req.method = "POST"
+        mock_req.resource_type = "fetch"
+        mock_req.headers = {}
+        mock_req.post_data = None
+        mock_req.is_navigation_request = MagicMock(return_value=False)
+        request_handler(mock_req)
+
+        resp = _mock_response(url="https://api.example.com/login")
+        # Override response headers to include auth-shaped ones.
+        resp.headers = {
+            "Content-Type": "application/json",
+            "Set-Cookie": "session=verysecret-session-id; HttpOnly",
+            "X-Auth-Token": "rotated-token-abc",
+        }
+        await response_handler(resp)
+
+        log = client._request_logs["s1"]
+        rh = log[0]["response_headers"]
+        assert rh["Content-Type"] == "application/json"
+        assert rh["Set-Cookie"].startswith("<redacted:")
+        assert "verysecret" not in rh["Set-Cookie"]
+        assert rh["X-Auth-Token"].startswith("<redacted:")

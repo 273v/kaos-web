@@ -131,6 +131,34 @@ class KaosWebSettings(ModuleSettings):
     Env var: ``KAOS_WEB_MAX_BODY_BYTES``.
     """
 
+    # WEB5-003 / audit-04 finding #3 — observed-traffic redaction
+    redact_observed_traffic: bool = True
+    """Whether to mask sensitive headers in CAPTURED third-party traffic
+    (request/response logs, captured response bodies metadata).
+
+    Default ``True`` (secure-by-default). Distinguishes:
+    - The agent's OWN session cookies (returned by
+      ``kaos-web-browser-cookies`` / ``GetCookiesTool``) — these
+      remain unredacted because the agent set them.
+    - Cookies / Authorization / API-key headers OBSERVED via request
+      logging on third-party sites — these are masked because they're
+      not the agent's to retain.
+
+    The redaction format ``<redacted: N bytes>`` preserves length
+    information (useful for "what kind of token did this site set?"
+    pattern detection) without leaking the value bytes.
+
+    Headers masked: ``Authorization``, ``Proxy-Authorization``,
+    ``Cookie``, ``Set-Cookie``, ``X-API-Key``, ``X-Auth-Token``,
+    ``X-CSRF-Token``, plus any header whose name matches the regex
+    ``(?i).*(?:secret|token|api[_-]?key|password|auth).*`` (defensive
+    catch-all).
+
+    Set ``KAOS_WEB_REDACT_OBSERVED_TRAFFIC=false`` to disable masking
+    for explicit security-research workflows where the raw bytes are
+    the intended observation.
+    """
+
     # Domain intelligence
     domain_verify_tls: bool = True
     """Whether to verify TLS certificates on domain-intelligence probes

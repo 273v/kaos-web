@@ -16,6 +16,7 @@ Features:
 from __future__ import annotations
 
 import contextlib
+import re
 from typing import Any, Never, Self
 
 from kaos_core.logging import get_logger
@@ -46,6 +47,47 @@ _DEFAULT_CAPTURE_CONTENT_TYPES = frozenset(
     }
 )
 _DEFAULT_MAX_BODY_SIZE = 1_048_576  # 1 MB
+
+# WEB5-003: header-name allowlist for redaction in OBSERVED third-party
+# traffic. Mask only on capture (request log + response headers in log);
+# never mask the agent's own cookie/header surfaces (GetCookiesTool,
+# SetCookieTool, navigation outbound headers).
+_REDACT_HEADER_NAMES = frozenset(
+    {
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "set-cookie",
+        "x-api-key",
+        "x-auth-token",
+        "x-csrf-token",
+    }
+)
+_REDACT_NAME_PATTERN = re.compile(r"(?i).*(?:secret|token|api[_-]?key|password|auth).*")
+
+
+def _should_redact_header(name: str) -> bool:
+    """Return True if a header name is auth-shaped or in the allowlist."""
+    lower = name.lower()
+    return lower in _REDACT_HEADER_NAMES or bool(_REDACT_NAME_PATTERN.match(lower))
+
+
+def _maybe_redact_headers(headers: dict[str, str], enabled: bool) -> dict[str, str]:
+    """Return a copy of ``headers`` with sensitive values masked when enabled.
+
+    Mask format: ``<redacted: N bytes>`` preserves the original byte
+    length (useful for "what kind of token did this site set?" pattern
+    detection) without leaking the value itself.
+    """
+    if not enabled:
+        return dict(headers)
+    redacted: dict[str, str] = {}
+    for name, value in headers.items():
+        if _should_redact_header(name):
+            redacted[name] = f"<redacted: {len(value)} bytes>"
+        else:
+            redacted[name] = value
+    return redacted
 
 
 class BrowserClient:
@@ -561,6 +603,8 @@ class BrowserClient:
         capture_bodies: bool = config["capture_bodies"]
         capture_resource_types: frozenset[str] = config["resource_types"]
         max_body_size: int = config["max_body_size"]
+        # WEB5-003: per-context redaction posture (frozen at log-enable time).
+        redact: bool = config.get("redact", True)
         capture_ct_prefixes = _DEFAULT_CAPTURE_CONTENT_TYPES
 
         def _on_request(request: Any) -> None:
@@ -570,7 +614,11 @@ class BrowserClient:
                     "url": request.url,
                     "method": request.method,
                     "resource_type": request.resource_type,
-                    "headers": dict(request.headers),
+                    # Mask sensitive request headers at capture time. The
+                    # agent's outbound headers may include legitimate auth
+                    # to the target site; we don't want them returned as
+                    # raw bytes via list-requests / get-request-detail.
+                    "headers": _maybe_redact_headers(dict(request.headers), redact),
                     "post_data": request.post_data,
                     "is_navigation_request": request.is_navigation_request(),
                 }
@@ -586,7 +634,11 @@ class BrowserClient:
                     if entry["url"] == response.url and "status" not in entry:
                         entry["status"] = response.status
                         entry["status_text"] = response.status_text
-                        entry["response_headers"] = dict(response.headers)
+                        # WEB5-003: mask Set-Cookie, Set-Cookie2, and any
+                        # auth-shaped response headers at capture.
+                        entry["response_headers"] = _maybe_redact_headers(
+                            dict(response.headers), redact
+                        )
                         matched_entry = entry
                         break
 
@@ -645,7 +697,11 @@ class BrowserClient:
                     if entry["url"] == response.url and "status" not in entry:
                         entry["status"] = response.status
                         entry["status_text"] = response.status_text
-                        entry["response_headers"] = dict(response.headers)
+                        # WEB5-003: same redaction posture as the
+                        # body-capturing variant above.
+                        entry["response_headers"] = _maybe_redact_headers(
+                            dict(response.headers), redact
+                        )
                         break
 
         page.on("request", _on_request)
@@ -681,6 +737,14 @@ class BrowserClient:
 
         resolved_resource_types = resource_types or _DEFAULT_CAPTURE_RESOURCE_TYPES
 
+        # WEB5-003: read the redaction setting once at log-enable time so
+        # the same posture applies to every captured request in this
+        # context (a flip of the env var mid-session won't change the
+        # masking behavior for an already-running log).
+        from kaos_web.settings import KaosWebSettings
+
+        redact = KaosWebSettings().redact_observed_traffic
+
         # Store config so fetch() can re-attach handlers on page replacement
         if not hasattr(self, "_logging_config"):
             self._logging_config: dict[str, dict[str, Any]] = {}
@@ -688,6 +752,7 @@ class BrowserClient:
             "capture_bodies": capture_bodies,
             "resource_types": resolved_resource_types,
             "max_body_size": max_body_size,
+            "redact": redact,
         }
 
         # Initialize log storage

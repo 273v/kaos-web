@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Observed third-party traffic redacts sensitive headers by default**
+  (WEB5-003). When ``kaos-web-browser-log-requests`` captures network
+  traffic, the recorded request and response headers now mask values
+  for ``Authorization``, ``Proxy-Authorization``, ``Cookie``,
+  ``Set-Cookie``, ``X-API-Key``, ``X-Auth-Token``, ``X-CSRF-Token``,
+  plus any header whose name matches the catch-all
+  ``(?i).*(?:secret|token|api[_-]?key|password|auth).*``. Mask format
+  ``<redacted: N bytes>`` preserves length information without leaking
+  the value. New ``KAOS_WEB_REDACT_OBSERVED_TRAFFIC`` env var
+  (default ``true``); set ``false`` for explicit security-research
+  workflows. The agent's OWN session cookies (returned by
+  ``kaos-web-browser-cookies`` / ``GetCookiesTool``) are NOT
+  redacted — they're the agent's own state.
+
 - **Response-body size cap enforced at every fetch site** (WEB5-007).
   New `KaosWebSettings.max_body_bytes` (env: `KAOS_WEB_MAX_BODY_BYTES`,
   default 50 MB) bounds memory usage on hostile or misconfigured
