@@ -56,8 +56,8 @@ Key modules:
 - `batch.py` — Concurrent URL fetching with asyncio.Semaphore
 - `crawl.py` — BFS site crawl orchestrator with depth/page limits
 - `crawl_tools.py` — 3 crawl MCP tools (discover-urls, batch-fetch, crawl-site)
-- `domain/` — Domain intelligence package: `tcp.py` (async port probing), `tls.py` (stdlib SSL cert inspection with validated→fallback pattern), `http.py` (header + security scoring + CDN detection), `service.py` (composite), `dns.py` (dnspython-based queries + reverse PTR + DNSSEC + zone transfers), `security.py` (SPF/DKIM/DMARC parsing, 12 DKIM selectors), `whois.py` (own stdlib WHOIS client, 55-TLD server map, referral following), `profile.py` (composite domain profile), `org.py` (Schema.org Organization/LegalService/Attorney entity extraction from JSON-LD + OpenGraph + footer patterns), `models.py` (Pydantic models)
-- `domain_tools.py` — 11 domain intelligence MCP tools (tcp-probe, tls-inspect, http-headers, service-detect, dns-lookup, dns-enumerate, dns-zone-transfer, dns-security, whois-lookup, domain-profile, extract-org). Registered via `register_domain_tools()` and enabled with `kaos-web-serve --domain`.
+- `domain/` — Domain intelligence package: `tcp.py` (async port probing + banner grabbing), `tls.py` (stdlib SSL cert inspection with validated→fallback pattern), `http.py` (header + security scoring + CDN detection), `service.py` (composite), `dns.py` (dnspython-based queries + reverse PTR + DNSSEC + zone transfers), `udp.py` (UDP protocol-aware probes — DNS / NTP / SNMPv1 / syslog), `fingerprint.py` (pure banner→ServiceIdentity fingerprinting, no I/O), `security.py` (SPF/DKIM/DMARC parsing, 12 DKIM selectors), `whois.py` (own stdlib WHOIS client, 55-TLD server map, referral following), `profile.py` (composite domain profile), `org.py` (Schema.org Organization/LegalService/Attorney entity extraction from JSON-LD + OpenGraph + footer patterns), `models.py` (Pydantic models)
+- `domain_tools.py` — 14 domain intelligence MCP tools (tcp-probe, tls-inspect, http-headers, service-detect, dns-lookup, dns-enumerate, dns-zone-transfer, dns-security, whois-lookup, domain-profile, extract-org, **tcp-banner**, **fingerprint-service**, **udp-probe**). Registered via `register_domain_tools()` and enabled with `kaos-web-serve --domain`.
 - `cli.py` — CLI with fetch, search, metadata commands
 
 ## Dependencies
@@ -243,6 +243,29 @@ All with `openWorldHint=True`, `readOnlyHint=True`, `idempotentHint=True`:
 | CrawlSiteTool | `kaos-web-crawl-site` | Full site crawl with sitemap-first BFS discovery |
 
 Firecrawl-style Map/Crawl: `discover-urls` first (fast, returns URL list), then `batch-fetch` or `crawl-site` on a subset. The `sitemap` parameter (`include`/`skip`/`only`) controls whether sitemaps are used for URL discovery.
+
+### Domain intelligence tools (14) — `domain_tools.py`
+
+Enable with `kaos-web-serve --domain`. All `openWorldHint=True`, `readOnlyHint=True`, `idempotentHint=True` EXCEPT `FingerprintServiceTool` which is `openWorldHint=False` (pure transform, no I/O).
+
+| Tool | Name | Purpose |
+|------|------|---------|
+| TcpProbeTool | `kaos-web-tcp-probe` | Probe TCP ports (preset web/mail/ssh/dns/ftp/database/default or explicit list) |
+| TlsInspectTool | `kaos-web-tls-inspect` | Connect to host:port and extract cert subject/issuer/SAN/expiry/protocol/cipher |
+| HttpHeadersTool | `kaos-web-http-headers` | HEAD request → server software, CDN detection, security score (0-100). SECURITY: TLS verify off by default |
+| ServiceDetectTool | `kaos-web-service-detect` | Composite service detection (HTTP + CDN + headers) |
+| DnsLookupTool | `kaos-web-dns-lookup` | Single DNS record-type query |
+| DnsEnumerateTool | `kaos-web-dns-enumerate` | Full enumeration: all common record types + reverse PTR + DNSSEC |
+| DnsZoneTransferTool | `kaos-web-dns-zone-transfer` | Attempt AXFR (refused = expected, success = misconfig) |
+| DnsSecurityTool | `kaos-web-dns-security` | SPF/DKIM/DMARC mail-auth posture |
+| WhoisLookupTool | `kaos-web-whois-lookup` | Stdlib WHOIS client, 55-TLD server map, referral following |
+| DomainProfileTool | `kaos-web-domain-profile` | Composite profile (services + mail-security + WHOIS + DNS) |
+| ExtractOrgTool | `kaos-web-extract-org` | Schema.org JSON-LD/OpenGraph/footer org-entity extraction. SECURITY: TLS verify off by default |
+| TcpBannerTool | `kaos-web-tcp-banner` | Open TCP, optionally send probe payload, capture service banner |
+| FingerprintServiceTool | `kaos-web-fingerprint-service` | Pure banner→ServiceIdentity (SSH, SMTP, FTP, POP3, IMAP, HTTP, MySQL, PostgreSQL, Redis). No I/O |
+| UdpProbeTool | `kaos-web-udp-probe` | UDP probes — `protocol` enum: dns / ntp / snmp / syslog |
+
+`KAOS_WEB_DOMAIN_VERIFY_TLS=true` forces CA validation on `kaos-web-http-headers` and `kaos-web-extract-org` (default off — these probes target hosts whose cert configs are the *subject* of inspection).
 
 ## Middleware
 
