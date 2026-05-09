@@ -96,7 +96,7 @@ async def crawl_site(
     Returns:
         CrawlResult with pages, errors, and statistics.
     """
-    from kaos_web.discovery import _compile_patterns, _matches_patterns, discover_urls
+    from kaos_web.discover.discovery import _compile_patterns, _matches_patterns, discover_urls
     from kaos_web.settings import KaosWebSettings
 
     s = settings or KaosWebSettings()

@@ -12,9 +12,9 @@ import pytest
 
 from kaos_web.clients.config import BrowserClientConfig, HttpClientConfig
 from kaos_web.clients.http import HttpClient
+from kaos_web.discover.sitemap import discover_sitemaps, parse_sitemap
 from kaos_web.extract import extract_metadata, html_to_document
 from kaos_web.models import WebRequest
-from kaos_web.sitemap import discover_sitemaps, parse_sitemap
 
 pytestmark = pytest.mark.integration
 
@@ -124,7 +124,7 @@ class TestHttpxE2E:
 
     @pytest.mark.asyncio
     async def test_discovery_page_links(self):
-        from kaos_web.discovery import discover_urls
+        from kaos_web.discover.discovery import discover_urls
 
         async with HttpClient(_HTTP_CONFIG) as client:
             result = await discover_urls(_SITE, client.fetch, sitemap="skip", max_urls=50)
@@ -136,7 +136,7 @@ class TestHttpxE2E:
 
     @pytest.mark.asyncio
     async def test_batch_fetch(self):
-        from kaos_web.batch import batch_fetch
+        from kaos_web.discover.batch import batch_fetch
 
         urls = [
             f"{_SITE}/",
@@ -153,7 +153,7 @@ class TestHttpxE2E:
 
     @pytest.mark.asyncio
     async def test_crawl_depth_zero(self):
-        from kaos_web.crawl import crawl_site
+        from kaos_web.discover.crawl import crawl_site
 
         result = await crawl_site(
             _SITE,
@@ -168,7 +168,7 @@ class TestHttpxE2E:
 
     @pytest.mark.asyncio
     async def test_crawl_depth_one(self):
-        from kaos_web.crawl import crawl_site
+        from kaos_web.discover.crawl import crawl_site
 
         result = await crawl_site(
             _SITE,
@@ -188,7 +188,7 @@ class TestHttpxE2E:
 
     @pytest.mark.asyncio
     async def test_crawl_with_pattern_filter(self):
-        from kaos_web.crawl import crawl_site
+        from kaos_web.discover.crawl import crawl_site
 
         result = await crawl_site(
             _SITE,

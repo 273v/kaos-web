@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 from kaos_core.logging import get_logger
+from kaos_web.discover.sitemap import FetchFn
 from kaos_web.models import WebRequest
-from kaos_web.sitemap import FetchFn
 
 if TYPE_CHECKING:
     from kaos_web.settings import KaosWebSettings
@@ -109,8 +109,8 @@ async def discover_urls(
     Returns:
         DiscoveryResult with deduplicated, filtered URLs.
     """
+    from kaos_web.discover.sitemap import discover_sitemaps, parse_sitemap
     from kaos_web.settings import KaosWebSettings
-    from kaos_web.sitemap import discover_sitemaps, parse_sitemap
 
     s = settings or KaosWebSettings()
     result = DiscoveryResult()

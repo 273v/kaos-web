@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from kaos_web.batch import batch_fetch
 from kaos_web.clients.config import HttpClientConfig
 from kaos_web.clients.http import HttpClient
-from kaos_web.crawl import crawl_site
-from kaos_web.discovery import discover_urls
-from kaos_web.sitemap import discover_sitemaps, parse_sitemap
+from kaos_web.discover.batch import batch_fetch
+from kaos_web.discover.crawl import crawl_site
+from kaos_web.discover.discovery import discover_urls
+from kaos_web.discover.sitemap import discover_sitemaps, parse_sitemap
 
 # All tests in this file require network access
 pytestmark = pytest.mark.integration

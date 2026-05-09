@@ -16,7 +16,7 @@ registered, so adding entries does not degrade no-banner performance.
 
 Usage::
 
-    from kaos_web.browser_page_prep import dismiss_cookie_banners
+    from kaos_web.clients.page_prep import dismiss_cookie_banners
 
     # After page.goto(), before page.content():
     dismissed = await dismiss_cookie_banners(page)

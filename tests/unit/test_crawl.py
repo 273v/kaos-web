@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from kaos_web.crawl import _normalize_url, crawl_site
+from kaos_web.discover.crawl import _normalize_url, crawl_site
 from kaos_web.models import WebResponse
 
 # HTML with internal links
@@ -77,7 +77,7 @@ class TestCrawlSite:
                 "https://example.com": (200, PAGE_HTML),
             }
         )
-        with patch("kaos_web.crawl.HttpClient", return_value=client):
+        with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
             result = await crawl_site("https://example.com", max_depth=0, sitemap="skip")
 
         assert result.total_extracted >= 1
@@ -97,7 +97,7 @@ class TestCrawlSite:
                 "https://example.com/page3": (200, CHILD_HTML),
             }
         )
-        with patch("kaos_web.crawl.HttpClient", return_value=client):
+        with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
             result = await crawl_site("https://example.com", max_depth=1, sitemap="skip")
 
         assert result.total_extracted >= 2
@@ -117,7 +117,7 @@ class TestCrawlSite:
                 "https://example.com/page3": (200, CHILD_HTML),
             }
         )
-        with patch("kaos_web.crawl.HttpClient", return_value=client):
+        with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
             result = await crawl_site("https://example.com", max_pages=2, sitemap="skip")
 
         assert len(result.pages) <= 2
@@ -151,7 +151,7 @@ class TestCrawlSite:
 
         client.fetch = patched_fetch
 
-        with patch("kaos_web.crawl.HttpClient", return_value=client):
+        with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
             result = await crawl_site("https://example.com", max_depth=1, sitemap="skip")
 
         # Should have at least the start page despite errors
@@ -168,7 +168,7 @@ class TestCrawlSite:
                 "https://example.com": (200, PAGE_HTML),
             }
         )
-        with patch("kaos_web.crawl.HttpClient", return_value=client):
+        with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
             result = await crawl_site("https://example.com", max_depth=2, sitemap="skip")
 
         urls = {p.url for p in result.pages}
@@ -184,7 +184,7 @@ class TestCrawlSite:
                 "https://example.com": (200, PAGE_HTML),
             }
         )
-        with patch("kaos_web.crawl.HttpClient", return_value=client):
+        with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
             result = await crawl_site("https://example.com", max_depth=0, sitemap="skip")
         assert result.elapsed_ms > 0
 
@@ -199,6 +199,6 @@ class TestCrawlSite:
                 "https://example.com": (200, PAGE_HTML),
             }
         )
-        with patch("kaos_web.crawl.HttpClient", return_value=client):
+        with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
             result = await crawl_site("example.com", max_depth=0, sitemap="skip")
         assert len(result.pages) >= 1

@@ -3,8 +3,8 @@
 Coverage backfill (audit-03 WEB3-005): exercises the execute() bodies of
 DiscoverUrlsTool, BatchFetchTool, and CrawlSiteTool — input parsing, success
 shaping, error translation, artifact-storage path, and the format branches
-of CrawlSiteTool. The underlying ``kaos_web.discovery``, ``kaos_web.batch``,
-and ``kaos_web.crawl`` functions are mocked; tests assert on contract
+of CrawlSiteTool. The underlying ``kaos_web.discover.discovery``, ``kaos_web.discover.batch``,
+and ``kaos_web.discover.crawl`` functions are mocked; tests assert on contract
 semantics (output shape, error text contents, artifact-creation effects).
 """
 
@@ -17,8 +17,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kaos_core import ToolResult
-from kaos_web.batch import BatchError, BatchResult
-from kaos_web.crawl import CrawlError, CrawlPage, CrawlResult
 from kaos_web.crawl_tools import (
     BatchFetchTool,
     CrawlSiteTool,
@@ -29,7 +27,9 @@ from kaos_web.crawl_tools import (
     _store_response_artifact,
     register_crawl_tools,
 )
-from kaos_web.discovery import DiscoveredUrl, DiscoveryResult
+from kaos_web.discover.batch import BatchError, BatchResult
+from kaos_web.discover.crawl import CrawlError, CrawlPage, CrawlResult
+from kaos_web.discover.discovery import DiscoveredUrl, DiscoveryResult
 from kaos_web.models import WebResponse
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -181,7 +181,7 @@ class TestDiscoverUrlsToolExecute:
             errors=["one error"],
         )
         with patch(
-            "kaos_web.discovery.discover_urls",
+            "kaos_web.discover.discovery.discover_urls",
             AsyncMock(return_value=disc),
         ):
             result = await DiscoverUrlsTool().execute({"url": "https://example.com"})
@@ -204,7 +204,7 @@ class TestDiscoverUrlsToolExecute:
             captured.update({"url": url, **kwargs})
             return DiscoveryResult()
 
-        with patch("kaos_web.discovery.discover_urls", _spy):
+        with patch("kaos_web.discover.discovery.discover_urls", _spy):
             await DiscoverUrlsTool().execute(
                 {
                     "url": "https://example.com",
@@ -222,7 +222,7 @@ class TestDiscoverUrlsToolExecute:
 
     async def test_unexpected_exception_returns_error_with_recovery(self) -> None:
         with patch(
-            "kaos_web.discovery.discover_urls",
+            "kaos_web.discover.discovery.discover_urls",
             AsyncMock(side_effect=RuntimeError("boom")),
         ):
             result = await DiscoverUrlsTool().execute({"url": "https://example.com"})
@@ -234,7 +234,7 @@ class TestDiscoverUrlsToolExecute:
 
     async def test_truncates_errors_to_first_10(self) -> None:
         disc = DiscoveryResult(errors=[f"e{i}" for i in range(25)])
-        with patch("kaos_web.discovery.discover_urls", AsyncMock(return_value=disc)):
+        with patch("kaos_web.discover.discovery.discover_urls", AsyncMock(return_value=disc)):
             result = await DiscoverUrlsTool().execute({"url": "https://example.com"})
         assert not _is_error(result)
         assert result.structuredContent is not None
@@ -271,7 +271,7 @@ class TestBatchFetchToolExecute:
             html="<html><body><h1>Hello</h1><p>Text body content.</p></body></html>",
         )
         batch = BatchResult(responses=[resp], elapsed_ms=12.34)
-        with patch("kaos_web.batch.batch_fetch", AsyncMock(return_value=batch)):
+        with patch("kaos_web.discover.batch.batch_fetch", AsyncMock(return_value=batch)):
             result = await BatchFetchTool().execute(
                 {"urls": "https://example.com/a", "output_format": "markdown"}
             )
@@ -294,7 +294,7 @@ class TestBatchFetchToolExecute:
             responses=[resp],
             errors=[BatchError(url="https://bad.example", error="DNS fail")],
         )
-        with patch("kaos_web.batch.batch_fetch", AsyncMock(return_value=batch)):
+        with patch("kaos_web.discover.batch.batch_fetch", AsyncMock(return_value=batch)):
             result = await BatchFetchTool().execute(
                 {"urls": "https://ok.example,https://bad.example"}
             )
@@ -317,7 +317,7 @@ class TestBatchFetchToolExecute:
 
         # store_document is called inside _store_response_artifact.
         with (
-            patch("kaos_web.batch.batch_fetch", AsyncMock(return_value=batch)),
+            patch("kaos_web.discover.batch.batch_fetch", AsyncMock(return_value=batch)),
             patch(
                 "kaos_content.artifacts.store_document",
                 AsyncMock(return_value=ctx.runtime.artifacts.create_from_path.return_value),
@@ -346,7 +346,7 @@ class TestBatchFetchToolExecute:
         ctx, _ = _make_mock_context_with_runtime()
 
         with (
-            patch("kaos_web.batch.batch_fetch", AsyncMock(return_value=batch)),
+            patch("kaos_web.discover.batch.batch_fetch", AsyncMock(return_value=batch)),
             patch(
                 "kaos_content.artifacts.store_document",
                 AsyncMock(side_effect=RuntimeError("vfs full")),
@@ -365,7 +365,7 @@ class TestBatchFetchToolExecute:
 
     async def test_unexpected_exception(self) -> None:
         with patch(
-            "kaos_web.batch.batch_fetch",
+            "kaos_web.discover.batch.batch_fetch",
             AsyncMock(side_effect=RuntimeError("upstream broke")),
         ):
             result = await BatchFetchTool().execute({"urls": "https://example.com"})
@@ -405,7 +405,7 @@ class TestCrawlSiteToolExecute:
             elapsed_ms=42.7,
             errors=[CrawlError(url="https://example.com/x", error="bad", depth=0)],
         )
-        with patch("kaos_web.crawl.crawl_site", AsyncMock(return_value=cresult)):
+        with patch("kaos_web.discover.crawl.crawl_site", AsyncMock(return_value=cresult)):
             result = await CrawlSiteTool().execute(
                 {"url": "https://example.com", "output_format": "summary"}
             )
@@ -433,7 +433,7 @@ class TestCrawlSiteToolExecute:
             content_text=long_text,
         )
         cresult = CrawlResult(pages=[page])
-        with patch("kaos_web.crawl.crawl_site", AsyncMock(return_value=cresult)):
+        with patch("kaos_web.discover.crawl.crawl_site", AsyncMock(return_value=cresult)):
             result = await CrawlSiteTool().execute(
                 {"url": "https://example.com", "output_format": "text"}
             )
@@ -452,7 +452,7 @@ class TestCrawlSiteToolExecute:
             content_markdown="# small",
         )
         cresult = CrawlResult(pages=[page])
-        with patch("kaos_web.crawl.crawl_site", AsyncMock(return_value=cresult)):
+        with patch("kaos_web.discover.crawl.crawl_site", AsyncMock(return_value=cresult)):
             result = await CrawlSiteTool().execute(
                 {"url": "https://example.com", "output_format": "markdown"}
             )
@@ -470,7 +470,7 @@ class TestCrawlSiteToolExecute:
             captured.update({"url": url, **kwargs})
             return CrawlResult()
 
-        with patch("kaos_web.crawl.crawl_site", _spy):
+        with patch("kaos_web.discover.crawl.crawl_site", _spy):
             await CrawlSiteTool().execute(
                 {
                     "url": "https://example.com",
@@ -501,7 +501,7 @@ class TestCrawlSiteToolExecute:
             artifact_id="art-md", size=42, body_uri="kaos://artifacts/art-md/body"
         )
 
-        with patch("kaos_web.crawl.crawl_site", AsyncMock(return_value=cresult)):
+        with patch("kaos_web.discover.crawl.crawl_site", AsyncMock(return_value=cresult)):
             result = await CrawlSiteTool().execute(
                 {"url": "https://example.com", "output_format": "summary"},
                 context=ctx,
@@ -528,7 +528,7 @@ class TestCrawlSiteToolExecute:
         ctx, _ = _make_mock_context_with_runtime()
         ctx.runtime.artifacts.create_from_path = AsyncMock(side_effect=RuntimeError("disk full"))
 
-        with patch("kaos_web.crawl.crawl_site", AsyncMock(return_value=cresult)):
+        with patch("kaos_web.discover.crawl.crawl_site", AsyncMock(return_value=cresult)):
             result = await CrawlSiteTool().execute(
                 {"url": "https://example.com", "output_format": "summary"},
                 context=ctx,
@@ -541,7 +541,7 @@ class TestCrawlSiteToolExecute:
 
     async def test_unexpected_exception(self) -> None:
         with patch(
-            "kaos_web.crawl.crawl_site",
+            "kaos_web.discover.crawl.crawl_site",
             AsyncMock(side_effect=RuntimeError("bad")),
         ):
             result = await CrawlSiteTool().execute({"url": "https://example.com"})

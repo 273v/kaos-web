@@ -6,8 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from kaos_web.models import WebResponse
-from kaos_web.sitemap import (
+from kaos_web.discover.sitemap import (
     _parse_lastmod,
     _parse_priority,
     _parse_text_sitemap,
@@ -15,6 +14,7 @@ from kaos_web.sitemap import (
     discover_sitemaps,
     parse_sitemap,
 )
+from kaos_web.models import WebResponse
 
 # --- XML fixtures ---
 

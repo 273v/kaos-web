@@ -220,7 +220,7 @@ class BrowserClient:
                 # Must happen before wait_for_selector — overlays can block content.
                 if request.extra.get("dismiss_overlays", False):
                     try:
-                        from kaos_web.browser_page_prep import dismiss_cookie_banners
+                        from kaos_web.clients.page_prep import dismiss_cookie_banners
 
                         await dismiss_cookie_banners(page)
                     except Exception:
@@ -231,7 +231,7 @@ class BrowserClient:
                 selector = request.extra.get("wait_for_selector")
                 if not selector and request.extra.get("wait_for_settled", False):
                     try:
-                        from kaos_web.browser_page_prep import wait_for_content_settled
+                        from kaos_web.clients.page_prep import wait_for_content_settled
 
                         await wait_for_content_settled(page)
                     except Exception:

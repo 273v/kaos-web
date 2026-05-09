@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Refactored package layout** for better cohesion (per
+  `docs/python/design/modules.md`):
+  - New `kaos_web.discover` subpackage groups the BFS-discovery
+    subsystem: `batch`, `crawl`, `discovery`, `sitemap` (formerly four
+    top-level modules with mutual imports). Re-exports the canonical
+    public API at the package level (e.g. `from kaos_web.discover
+    import batch_fetch, crawl_site, discover_urls, parse_sitemap`).
+  - `kaos_web.browser_page_prep` → `kaos_web.clients.page_prep`. Only
+    consumer was `clients/browser.py`; the helper is logically a
+    browser-client primitive.
+  - The four `*_tools.py` files (`tools.py`, `browser_tools.py`,
+    `crawl_tools.py`, `domain_tools.py`) **stay top-level** per the
+    explicit KAOS convention documented in
+    `docs/python/design/modules.md` ("split tool files by domain when
+    they would otherwise exceed ~1500 lines"). No tools/ subpackage.
+
+  Pre-0.1.0a1 — no published version pins these import paths, so no
+  back-compat shims are shipped. If you imported from these paths in
+  pre-release builds, update to the new locations.
+
 ## [0.1.0a1] — 2026-05-08
 
 First public alpha release.

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from kaos_web.batch import BatchError, BatchResult, batch_fetch
+from kaos_web.discover.batch import BatchError, BatchResult, batch_fetch
 from kaos_web.models import WebResponse
 
 
@@ -39,7 +39,7 @@ class TestBatchFetch:
     @pytest.mark.asyncio
     async def test_single_url(self):
         resp = WebResponse(url="https://example.com", status_code=200, html="<html></html>")
-        with patch("kaos_web.batch.HttpClient") as MockClient:
+        with patch("kaos_web.discover.batch.HttpClient") as MockClient:
             instance = AsyncMock()
             instance.fetch = AsyncMock(return_value=resp)
             instance.__aenter__ = AsyncMock(return_value=instance)
@@ -61,7 +61,7 @@ class TestBatchFetch:
                 raise ConnectionError("Network error")
             return WebResponse(url=request.url, status_code=200, html="<html></html>")
 
-        with patch("kaos_web.batch.HttpClient") as MockClient:
+        with patch("kaos_web.discover.batch.HttpClient") as MockClient:
             instance = AsyncMock()
             instance.fetch = mock_fetch
             instance.__aenter__ = AsyncMock(return_value=instance)
@@ -99,7 +99,7 @@ class TestBatchFetch:
                 current_concurrent -= 1
             return WebResponse(url=request.url, status_code=200, html="ok")
 
-        with patch("kaos_web.batch.HttpClient") as MockClient:
+        with patch("kaos_web.discover.batch.HttpClient") as MockClient:
             instance = AsyncMock()
             instance.fetch = mock_fetch
             instance.__aenter__ = AsyncMock(return_value=instance)
@@ -113,7 +113,7 @@ class TestBatchFetch:
     @pytest.mark.asyncio
     async def test_elapsed_ms_tracked(self):
         resp = WebResponse(url="https://example.com", status_code=200, html="ok")
-        with patch("kaos_web.batch.HttpClient") as MockClient:
+        with patch("kaos_web.discover.batch.HttpClient") as MockClient:
             instance = AsyncMock()
             instance.fetch = AsyncMock(return_value=resp)
             instance.__aenter__ = AsyncMock(return_value=instance)

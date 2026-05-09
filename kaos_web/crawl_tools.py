@@ -113,7 +113,7 @@ class DiscoverUrlsTool(KaosTool):
 
         try:
             from kaos_web.clients.http import HttpClient
-            from kaos_web.discovery import discover_urls
+            from kaos_web.discover.discovery import discover_urls
 
             async with HttpClient() as client:
                 result = await discover_urls(
@@ -219,7 +219,7 @@ class BatchFetchTool(KaosTool):
         output_format = inputs.get("output_format", "markdown")
 
         try:
-            from kaos_web.batch import batch_fetch
+            from kaos_web.discover.batch import batch_fetch
 
             result = await batch_fetch(urls, concurrency=concurrency)
 
@@ -363,7 +363,7 @@ class CrawlSiteTool(KaosTool):
         exc = _split_patterns(inputs.get("exclude_patterns"))
 
         try:
-            from kaos_web.crawl import crawl_site
+            from kaos_web.discover.crawl import crawl_site
 
             result = await crawl_site(
                 url,

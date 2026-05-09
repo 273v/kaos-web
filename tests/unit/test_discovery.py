@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kaos_web.discovery import (
+from kaos_web.discover.discovery import (
     _compile_patterns,
     _matches_patterns,
     _same_domain,
@@ -235,7 +235,7 @@ class TestDiscoverUrls:
                 return WebResponse(url=request.url, status_code=200, html=LINKS_HTML)
             return WebResponse(url=request.url, status_code=404, html="")
 
-        with patch("kaos_web.discovery.logger.warning") as mock_warn:
+        with patch("kaos_web.discover.discovery.logger.warning") as mock_warn:
             result = await discover_urls("https://example.com", fetch, sitemap="skip")
 
         assert result.total > 0

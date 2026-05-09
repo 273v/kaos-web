@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kaos_web.browser_page_prep import (
+from kaos_web.clients.page_prep import (
     KNOWN_CMPS,
     KnownCMP,
     dismiss_cookie_banners,
