@@ -47,26 +47,95 @@ class DiscoveryResult:
         return len(self.urls)
 
 
+# WEB5-008: caller-supplied URL filter regexes used to compile with
+# stdlib ``re``, which is a backtracking engine — pathological patterns
+# like ``(a+)+b`` can run for exponential time on adversarial input
+# (ReDoS, blocks the asyncio event loop). Switch to the kaos-nlp-core
+# Rust regex engine (linear time, no backtracking) when the [nlp]
+# optional extra is installed; fall back to stdlib ``re`` otherwise.
+# The fallback path emits a one-shot warning so operators see the
+# difference and can install kaos-nlp-core if running with untrusted
+# patterns.
+class _SafePattern:
+    """Uniform ``is_match(text) -> bool`` wrapper over either backend.
+
+    The Rust-backed branch (preferred) gives linear-time matching and
+    catastrophic-backtracking immunity. The stdlib-``re`` branch is the
+    fallback used when ``kaos-nlp-core`` isn't installed.
+    """
+
+    __slots__ = ("_inner", "_is_rust")
+
+    def __init__(self, inner: object, is_rust: bool) -> None:
+        self._inner = inner
+        self._is_rust = is_rust
+
+    def is_match(self, text: str) -> bool:
+        if self._is_rust:
+            return self._inner.is_match(text)  # ty: ignore[unresolved-attribute]
+        return self._inner.search(text) is not None  # ty: ignore[unresolved-attribute]
+
+
+_warned_regex_fallback = False
+
+
 def _matches_patterns(
     url: str,
-    include_patterns: list[re.Pattern[str]] | None,
-    exclude_patterns: list[re.Pattern[str]] | None,
+    include_patterns: list[_SafePattern] | None,
+    exclude_patterns: list[_SafePattern] | None,
 ) -> bool:
     """Check if URL matches include patterns and doesn't match exclude patterns."""
     path = urlparse(url).path
-    if include_patterns and not any(p.search(path) for p in include_patterns):
+    if include_patterns and not any(p.is_match(path) for p in include_patterns):
         return False
-    return not (exclude_patterns and any(p.search(path) for p in exclude_patterns))
+    return not (exclude_patterns and any(p.is_match(path) for p in exclude_patterns))
 
 
-def _compile_patterns(patterns: list[str] | None) -> list[re.Pattern[str]] | None:
-    """Compile regex patterns, returning None if empty."""
+def _compile_patterns(patterns: list[str] | None) -> list[_SafePattern] | None:
+    """Compile regex patterns, returning None if empty.
+
+    Prefers the Rust-backed ``kaos_nlp_core.matching.RegexMatcher``
+    (linear-time, no backtracking) when the ``[nlp]`` optional extra is
+    installed; falls back to stdlib ``re`` with a one-shot warning.
+    Patterns that fail to compile under either engine are dropped with
+    a warning rather than raising — discovery should continue with the
+    valid subset.
+    """
     if not patterns:
         return None
-    compiled = []
+
+    use_rust = False
+    rust_cls: type | None = None
+    try:
+        from kaos_nlp_core.matching import RegexMatcher
+
+        rust_cls = RegexMatcher
+        use_rust = True
+    except ImportError:
+        global _warned_regex_fallback
+        if not _warned_regex_fallback:
+            logger.warning(
+                "kaos-nlp-core not installed; falling back to stdlib `re` for URL "
+                "filter patterns. Untrusted regex input can trigger catastrophic "
+                "backtracking. Install kaos-web[nlp] to use the Rust regex engine."
+            )
+            _warned_regex_fallback = True
+
+    compiled: list[_SafePattern] = []
     for p in patterns:
+        if use_rust and rust_cls is not None:
+            try:
+                compiled.append(_SafePattern(rust_cls(p), is_rust=True))
+                continue
+            except Exception as exc:  # Rust regex syntax differs slightly from re
+                logger.warning(
+                    "Pattern %r rejected by Rust regex engine (%s); falling back "
+                    "to stdlib re for this pattern.",
+                    p,
+                    exc,
+                )
         try:
-            compiled.append(re.compile(p))
+            compiled.append(_SafePattern(re.compile(p), is_rust=False))
         except re.error:
             logger.warning("Invalid regex pattern: %s", p)
     return compiled or None

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **URL filter regexes now use the Rust regex engine when available**
+  (WEB5-008). `kaos_web.discover.discovery._compile_patterns` previously
+  built `re.compile(...)` patterns from caller-supplied include /
+  exclude regex strings and applied `pattern.search(...)` to every
+  discovered URL path. Stdlib `re` is a backtracking engine —
+  pathological patterns like `(a+)+b` against `"a" * N` run in
+  exponential time and block the asyncio event loop (ReDoS).
+  Compiled patterns now route through a `_SafePattern` shim that
+  prefers `kaos_nlp_core.matching.RegexMatcher` (Rust regex, linear
+  time, no backtracking) when the `[nlp]` optional extra is installed,
+  with stdlib `re` as a fallback (one-shot warning logged so operators
+  see the path). Install `kaos-web[nlp]` to get the protection by
+  default.
+
 - **CacheMiddleware bypasses any request bearing auth-shaped headers**
   (WEB5-009). Cache key is `method:url` only — without this gate, an
   authenticated request would either return another caller's cached

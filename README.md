@@ -207,6 +207,13 @@ The `CacheMiddleware` automatically bypasses any request that carries
 `X-Auth-Token`, or `X-CSRF-Token` headers, so authenticated responses
 cannot leak across callers via the shared cache.
 
+URL filter regexes used by `kaos-web-discover-urls` /
+`kaos-web-crawl-site` route through the `kaos-nlp-core` Rust regex
+engine (linear-time, no catastrophic backtracking) when the `[nlp]`
+optional extra is installed. Without it, kaos-web falls back to stdlib
+`re` and logs a one-shot warning — install `kaos-web[nlp]` if you
+plan to accept caller-supplied regex patterns.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

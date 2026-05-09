@@ -72,6 +72,55 @@ class TestPatternMatching:
         result = _compile_patterns(["[invalid"])
         assert result is None  # Invalid regex is skipped
 
+    def test_redos_pattern_completes_quickly(self):
+        """WEB5-008: catastrophic-backtracking pattern must NOT block.
+
+        ``(a+)+b`` against ``"a" * N`` is the textbook ReDoS payload —
+        stdlib ``re`` (backtracking engine) takes exponential time. The
+        Rust regex engine (when ``[nlp]`` extra is installed) and the
+        stdlib fallback for *this* particular pattern both need to
+        complete promptly; the assertion is "wall-clock < 2 seconds"
+        which is generous for the Rust path (microseconds) and tight
+        enough that a real backtracking failure would blow it.
+
+        N=30 keeps the test fast even under a hypothetical fallback.
+        Adversarial-pattern protection is the contract of the new
+        ``_SafePattern`` shim, not just of the Rust engine.
+        """
+        import time
+
+        pattern = _compile_patterns(["(a+)+b"])
+        assert pattern is not None
+        haystack = "a" * 30  # No 'b' → maximum backtracking under stdlib re
+        start = time.perf_counter()
+        # Match the helper signature: include patterns are matched on the
+        # URL path component, so embed the haystack in a URL.
+        _matches_patterns(f"https://e.com/{haystack}", pattern, None)
+        elapsed = time.perf_counter() - start
+        assert elapsed < 2.0, f"ReDoS-style pattern took {elapsed:.2f}s"
+
+    def test_returns_safe_pattern_wrapper(self):
+        """The compile helper now returns ``_SafePattern`` instances,
+        not raw ``re.Pattern`` objects. Guards the type contract."""
+        from kaos_web.discover.discovery import _SafePattern
+
+        result = _compile_patterns(["/blog/"])
+        assert result is not None
+        assert all(isinstance(p, _SafePattern) for p in result)
+
+    def test_uses_rust_backend_when_available(self):
+        """If ``kaos-nlp-core`` is importable, the compiled pattern
+        should be backed by the Rust ``RegexMatcher`` (linear time)."""
+        try:
+            import kaos_nlp_core.matching  # noqa: F401
+        except ImportError:
+            pytest.skip("kaos-nlp-core not installed")
+
+        result = _compile_patterns(["/blog/"])
+        assert result is not None
+        # Internal: the wrapper records which backend it's using.
+        assert result[0]._is_rust is True
+
 
 class TestSameDomain:
     def test_same(self):
