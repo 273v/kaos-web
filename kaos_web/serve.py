@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> None:
         "--crawl", action="store_true", help="Enable crawl/discovery tools (3 tools)"
     )
     parser.add_argument(
-        "--domain", action="store_true", help="Enable domain intelligence tools (10 tools)"
+        "--domain", action="store_true", help="Enable domain intelligence tools (14 tools)"
     )
     args = parser.parse_args(argv)
 
