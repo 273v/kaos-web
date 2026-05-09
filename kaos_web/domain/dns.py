@@ -14,6 +14,7 @@ import ipaddress
 import time
 from collections.abc import Sequence
 
+from kaos_core.logging import get_logger
 from kaos_web.domain.models import (
     DnsProfile,
     DnsQueryResult,
@@ -22,6 +23,8 @@ from kaos_web.domain.models import (
     ZoneTransferResult,
     ZoneTransferStatus,
 )
+
+logger = get_logger(__name__)
 
 # Default record types for full enumeration
 DEFAULT_RECORD_TYPES: tuple[str, ...] = (
@@ -405,8 +408,15 @@ async def reverse_ptr(
                 ttl=getattr(answer.rrset, "ttl", None),
                 value=rdata.to_text().rstrip("."),
             )
-    except (NXDOMAIN, NoAnswer, NoNameservers, Exception):
+    except (NXDOMAIN, NoAnswer, NoNameservers):
+        # Expected "no record" outcomes for reverse PTR — silent.
         pass
+    except Exception as exc:
+        # Catch-all for resolver/network errors so reverse PTR never raises
+        # back to the caller. Logged at DEBUG so failures are observable
+        # (audit-03 WEB3-002: previously the resolver path silently swallowed
+        # everything via a redundant trailing `Exception` in the same tuple).
+        logger.debug("reverse-PTR resolver error for %s: %s", ip_address, exc)
     return None
 
 

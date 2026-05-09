@@ -234,6 +234,51 @@ class TestReversePtr:
             ptr = await reverse_ptr("93.184.216.34", timeout=1.0)
         assert ptr is None
 
+    async def test_no_answer_silent(self) -> None:
+        # NoAnswer is an expected "no PTR record" outcome — silent return.
+        with _patch_resolver(NoAnswer):
+            ptr = await reverse_ptr("93.184.216.34", timeout=1.0)
+        assert ptr is None
+
+    async def test_no_nameservers_silent(self) -> None:
+        # NoNameservers is also an expected outcome (resolver had nothing
+        # authoritative) — silent return, no exception.
+        with _patch_resolver(NoNameservers):
+            ptr = await reverse_ptr("93.184.216.34", timeout=1.0)
+        assert ptr is None
+
+    async def test_unexpected_resolver_error_logged(self) -> None:
+        # WEB3-002 regression: an unexpected resolver error must NOT raise
+        # back to the caller (PTR lookups are best-effort), but it must be
+        # logged at DEBUG so failures are observable. Previously the bare
+        # `Exception` in the except tuple swallowed everything silently.
+        # Patch the module-level logger directly because kaos-core's
+        # get_logger() configures its own handler hierarchy that doesn't
+        # propagate cleanly into pytest's caplog.
+        with (
+            patch("kaos_web.domain.dns.logger") as mock_logger,
+            _patch_resolver(RuntimeError("resolver socket exploded")),
+        ):
+            ptr = await reverse_ptr("93.184.216.34", timeout=1.0)
+        assert ptr is None
+        # The logger.debug call must have been made with our message + exc
+        assert mock_logger.debug.called
+        call_args = mock_logger.debug.call_args
+        assert "reverse-PTR resolver error" in call_args.args[0]
+        # The IP and the original exception must be in the format args
+        assert "93.184.216.34" in call_args.args
+        # The third arg is the RuntimeError instance — check its str
+        assert "exploded" in str(call_args.args[2])
+
+    async def test_unexpected_resolver_error_does_not_raise(self) -> None:
+        # WEB3-002 contract: even with a totally unexpected exception type,
+        # reverse_ptr must return None rather than propagate. The existing
+        # test_resolver_failure covers the dnspython-typed exceptions; this
+        # widens the contract to arbitrary RuntimeError-style failures.
+        with _patch_resolver(RuntimeError("anything at all")):
+            ptr = await reverse_ptr("93.184.216.34", timeout=1.0)
+        assert ptr is None
+
 
 # ── enumerate_dns() ─────────────────────────────────────────────────
 
