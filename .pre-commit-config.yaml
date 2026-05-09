@@ -16,9 +16,10 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        exclude: ^LICENSE$
+        # Test fixtures are verbatim public-page snapshots — preserve exactly.
+        exclude: ^(LICENSE|tests/fixtures/.*)$
       - id: end-of-file-fixer
-        exclude: ^LICENSE$
+        exclude: ^(LICENSE|tests/fixtures/.*)$
       - id: check-yaml
       - id: check-toml
       - id: check-merge-conflict

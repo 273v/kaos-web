@@ -45,7 +45,10 @@ dependencies = [
   "kaos-content>=0.1.0a2,<0.2",
   "kaos-core>=0.1.0a4,<0.2",
   "httpx[http2]>=0.28.0",
-  "lxml>=5.0.0",
+  # lxml 5.3.0 is the first version with cp313 binary wheels. Earlier
+  # 5.x lacks them and the runner has no libxml2-dev for source builds,
+  # which makes the lowest-direct CI job source-build and fail.
+  "lxml>=5.3.0",
 ]
 
 [project.optional-dependencies]
