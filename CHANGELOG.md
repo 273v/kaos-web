@@ -44,6 +44,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **bandit + vulture now run in both pre-commit and CI.** Two new
+  hooks in ``.pre-commit-config.yaml`` (bandit + vulture), mirrored
+  by two new jobs in ``security.yml`` (``bandit (static security)``
+  + ``vulture (dead-code scan)``). Pre-commit gives contributors fast
+  feedback before push; CI makes the scan publicly visible on every
+  PR. Bandit skip list (``B101,B404,B603,B607``) justified inline
+  per audit; vulture runs at ``--min-confidence 100`` with the shared
+  ``--ignore-names`` family list. Both pass clean — see PR for the
+  prerequisite B314 sitemap fix that this PR depends on. Mirrors
+  the rollout from kaos-core.
+
+### Security
+
 - **SSRF gate at every outbound URL/host site** (WEB5-001). Wires
   ``kaos_core.security.validate_outbound_url`` (and the host-only
   ``is_loopback`` / ``is_private_ip`` / ``is_metadata_service``
