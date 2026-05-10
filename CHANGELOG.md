@@ -26,6 +26,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Sitemap parser no longer falls back to vulnerable
+  `xml.etree.ElementTree`.** ``kaos_web/discover/sitemap.py``
+  previously tried lxml first (safe — ``resolve_entities=False`` on a
+  recovering parser) but fell back to stdlib
+  ``xml.etree.ElementTree.fromstring`` if lxml raised. The fallback
+  was unreachable in practice (lxml's recovering parser doesn't raise
+  on syntactic chaos — it returns a partial tree) and stdlib
+  ``etree.fromstring`` is itself vulnerable to XML attacks (XXE,
+  entity expansion, billion-laughs). Bandit B314 flagged it; dropped
+  the fallback entirely. If lxml's recovering parser raises
+  ``ValueError`` / ``XMLSyntaxError``, the sitemap is now treated as
+  unparseable and returns ``([], [])`` — same shape as the existing
+  ``except ParseError`` path. The runtime ``xml.etree`` import is now
+  TYPE_CHECKING-only (kept for the ``_find_text`` type annotation).
+  Files: ``kaos_web/discover/sitemap.py``.
+
+### Security
+
 - **SSRF gate at every outbound URL/host site** (WEB5-001). Wires
   ``kaos_core.security.validate_outbound_url`` (and the host-only
   ``is_loopback`` / ``is_private_ip`` / ``is_metadata_service``
