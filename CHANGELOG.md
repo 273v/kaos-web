@@ -54,6 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ``--ignore-names`` family list. Both pass clean — see PR for the
   prerequisite B314 sitemap fix that this PR depends on. Mirrors
   the rollout from kaos-core.
+### Changed
+
+- **uv.lock bumped to the current PyPI-latest of two kaos-* siblings:**
+  ``kaos-content`` 0.1.0a2 → 0.1.0a4 and ``kaos-core`` 0.1.0a4 →
+  0.1.0a5. Both bumps are no-op for the kaos-web public API but pull
+  in upstream bug fixes / performance work. All 1337 unit tests
+  continue to pass.
 
 ### Security
 
