@@ -16,12 +16,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
-from xml.etree import ElementTree as etree
 
 from kaos_core.logging import get_logger
 from kaos_web.models import WebRequest, WebResponse
 
 if TYPE_CHECKING:
+    # `_find_text` uses `etree.Element` as a type annotation only;
+    # at runtime parsing goes through lxml. Keep the import
+    # TYPE_CHECKING-only so the actual `xml.etree.ElementTree`
+    # parser isn't imported at runtime (bandit B314).
+    from xml.etree import ElementTree as etree
+
     from kaos_web.settings import KaosWebSettings
 
 logger = get_logger(__name__)
@@ -107,17 +112,22 @@ def _parse_xml_sitemap(content: bytes) -> tuple[list[SitemapEntry], list[str]]:
     yield whatever complete ``<url>`` entries they contain — real-world
     sitemaps are frequently truncated by proxies or CDN limits.
     """
+    # lxml is a base dependency. We use the recovering parser with
+    # `resolve_entities=False` so DOCTYPE entity-expansion attacks
+    # (billion-laughs, external-entity fetches) can't fire. There was
+    # previously a stdlib ``xml.etree.ElementTree.fromstring`` fallback
+    # below this try block; it was unreachable in practice (only
+    # ``ValueError`` / ``XMLSyntaxError`` from lxml's RECOVERING
+    # parser would have triggered it — that parser already returns a
+    # partial tree on syntactic chaos) and stdlib ``etree.fromstring``
+    # is itself vulnerable to XML attacks (bandit B314). Dropped.
     try:
         from lxml import etree as lxml_etree  # ty: ignore[unresolved-import]
 
         parser = lxml_etree.XMLParser(recover=True, resolve_entities=False)
         root = lxml_etree.fromstring(content, parser=parser)
     except (ValueError, lxml_etree.XMLSyntaxError):
-        # Fall back to stdlib for defence in depth
-        try:
-            root = etree.fromstring(content)
-        except etree.ParseError:
-            return [], []
+        return [], []
 
     if root is None:
         return [], []
