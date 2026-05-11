@@ -94,8 +94,30 @@ jobs:
             os: kaos-x64-16core
             display-os: linux-x64
             experimental: true
-          # 3.15: rpds-py (transitive via jsonschema) source-builds
-          # against pyo3 0.27.x (caps at 3.14). Expected red; informational.
+          # 3.15: blocked on upstream rpds-py.
+          #
+          # The 3.15 lane has no published rpds-py wheel, so uv
+          # source-builds rpds-py==0.30.0. Its Cargo.toml pins
+          # `pyo3-ffi 0.27.2`, which caps the supported CPython at
+          # 3.14:
+          #
+          #     error: the configured Python version (3.15) is newer
+          #            than PyO3's
+          #
+          # rpds-py is pulled transitively via `jsonschema` (via
+          # `referencing`), which is itself a transitive of several
+          # of our base deps — we cannot drop it. The PyO3 release
+          # that supports 3.15 is 0.27.3+ / 0.28.x; once rpds-py cuts
+          # a release with that floor, the wheel build will resume
+          # on Linux 3.15 and this leg will pass.
+          #
+          # Tracking: https://github.com/crate-py/rpds/blob/main/Cargo.toml
+          # (look for the `pyo3` dep version). Re-check on every
+          # rpds-py release until it's >= the version that landed
+          # PyO3 0.28+. Until then this leg is expected red and is
+          # intentionally `experimental: true` /
+          # `continue-on-error: true` so the workflow signal stays
+          # green on PRs.
           - python-version: "3.15"
             os: kaos-x64-16core
             display-os: linux-x64

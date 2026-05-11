@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **CI: 3.15 lane blocked on upstream rpds-py / PyO3.** Expanded the
+  inline comment on the Python 3.15 matrix entry in ``ci.yml`` to
+  explain the upstream block in detail: ``rpds-py==0.30.0`` (pulled
+  transitively via ``jsonschema`` → ``referencing``) source-builds
+  with ``pyo3-ffi 0.27.2`` which caps at CPython 3.14, so
+  ``maturin pep517 build-wheel`` fails with ``the configured Python
+  version (3.15) is newer than PyO3's``. No local fix is possible:
+  we cannot drop ``jsonschema`` and ``rpds-py`` cannot be pinned to
+  an older release on 3.15 because no older release has 3.15
+  wheels either. Resolution is gated on rpds-py cutting a release
+  with PyO3 0.28+. Tracking pointer added so the comment is
+  actionable on each ecosystem refresh. The leg remains
+  ``experimental: true`` / ``continue-on-error: true`` so the
+  workflow signal stays green on PRs. No code change.
+
 ### Security
 
 - **SSRF gate at every outbound URL/host site** (WEB5-001). Wires
