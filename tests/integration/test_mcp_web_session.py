@@ -126,11 +126,12 @@ async def test_get_metadata_via_mcp_session(tmp_path: Path) -> None:
 
 async def test_fetch_page_artifact_resources_via_mcp(tmp_path: Path) -> None:
     """Fetch page, store as artifact, then read via MCP resource templates."""
+    client_id = "web-mcp-test"
     runtime = _make_runtime(tmp_path)
     register_web_tools(runtime)
 
     # Parse via Python API and store as artifact
-    context = KaosContext.create(session_id="web-mcp-test", runtime=runtime)
+    context = KaosContext.create(session_id=client_id, runtime=runtime)
     from kaos_content.artifacts import store_document
     from kaos_web.extract import html_to_document
 
@@ -140,7 +141,10 @@ async def test_fetch_page_artifact_resources_via_mcp(tmp_path: Path) -> None:
 
     app = create_app(runtime)
 
-    async with create_connected_server_and_client_session(app) as session:
+    async with create_connected_server_and_client_session(
+        app,
+        client_info=types.Implementation(name=client_id, version="test"),
+    ) as session:
         # List resource templates
         templates = await session.list_resource_templates()
         template_uris = {t.uriTemplate for t in templates.resourceTemplates}

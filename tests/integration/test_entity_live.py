@@ -71,4 +71,4 @@ class TestExtractOrgLive:
     async def test_tool_count_updated(self) -> None:
         """Domain tools should now include the org extraction tool."""
         assert "kaos-web-extract-org" in TOOLS
-        assert len(TOOLS) == 11  # 10 original + 1 new
+        assert len(TOOLS) == 14
