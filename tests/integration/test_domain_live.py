@@ -1,6 +1,6 @@
 """Live E2E tests for the domain intelligence tools.
 
-Tests all 10 domain tools against real domains (273ventures.com,
+Tests all 14 domain tools against real domains (273ventures.com,
 kelvin.legal, google.com).  Every assertion verifies actual content,
 not just ``len() > 0``.
 
@@ -46,10 +46,10 @@ _GOOGLE = "google.com"
 
 
 class TestDomainToolMetadata:
-    """Validate metadata for all 10 domain tools."""
+    """Validate metadata for all domain tools."""
 
     def test_tool_count(self) -> None:
-        assert len(TOOLS) == 11
+        assert len(TOOLS) == 14
 
     @pytest.mark.parametrize("name", list(TOOLS.keys()))
     def test_name_pattern(self, name: str) -> None:
@@ -68,6 +68,9 @@ class TestDomainToolMetadata:
     @pytest.mark.parametrize("name", list(TOOLS.keys()))
     def test_all_open_world(self, name: str) -> None:
         ann = TOOLS[name].metadata.annotations
+        if name == "kaos-web-fingerprint-service":
+            assert ann.openWorldHint is False, f"{name} should be pure/local"
+            return
         assert ann.openWorldHint is True, f"{name} should be open-world (network)"
 
     def test_expected_names(self) -> None:
@@ -83,6 +86,9 @@ class TestDomainToolMetadata:
             "kaos-web-whois-lookup",
             "kaos-web-domain-profile",
             "kaos-web-extract-org",
+            "kaos-web-tcp-banner",
+            "kaos-web-fingerprint-service",
+            "kaos-web-udp-probe",
         }
         assert set(TOOLS.keys()) == expected
 
