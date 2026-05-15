@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a3] — 2026-05-15
+
+### Added — `register_web_all_tools` convenience union (PRD PR 1)
+
+- **`register_web_all_tools(runtime)`** — registers every kaos-web
+  MCP tool with one call. Composes the existing 4 group entry
+  points:
+  - `register_web_tools(runtime)` → 9 HTTP fetch + search tools
+    (SessionToolSet `web` group)
+  - `register_browser_tools(runtime)` → 19 Playwright tools
+    (`browser` group; `[browser]` extra needed at *runtime*, not
+    registration)
+  - `register_domain_tools(runtime)` → 14 DNS / WHOIS / TLS / TCP
+    banner / UDP probe / HTTP header / org-extract tools
+    (`netinfra` group; `[dns]` extra at runtime)
+  - `register_crawl_tools(runtime)` → 3 URL discovery / batch
+    fetch / full-site crawl tools (`web` group)
+
+  Total: **45 tools** registered.
+
+The four group-specific registration functions retain their
+existing names and behavior — no breaking changes. The new union
+is purely additive for callers (single-user-chat backend,
+power-user sessions) that want the full 45-tool surface in one
+call instead of four.
+
+Pins the SessionToolSet `web` / `browser` / `netinfra` group entry
+points so kaos-agents (PR 2) can wire ceiling membership without
+a new public surface bump.
+
+Motivated by `kaos-modules/docs/internal/dynamic-tool-planning-prd.md`
+§4 ("PR 1 — catalog expansion"; round-1 decision #3 — bump from 9
+to 45 registered tools).
+
 ## [0.1.0a2] — 2026-05-11
 
 ### Documentation

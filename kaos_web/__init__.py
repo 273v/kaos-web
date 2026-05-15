@@ -26,7 +26,7 @@ from kaos_web.browser_tools import register_browser_tools
 from kaos_web.crawl_tools import register_crawl_tools
 from kaos_web.domain_tools import register_domain_tools
 from kaos_web.extract import extract_content, extract_metadata, html_to_document
-from kaos_web.tools import register_web_tools
+from kaos_web.tools import register_web_all_tools, register_web_tools
 
 __all__ = [
     "__version__",
@@ -37,5 +37,6 @@ __all__ = [
     "register_browser_tools",
     "register_crawl_tools",
     "register_domain_tools",
+    "register_web_all_tools",
     "register_web_tools",
 ]

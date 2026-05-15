@@ -1058,7 +1058,21 @@ class WebSearchTool(KaosTool):
 
 
 def register_web_tools(runtime: KaosRuntime) -> int:
-    """Register all web tools with the runtime. Returns count."""
+    """Register the 9 HTTP fetch + search tools with the runtime.
+
+    Pins the SessionToolSet ``web`` group entry point for kaos-web.
+    Covers the "fetch a URL and extract text / markdown / metadata /
+    links / images / tables, or search the web" surface — every tool
+    that performs a single bounded HTTP GET via ``httpx`` (no
+    JS-rendering, no DNS / WHOIS / TLS introspection, no multi-URL
+    crawling).
+
+    The full 45-tool kaos-web surface is split across 4 register
+    functions: see :func:`register_web_all_tools` for the union, or
+    call :func:`register_browser_tools` / :func:`register_crawl_tools`
+    / :func:`register_domain_tools` (the ``netinfra`` group) directly
+    for granular opt-in.
+    """
     from kaos_web.settings import KaosWebSettings
 
     runtime.module_settings["web"] = KaosWebSettings()
@@ -1077,3 +1091,38 @@ def register_web_tools(runtime: KaosRuntime) -> int:
     for tool in tools:
         runtime.tools.register_tool(tool)
     return len(tools)
+
+
+def register_web_all_tools(runtime: KaosRuntime) -> int:
+    """Register every kaos-web MCP tool — 45 total across 4 groups.
+
+    Convenience union for callers that want the full kaos-web
+    surface registered in one call. Composes:
+
+    - :func:`register_web_tools` — 9 tools, SessionToolSet ``web``
+      group (HTTP fetch + search)
+    - :func:`register_browser_tools` — 19 tools, SessionToolSet
+      ``browser`` group (Playwright; requires ``[browser]`` extra
+      at runtime, not at registration)
+    - :func:`register_domain_tools` — 14 tools, SessionToolSet
+      ``netinfra`` group (DNS / WHOIS / TLS / TCP banner / UDP
+      probe / HTTP header / org-extract; ``[dns]`` extra at
+      runtime)
+    - :func:`register_crawl_tools` — 3 tools, SessionToolSet
+      ``web`` group (URL discovery, batch fetch, full-site crawl)
+
+    Registration itself is lazy with respect to ``[browser]`` and
+    ``[dns]`` — tool *construction* doesn't import Playwright or
+    dnspython; those imports happen inside ``execute()``. Calling
+    this from a process that lacks those extras is safe; the
+    tool just errors at *invocation* with an actionable message.
+    """
+    from kaos_web.browser_tools import register_browser_tools
+    from kaos_web.crawl_tools import register_crawl_tools
+    from kaos_web.domain_tools import register_domain_tools
+
+    count = register_web_tools(runtime)
+    count += register_browser_tools(runtime)
+    count += register_domain_tools(runtime)
+    count += register_crawl_tools(runtime)
+    return count
