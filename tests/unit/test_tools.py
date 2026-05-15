@@ -85,6 +85,64 @@ class TestRegisterTools:
                 f"Tool '{required}' should be registered. Registered: {registered}"
             )
 
+    def test_every_browser_tool_carries_browser_tag(self) -> None:
+        """Per `kaos-modules/docs/internal/dynamic-tool-planning-completion-plan.md`
+        §2.4, every Playwright-based tool must carry ``tags=["browser"]``
+        so kaos-agents' ``derive_group()`` classifies it into the
+        SessionToolSet ``browser`` group rather than the broader
+        ``web`` group. A new browser tool added without the tag
+        silently lands in ``web`` (and gets surfaced on `web`-only
+        sessions that haven't opted into Playwright); this test
+        catches that drift.
+        """
+        from kaos_web.browser_tools import register_browser_tools
+
+        runtime = KaosRuntime()
+        register_browser_tools(runtime)
+        for tool in runtime.tools.list_tool_objects():
+            assert "browser" in tool.metadata.tags, (
+                f"{tool.metadata.name} is a browser tool but lacks "
+                f"tags=['browser']; got tags={tool.metadata.tags}."
+            )
+
+    def test_every_netinfra_tool_carries_netinfra_tag(self) -> None:
+        """DNS / WHOIS / TLS / TCP banner / UDP probe / HTTP-headers
+        tools must carry ``tags=["netinfra"]`` for kaos-agents'
+        ``derive_group()``. Default-off at the SessionToolSet
+        ceiling; without the tag they'd land in ``web`` and
+        accidentally surface on the default research preset."""
+        from kaos_web.domain_tools import register_domain_tools
+
+        runtime = KaosRuntime()
+        register_domain_tools(runtime)
+        for tool in runtime.tools.list_tool_objects():
+            assert "netinfra" in tool.metadata.tags, (
+                f"{tool.metadata.name} is a netinfra tool but lacks "
+                f"tags=['netinfra']; got tags={tool.metadata.tags}."
+            )
+
+    def test_web_tools_do_not_carry_browser_or_netinfra_tags(self) -> None:
+        """HTTP fetch + search tools and crawl tools are pure `web`
+        group — they should NOT carry browser/netinfra tags. The
+        kaos-agents derivation reads tags as narrowing signals;
+        having them here would incorrectly route these tools to
+        opt-in groups."""
+        from kaos_web.crawl_tools import register_crawl_tools
+
+        runtime = KaosRuntime()
+        register_web_tools(runtime)
+        register_crawl_tools(runtime)
+        for tool in runtime.tools.list_tool_objects():
+            tags = tool.metadata.tags
+            assert "browser" not in tags, (
+                f"{tool.metadata.name} is not a browser tool but carries "
+                f"tags=['browser']; got tags={tags}."
+            )
+            assert "netinfra" not in tags, (
+                f"{tool.metadata.name} is not a netinfra tool but carries "
+                f"tags=['netinfra']; got tags={tags}."
+            )
+
 
 class TestFetchPageTool:
     async def test_fetch_page_no_context(self) -> None:
