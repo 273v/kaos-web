@@ -37,7 +37,7 @@ _has_kaos_nlp_core = bool(sys.modules.get("kaos_nlp_core")) or (
 
 class TestRegisterTools:
     def test_register_web_tools(self) -> None:
-        """Register 5 tools with a runtime and verify count and names."""
+        """Register the 9 HTTP fetch / search tools — the `web` group."""
         runtime = KaosRuntime()
         count = register_web_tools(runtime)
 
@@ -56,6 +56,33 @@ class TestRegisterTools:
         for name in expected_names:
             assert name in registered, (
                 f"Tool '{name}' should be registered. Registered tools: {registered}"
+            )
+
+    def test_register_web_all_tools_union(self) -> None:
+        """`register_web_all_tools` registers all 45 tools across 4 groups.
+
+        Pins the convenience-union entry point: 9 web + 19 browser +
+        14 netinfra + 3 crawl = 45. Registration itself is lazy with
+        respect to ``[browser]`` / ``[dns]`` extras — construction
+        doesn't import Playwright or dnspython.
+        """
+        from kaos_web.tools import register_web_all_tools
+
+        runtime = KaosRuntime()
+        count = register_web_all_tools(runtime)
+        # 9 web + 19 browser + 14 netinfra + 3 crawl = 45.
+        assert count == 45, f"Expected 45 tools registered, got {count}"
+
+        registered = runtime.tools.list_tools()
+        # Spot-check one tool per group is present.
+        for required in (
+            "kaos-web-fetch-page",  # web group
+            "kaos-web-browser-navigate",  # browser group
+            "kaos-web-dns-lookup",  # netinfra group
+            "kaos-web-crawl-site",  # crawl group (folds into `web`)
+        ):
+            assert required in registered, (
+                f"Tool '{required}' should be registered. Registered: {registered}"
             )
 
 
