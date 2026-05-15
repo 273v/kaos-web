@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a4] — 2026-05-15
+
+### Added — `tags=["browser"]` / `tags=["netinfra"]` on Playwright + DNS/WHOIS tools (PRD PR 2 Stage A.5)
+
+kaos-agents 0.1.0a3's `derive_group()` reads recognized tags as
+narrowing signals: `["browser"]` routes a tool to the SessionToolSet
+`browser` group; `["netinfra"]` routes to `netinfra`. Without these
+tags, both surfaces would land in the broader `web` group and
+accidentally surface on the default research preset, even for
+sessions that haven't opted into Playwright or netinfra
+introspection.
+
+Affected tools:
+
+- **Browser** (19 tools — every tool in `browser_tools.py`):
+  `browser-navigate`, `-click`, `-fill`, `-type`, `-press`,
+  `-select`, `-screenshot`, `-evaluate`, `-snapshot`, `-content`,
+  `-cookies`, `-set-cookie`, `-save-auth`, `-log-requests`,
+  `-requests`, `-get-request`, `-captured-responses`,
+  `-list-contexts`, `-close-context`.
+- **Netinfra** (14 tools — every tool in `domain_tools.py`):
+  `tcp-probe`, `tls-inspect`, `http-headers`, `service-detect`,
+  `dns-lookup`, `dns-enumerate`, `dns-zone-transfer`, `dns-security`,
+  `whois-lookup`, `domain-profile`, `extract-org`, `tcp-banner`,
+  `fingerprint-service`, `udp-probe`.
+
+HTTP fetch + search tools in `tools.py` (9) and crawl tools in
+`crawl_tools.py` (3) deliberately stay untagged — they're pure
+`web` group and the derivation reaches them via
+`openWorldHint=True` + `readOnlyHint=True` without needing a tag.
+
+Tests:
+  - 3 new tests pin the tag coverage: every browser tool carries
+    `tags=["browser"]`; every netinfra tool carries `tags=["netinfra"]`;
+    web + crawl tools carry NEITHER.
+
+Motivated by `kaos-modules/docs/internal/dynamic-tool-planning-completion-plan.md`
+§4 Stage A.5. Purely additive: the `tags` field was empty before.
+
 ## [0.1.0a3] — 2026-05-15
 
 ### Added — `register_web_all_tools` convenience union (PRD PR 1)
