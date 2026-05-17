@@ -424,7 +424,11 @@ class TestCrawlSiteToolExecute:
         assert page_out["word_count"] == 5
         assert page_out["link_count"] == 2
 
-    async def test_text_format_truncates(self) -> None:
+    async def test_text_format_returns_full_content_unbounded(self) -> None:
+        # Regression: silent truncation at 5000 chars hid information from
+        # downstream agents. Full content is now returned in the no-runtime
+        # fallback path; the artifact tier handles size when runtime context
+        # is available.
         long_text = "x" * 6000
         page = CrawlPage(
             url="https://example.com/a",
@@ -441,10 +445,11 @@ class TestCrawlSiteToolExecute:
         out = result.structuredContent
         assert out is not None
         page_out = out["pages"][0]
-        assert page_out["truncated"] is True
-        assert len(page_out["content"]) == 5000
+        assert "truncated" not in page_out
+        assert page_out["content"] == long_text
+        assert len(page_out["content"]) == 6000
 
-    async def test_markdown_format_short_not_truncated(self) -> None:
+    async def test_markdown_format_short_content_passes_through(self) -> None:
         page = CrawlPage(
             url="https://example.com/a",
             depth=0,
@@ -460,7 +465,7 @@ class TestCrawlSiteToolExecute:
         out = result.structuredContent
         assert out is not None
         page_out = out["pages"][0]
-        assert page_out["truncated"] is False
+        assert "truncated" not in page_out
         assert page_out["content"] == "# small"
 
     async def test_passes_filters_through(self) -> None:
@@ -575,18 +580,20 @@ class TestExtractResponseHelper:
         assert isinstance(out["metadata"], dict)
 
     async def test_text_format(self) -> None:
+        # `truncated` key removed: silent truncation was an anti-pattern;
+        # the artifact tier handles size for the runtime-context path.
         html = "<html><body><h1>Hi</h1><p>Body</p></body></html>"
         resp = WebResponse(url="https://e.com", status_code=200, html=html)
         out = await _extract_response(resp, "text")
         assert "content" in out
-        assert "truncated" in out
+        assert "truncated" not in out
 
     async def test_markdown_format_default(self) -> None:
         html = "<html><body><h1>Hi</h1><p>Body</p></body></html>"
         resp = WebResponse(url="https://e.com", status_code=200, html=html)
         out = await _extract_response(resp, "markdown")
         assert "content" in out
-        assert "truncated" in out
+        assert "truncated" not in out
 
     async def test_extract_failure_caught(self) -> None:
         resp = WebResponse(url="https://e.com", status_code=200, html="<html></html>")

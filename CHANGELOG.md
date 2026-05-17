@@ -8,6 +8,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0a5] — 2026-05-17
+
+### Changed (intentional break — alpha train)
+
+- **`kaos-web-crawl-site`** and **`kaos-web-batch-fetch`** no longer
+  silently truncate page content at 5000 characters in the
+  no-runtime-context fallback path. The four `[:5000]` truncations
+  and the `truncated: bool` flag are **deleted** from
+  `crawl_tools.py`:
+  - `CrawlSiteTool.execute` (text + markdown fallback branches)
+  - `_extract_response` helper used by `BatchFetchTool` (text +
+    markdown branches)
+
+  The artifact-tier happy path (`_store_response_artifact` /
+  `_store_crawl_page_artifact`) — which already activates when a
+  `KaosContext` with a `KaosRuntime` is supplied — is the canonical
+  flow for large pages. The fallback path now returns full content
+  unbounded; downstream callers should supply a runtime context to
+  get the tiered (inline / summary+link / link-only) experience
+  driven by the `KaosCoreArtifactSettings` thresholds shipped in
+  kaos-core 0.1.0a8.
+
+  **Output-shape break:** the `truncated` key is gone from both
+  fallback responses. Callers that read it must remove the read.
+
+### Why
+
+Stage B3 of the cross-package
+`no-hardcoded-caps-and-artifact-first-tool-results` plan in the
+kaos-modules monorepo. The 5000-char silent truncation hid information
+from downstream agents — long pages came back claiming
+`"truncated": true` but the full text was discarded. With the artifact
+path already wired for the runtime-context case, the surgical fix is
+to delete the fallback truncation and trust the artifact tier system
+to handle size.
+
+### Constants audit
+
+```bash
+$ git grep '\[:5000\]\|max_chars\s*=\|content_max_chars' kaos_web/
+# (no hits in production code)
+```
+
+### Dependencies
+
+No version pin changes. `kaos-web` continues to declare
+`kaos-core>=0.1.0a4,<0.2`; the artifact helpers already used by
+`_store_response_artifact` / `_store_crawl_page_artifact` predate
+0.1.0a8 and don't require the new API surface.
+
 ## [0.1.0a4] — 2026-05-15
 
 ### Added — `tags=["browser"]` / `tags=["netinfra"]` on Playwright + DNS/WHOIS tools (PRD PR 2 Stage A.5)

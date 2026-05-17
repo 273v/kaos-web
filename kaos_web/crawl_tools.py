@@ -404,13 +404,16 @@ class CrawlSiteTool(KaosTool):
                         }
                     )
                 elif output_format == "text":
+                    # No runtime context (or artifact storage failed) — return full
+                    # content unbounded. Silent truncation hid information from
+                    # downstream agents; the artifact path above is the canonical
+                    # tiered flow for the runtime-context case.
                     pages.append(
                         {
                             "url": page.url,
                             "title": page.title,
                             "depth": page.depth,
-                            "content": page.content_text[:5000],
-                            "truncated": len(page.content_text) > 5000,
+                            "content": page.content_text,
                         }
                     )
                 else:  # markdown
@@ -419,8 +422,7 @@ class CrawlSiteTool(KaosTool):
                             "url": page.url,
                             "title": page.title,
                             "depth": page.depth,
-                            "content": page.content_markdown[:5000],
-                            "truncated": len(page.content_markdown) > 5000,
+                            "content": page.content_markdown,
                         }
                     )
 
@@ -482,16 +484,18 @@ async def _extract_response(resp: WebResponse, output_format: str) -> dict[str, 
 
             doc = html_to_document(resp.html, url=resp.url)
             page_data["title"] = doc.metadata.title
-            page_data["content"] = serialize_text(doc)[:5000]
-            page_data["truncated"] = len(serialize_text(doc)) > 5000
+            # Return full content; truncation was a silent data-loss anti-pattern.
+            # When a runtime context is available, BatchFetchTool routes via
+            # _store_response_artifact instead and the body lives in the
+            # artifact tier.
+            page_data["content"] = serialize_text(doc)
         else:  # markdown
             from kaos_content.serializers.markdown import serialize_markdown
 
             doc = html_to_document(resp.html, url=resp.url)
             md = serialize_markdown(doc)
             page_data["title"] = doc.metadata.title
-            page_data["content"] = md[:5000]
-            page_data["truncated"] = len(md) > 5000
+            page_data["content"] = md
     except Exception as exc:
         page_data["error"] = f"Extraction failed: {exc}"
 
