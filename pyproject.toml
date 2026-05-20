@@ -43,7 +43,7 @@ dependencies = [
   # PEP 440: pin to alpha because 0.1.0aN sorts BEFORE 0.1.0; >=0.1.0
   # would EXCLUDE the only published versions of these siblings.
   "kaos-content>=0.1.0a2,<0.2",
-  "kaos-core>=0.1.0a4,<0.2",
+  "kaos-core>=0.1.0a12,<0.2",
   "httpx[http2]>=0.28.0",
   # lxml 5.3.0 is the first version with cp313 binary wheels. Earlier
   # 5.x lacks them and the runner has no libxml2-dev for source builds,
