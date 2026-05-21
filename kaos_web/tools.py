@@ -1008,7 +1008,16 @@ class WebSearchTool(KaosTool):
                 ParameterSchema(
                     name="backend",
                     type="string",
-                    description="Search backend. Default: auto-detect from env vars.",
+                    description=(
+                        "Optional search backend. Omit this parameter to "
+                        "auto-detect (SerpAPI → Exa → Brave → DuckDuckGo, "
+                        "based on configured env keys). Do NOT pass the "
+                        "literal string 'auto' — use one of the enum "
+                        "values below to force a specific backend. The "
+                        "string 'auto' is also accepted as a synonym for "
+                        "omission (0.1.1, #545) but the canonical pattern "
+                        "is to omit the parameter."
+                    ),
                     required=False,
                     constraints={"enum": ["serpapi", "duckduckgo", "exa", "brave"]},
                 ),
