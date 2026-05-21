@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Domain-profile error unwraps `BaseExceptionGroup`** (P2-A,
+  WU-K v2 Case E6 follow-up). When `profile_domain` raised an
+  `ExceptionGroup` from its `asyncio.TaskGroup`, the agent saw a
+  useless "unhandled errors in a TaskGroup (1 sub-exception)" with
+  no signal as to what actually went wrong. The dispatcher in
+  `kaos_web/domain_tools.py:678-695` now unwraps the first 3 sub-
+  exceptions and renders each as `Type: message`, restoring the
+  what/how/alternative-tool contract required by kaos-mcp tool design.
+  Bare `Exception` paths also now include `type(exc).__name__:` so the
+  failure shape is visible regardless of the exception family.
+
 - **Search dispatcher rejects the literal string `"auto"`** (#545,
   WU-K v2 Case C2 + cluster). LLMs (gpt-5.4-mini, Haiku 4.5) routinely
   pass `backend="auto"` to `kaos-web-search` because the public MCP
