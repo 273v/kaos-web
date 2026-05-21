@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.1] — 2026-05-21
+
+### Fixed
+
+- **Search dispatcher rejects the literal string `"auto"`** (#545,
+  WU-K v2 Case C2 + cluster). LLMs (gpt-5.4-mini, Haiku 4.5) routinely
+  pass `backend="auto"` to `kaos-web-search` because the public MCP
+  tool description on 0.1.0 says "Default: auto-detect from env vars"
+  — even though `"auto"` was never a real enum value in `_BACKENDS`.
+  The dispatcher at `kaos_web/search/backends.py:89` now normalizes
+  the literal `"auto"` (case-insensitive) to the auto-detect path,
+  the same as omitting the parameter. Three new regression tests in
+  `tests/unit/test_search_backends.py` pin the new behavior:
+  `test_auto_string_falls_through_to_detect`,
+  `test_auto_synonym_with_no_keys_uses_duckduckgo`, and
+  `test_auto_uppercase_also_accepted`.
+
+### Changed
+
+- **`kaos-web-search` MCP tool description rewritten** to discourage
+  the literal-string-passing pattern: "Optional search backend. Omit
+  this parameter to auto-detect ... Do NOT pass the literal string
+  'auto' — use one of the enum values below to force a specific
+  backend. The string 'auto' is also accepted as a synonym for
+  omission (0.1.1, #545) but the canonical pattern is to omit the
+  parameter." Fixing the description is necessary but not sufficient
+  (training-cutoff propagation, copy-paste from docs); the
+  dispatcher-side fix is the load-bearing change.
+
+
 ## [0.1.0] — 2026-05-20
 
 ### Released
