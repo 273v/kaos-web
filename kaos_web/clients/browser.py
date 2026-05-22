@@ -164,14 +164,42 @@ class BrowserClient:
         cfg = self._config
         engine = getattr(self._playwright, cfg.browser_type)
 
+        # Resolve effective browser channel. Explicit ``cfg.channel``
+        # always wins. Otherwise consult :class:`KaosWebSettings` —
+        # the existing ``browser_channel`` env override + auto-detect
+        # (uses system ``google-chrome`` on Linux when Playwright's
+        # bundled Chromium isn't supported, e.g. Ubuntu 26.04+).
+        # Without this wiring, ``BrowserClient()`` ignored the env
+        # var and the auto-detect, leaving the bundled-Chromium
+        # failure surface live.
+        effective_channel: str | None = cfg.channel
+        if effective_channel is None:
+            try:
+                from kaos_web.settings import (
+                    KaosWebSettings,
+                    _detect_browser_channel,
+                )
+
+                settings = KaosWebSettings()
+                effective_channel = settings.browser_channel
+                if effective_channel is None and settings.browser_auto_detect_channel:
+                    effective_channel = _detect_browser_channel()
+            except Exception as exc:  # settings is best-effort; never block fetch
+                logger.debug("browser_channel auto-detect failed: %s", exc)
+
         launch_kwargs: dict[str, Any] = {"headless": cfg.headless}
-        if cfg.channel:
-            launch_kwargs["channel"] = cfg.channel
+        if effective_channel:
+            launch_kwargs["channel"] = effective_channel
         if cfg.proxy:
             launch_kwargs["proxy"] = {"server": cfg.proxy}
 
         self._browser = await engine.launch(**launch_kwargs)
-        logger.debug("Launched %s browser (headless=%s)", cfg.browser_type, cfg.headless)
+        logger.debug(
+            "Launched %s browser (channel=%s, headless=%s)",
+            cfg.browser_type,
+            effective_channel or "<bundled>",
+            cfg.headless,
+        )
         return self._browser
 
     async def _get_or_create_context(
