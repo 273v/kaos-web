@@ -675,9 +675,29 @@ class DomainProfileTool(KaosTool):
 
         try:
             result = await profile_domain(domain)
+        except BaseExceptionGroup as eg:
+            # P2-A (0.1.1): unwrap asyncio.TaskGroup sub-exceptions so the
+            # agent can see WHAT went wrong, not just "unhandled errors
+            # in a TaskGroup". The previous error string was literally
+            # "unhandled errors in a TaskGroup (1 sub-exception)" with
+            # no detail, which violates the kaos-mcp tool-design rule
+            # "every error must include (1) what went wrong, (2) how to
+            # fix it, (3) alternative tool". Show the first 3 concrete
+            # sub-exception messages — that's usually enough to route to
+            # the right atomic tool.
+            sub_msgs = []
+            for sub in eg.exceptions[:3]:
+                sub_msgs.append(f"{type(sub).__name__}: {sub}")
+            detail = "; ".join(sub_msgs) if sub_msgs else str(eg)
+            return ToolResult.create_error(
+                f"Domain profiling failed for {domain}: {detail}. "
+                "Try individual tools instead: kaos-web-dns-enumerate for DNS, "
+                "kaos-web-whois-lookup for registration data, kaos-web-service-detect "
+                "for HTTP/TLS services, or kaos-web-dns-security for mail authentication."
+            )
         except Exception as exc:
             return ToolResult.create_error(
-                f"Domain profiling failed for {domain}: {exc}. "
+                f"Domain profiling failed for {domain}: {type(exc).__name__}: {exc}. "
                 "Try individual tools instead: kaos-web-dns-enumerate for DNS, "
                 "kaos-web-whois-lookup for registration data, kaos-web-service-detect "
                 "for HTTP/TLS services, or kaos-web-dns-security for mail authentication."

@@ -70,8 +70,26 @@ class HttpClientConfig(BaseModel):
     """Default cache TTL in seconds (when enable_cache=True)."""
 
 
+def _default_extra_headers() -> dict[str, str]:
+    # Imported lazily so the user_agents module isn't loaded at import
+    # time for HttpClient consumers that don't need Playwright defaults.
+    from kaos_web.clients.user_agents import DEFAULT_EXTRA_HEADERS
+
+    return dict(DEFAULT_EXTRA_HEADERS)
+
+
 class BrowserClientConfig(BaseModel):
-    """Configuration for BrowserClient."""
+    """Configuration for BrowserClient.
+
+    Defaults mirror the production-validated anti-bot context from
+    ``kelvin-legal-intelligence`` — realistic 1365x768 laptop viewport,
+    en-US locale, America/New_York timezone, full Chrome sec-ch-ua +
+    sec-fetch + accept-language header set, and round-robin UA
+    rotation across :data:`kaos_web.clients.user_agents.DEFAULT_DESKTOP_UAS`.
+    These choices are what get the BrowserClient past SEC.gov,
+    Cloudflare, and most government anti-bot stacks; do NOT downgrade
+    them without a verified-on-target-sites reason.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -80,14 +98,14 @@ class BrowserClientConfig(BaseModel):
     headless: bool = True
     channel: str | None = None
 
-    # Viewport
-    viewport_width: int = 1280
-    viewport_height: int = 720
+    # Viewport — kelvin reference defaults
+    viewport_width: int = 1365
+    viewport_height: int = 768
     device_scale_factor: float = 1.0
     is_mobile: bool = False
 
     # Navigation
-    default_wait_until: Literal["load", "domcontentloaded", "networkidle", "commit"] = "load"
+    default_wait_until: Literal["load", "domcontentloaded", "networkidle", "commit"] = "networkidle"
     navigation_timeout: int = 30000
     default_timeout: int = 30000
 
@@ -96,13 +114,36 @@ class BrowserClientConfig(BaseModel):
     proxy: str | None = None
     ignore_https_errors: bool = False
     extra_headers: dict[str, str] = {}
+    """Caller-supplied additional headers. Merged on TOP of
+    :data:`DEFAULT_EXTRA_HEADERS` (caller wins for collisions). Empty
+    by default; the anti-bot Chrome header set is applied automatically
+    unless ``use_default_anti_bot_headers=False``."""
+
+    use_default_anti_bot_headers: bool = True
+    """Apply :data:`DEFAULT_EXTRA_HEADERS` (sec-ch-ua, sec-fetch-*,
+    accept-language, cache-control, …) to every browser context.
+    Set False only for testing or to deliberately fingerprint as
+    "non-Chrome"."""
 
     # Auth
     storage_state: str | None = None
     http_credentials: tuple[str, str] | None = None
 
-    # Context
+    # Context — kelvin reference defaults
     user_agent: str | None = None
-    locale: str | None = None
-    timezone: str | None = None
+    """Explicit User-Agent string. None = rotate through
+    :data:`DEFAULT_DESKTOP_UAS` round-robin per fetch."""
+
+    randomize_user_agent: bool = True
+    """Cycle through :data:`DEFAULT_DESKTOP_UAS` when ``user_agent``
+    is None. False + ``user_agent=None`` = use Playwright's default UA
+    (Chromium headless string — easily fingerprinted as a bot)."""
+
+    locale: str | None = "en-US"
+    timezone: str | None = "America/New_York"
     color_scheme: Literal["light", "dark"] | None = None
+
+    # Browser pool — amortize the 2-3s launch cost across requests
+    enable_browser_pool: bool = True
+    pool_max_browsers: int = 3
+    pool_idle_timeout_seconds: float = 300.0

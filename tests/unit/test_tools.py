@@ -473,6 +473,9 @@ class TestFetchHtmlBranches:
     """Cover the branching logic in _fetch_html: HTTP, browser, fallback."""
 
     async def test_http_only_path(self) -> None:
+        # 0.1.3: _fetch_html is Playwright-first by default. Pass
+        # use_browser=False to force the bare httpx path that this
+        # test exercises.
         resp = WebResponse(
             url="https://example.com/final",
             status_code=200,
@@ -481,7 +484,7 @@ class TestFetchHtmlBranches:
         client = _async_cm(MagicMock())
         client.fetch = AsyncMock(return_value=resp)
         with patch("kaos_web.clients.http.HttpClient", return_value=client):
-            html, final = await _fetch_html("https://example.com")
+            html, final = await _fetch_html("https://example.com", use_browser=False)
         assert "<p>hi</p>" in html
         assert final == "https://example.com/final"
 
@@ -578,7 +581,11 @@ class TestFetchHtmlBranches:
             await _fetch_html("https://e.com")
 
     async def test_http_500_does_not_trigger_fallback(self) -> None:
-        """Non-403/406 errors do not fall back — they re-raise."""
+        """Non-403/406 errors do not fall back — they re-raise.
+
+        Forced httpx path via use_browser=False — 0.1.3 default is
+        Playwright-first.
+        """
 
         class _Err(Exception):
             status_code = 500
@@ -589,7 +596,7 @@ class TestFetchHtmlBranches:
             patch("kaos_web.clients.http.HttpClient", return_value=http_client),
             pytest.raises(_Err),
         ):
-            await _fetch_html("https://e.com")
+            await _fetch_html("https://e.com", use_browser=False)
 
 
 # ── Backfill: artifact-storage paths ────────────────────────────────

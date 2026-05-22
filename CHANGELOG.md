@@ -8,6 +8,185 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## [0.1.5] — 2026-05-22
+
+### Fixed
+
+- **`BrowserClient` consults `KaosWebSettings.browser_channel` +
+  auto-detect** when ``BrowserClientConfig.channel`` is None. Previously
+  the env var (``KAOS_WEB_BROWSER_CHANNEL`` / ``KAOS_BROWSER_CHANNEL``)
+  and `_detect_browser_channel()` (which selects system `chrome` when
+  Playwright's bundled Chromium isn't available, e.g. Ubuntu 26.04+)
+  were dead code unless callers built a custom `BrowserClientConfig`.
+  Default `BrowserClient()` now picks them up automatically. Verified
+  live against Cloudflare's home page (1.4MB rendered HTML) using
+  system `google-chrome` on Ubuntu 26.04.
+
+
+## [0.1.4] — 2026-05-22
+
+Re-tag of 0.1.3 — the 0.1.3 publish failed pre-publish QA on three
+unit tests that pinned the old viewport / `_fetch_html` defaults.
+0.1.4 ships the same code with those tests updated to match the new
+anti-bot defaults. See 0.1.3 entry below for full content.
+
+## [0.1.3] — 2026-05-22 (failed publish — superseded by 0.1.4)
+
+### Changed
+
+- **`_fetch_html` is Playwright-first.** When Playwright is available
+  (i.e. ``kaos-web[browser]`` extra is installed), the realistic-
+  browser path is now the default — not a 403/406 fallback. This is
+  the canonical pattern: realistic Chrome fingerprint, 1365x768
+  viewport, en-US locale, America/New_York timezone, rotated desktop
+  UA across :data:`DEFAULT_DESKTOP_UAS`, and the full
+  ``sec-ch-ua`` / ``sec-fetch-*`` / ``accept-language`` /
+  ``cache-control`` header set. Bare httpx is the explicit opt-out
+  (``use_browser=False`` for known-API JSON endpoints).
+- **BrowserClient defaults overhauled.** ``BrowserClientConfig`` now
+  ships with the production-validated anti-bot defaults ported from
+  ``kelvin-legal-intelligence/kelvin_firm_db/services/browser/
+  collector.py``: ``randomize_user_agent=True``,
+  ``use_default_anti_bot_headers=True``, viewport 1365x768,
+  locale ``en-US``, timezone ``America/New_York``,
+  ``default_wait_until="networkidle"``. Callers that want the old
+  bare-Playwright behavior can disable these explicitly.
+
+### Added
+
+- :data:`kaos_web.clients.user_agents.DEFAULT_DESKTOP_UAS` — curated,
+  market-share-weighted realistic desktop UA list (Chrome Win/Mac/
+  Linux, Safari, Edge, Firefox).
+- :data:`DEFAULT_EXTRA_HEADERS` — full anti-bot Chrome header set
+  (``sec-ch-ua``, ``sec-ch-ua-mobile``, ``sec-ch-ua-platform``,
+  ``sec-fetch-dest``, ``sec-fetch-mode``, ``sec-fetch-site``,
+  ``sec-fetch-user``, ``upgrade-insecure-requests``,
+  ``accept-language``, ``cache-control``, ``pragma``, ``accept``).
+- :func:`next_default_desktop_ua` — process-wide round-robin UA
+  rotation safe under asyncio concurrency.
+- Live regression tests in
+  ``tests/integration/test_playwright_anti_bot.py`` — SEC.gov press
+  releases, EDGAR CGI route, Cloudflare home page, UA rotation
+  invariant, sec-ch-ua header invariant, and explicit httpx fallback.
+  All 6 pass against real targets.
+
+
+## [0.1.2] — 2026-05-22
+
+### Fixed
+
+- **SEC.gov 403 cascade** (closes kaos-modules #444). The 2026-05-22
+  237-session production audit found 21 `kaos-web-fetch-page` failures
+  against `sec.gov` press releases + EDGAR routes, driving 30+ cascading
+  `max_iterations` and `wall_clock_exceeded` aborts. Root cause: the
+  randomized-Chrome desktop UA strategy that protects against
+  consumer-site bot detection is *inverted* on government domains —
+  SEC.gov specifically rejects Chrome UAs but accepts honest bot
+  identifiers like `KAOS-Web/0.1 (+https://273ventures.com/kaos-web)`.
+
+  `_raw_fetch` now overrides the client's baked-in UA per request when
+  the host matches `BOT_FRIENDLY_HOSTS` (sec.gov, govinfo.gov,
+  federalregister.gov, ecfr.gov, congress.gov, uscourts.gov,
+  courtlistener.com, irs.gov, fcc.gov, ftc.gov, doj.gov,
+  treasury.gov, data.gov, europa.eu). Verified live: SEC.gov press
+  releases + EDGAR company filings both return 200 instead of 403.
+  Caller-supplied `User-Agent` headers always win — explicit
+  overrides are never clobbered. (`tests/integration/test_sec_gov_anti_bot.py`,
+  `tests/unit/test_user_agents.py`)
+
+
+## [0.1.1] — 2026-05-21
+
+### Fixed
+
+- **Domain-profile error unwraps `BaseExceptionGroup`** (P2-A,
+  WU-K v2 Case E6 follow-up). When `profile_domain` raised an
+  `ExceptionGroup` from its `asyncio.TaskGroup`, the agent saw a
+  useless "unhandled errors in a TaskGroup (1 sub-exception)" with
+  no signal as to what actually went wrong. The dispatcher in
+  `kaos_web/domain_tools.py:678-695` now unwraps the first 3 sub-
+  exceptions and renders each as `Type: message`, restoring the
+  what/how/alternative-tool contract required by kaos-mcp tool design.
+  Bare `Exception` paths also now include `type(exc).__name__:` so the
+  failure shape is visible regardless of the exception family.
+
+- **Search dispatcher rejects the literal string `"auto"`** (#545,
+  WU-K v2 Case C2 + cluster). LLMs (gpt-5.4-mini, Haiku 4.5) routinely
+  pass `backend="auto"` to `kaos-web-search` because the public MCP
+  tool description on 0.1.0 says "Default: auto-detect from env vars"
+  — even though `"auto"` was never a real enum value in `_BACKENDS`.
+  The dispatcher at `kaos_web/search/backends.py:89` now normalizes
+  the literal `"auto"` (case-insensitive) to the auto-detect path,
+  the same as omitting the parameter. Three new regression tests in
+  `tests/unit/test_search_backends.py` pin the new behavior:
+  `test_auto_string_falls_through_to_detect`,
+  `test_auto_synonym_with_no_keys_uses_duckduckgo`, and
+  `test_auto_uppercase_also_accepted`.
+
+### Changed
+
+- **`kaos-web-search` MCP tool description rewritten** to discourage
+  the literal-string-passing pattern: "Optional search backend. Omit
+  this parameter to auto-detect ... Do NOT pass the literal string
+  'auto' — use one of the enum values below to force a specific
+  backend. The string 'auto' is also accepted as a synonym for
+  omission (0.1.1, #545) but the canonical pattern is to omit the
+  parameter." Fixing the description is necessary but not sufficient
+  (training-cutoff propagation, copy-paste from docs); the
+  dispatcher-side fix is the load-bearing change.
+
+
+## [0.1.0] — 2026-05-20
+
+### Released
+
+- 0.1.0 GA — WU-L of GA plan. First stable release. Public API frozen.
+- Pin floor raised to `>=0.1.0,<0.2` across all kaos-* runtime and
+  optional dependencies. Refreshed `uv.lock` to pick up the 0.1.0
+  line of every upstream.
+
+### Internal
+
+- WU-L of the 0.1.0 GA plan
+  (`kaos-modules/docs/plans/2026-05-20-0.1.0-ga-plan.md`).
+
+
+## [0.1.0rc1] — 2026-05-20
+
+### Changed
+
+- Pin floor raised to `>=0.1.0rc1,<0.2` across kaos-* runtime and
+  optional dependencies (`kaos-core`, `kaos-content`, `kaos-mcp`,
+  `kaos-nlp-core`). Refreshed `uv.lock` to pick up the rc1 line of
+  every upstream.
+
+### Internal
+
+- WU-J of the 0.1.0 GA plan
+  (`kaos-modules/docs/plans/2026-05-20-0.1.0-ga-plan.md`).
+  Release candidate; freezes the public API for `kaos-web`
+  ahead of 0.1.0 GA.
+
+
+## [0.1.0a6] — 2026-05-20
+
+### Changed
+
+- Bumped minimum `kaos-core` to `0.1.0a12` (post-URI-redesign +
+  Capability type). kaos-web does not use the URI redesign directly —
+  the bump aligns the supported floor with the rest of the kaos-*
+  DAG ahead of 0.1.0 GA.
+- Refreshed `uv.lock` to pick up `kaos-core 0.1.0a12`,
+  `kaos-content 0.1.0a12`, `kaos-mcp 0.1.0a4`, and
+  `kaos-nlp-core 0.1.0a8`.
+
+### Internal
+
+- WU-F.6 of the 0.1.0 GA plan
+  (`kaos-modules/docs/plans/2026-05-20-0.1.0-ga-plan.md`):
+  catch-up to kaos-core 0.1.0a12.
+
 ## [0.1.0a5] — 2026-05-17
 
 ### Changed (intentional break — alpha train)

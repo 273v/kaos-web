@@ -267,3 +267,52 @@ class TestSearchWebDispatcher:
     async def test_unknown_backend_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown search backend"):
             await search_web("test", backend="nonexistent")
+
+    # 0.1.1 (#545) — the LLM literal "auto" is treated as auto-detect.
+    @pytest.mark.asyncio()
+    async def test_auto_string_falls_through_to_detect(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The string ``"auto"`` must be a synonym for omission.
+
+        gpt-5.4-mini and Haiku 4.5 both observed passing the literal
+        string ``"auto"`` because the public MCP tool description said
+        "Default: auto-detect from env vars". On 0.1.0 the dispatcher
+        rejected that with ``Unknown search backend: 'auto'`` even
+        though every other surface accepted it. 0.1.1 normalizes the
+        literal to the auto-detect path.
+        """
+        monkeypatch.setenv("SERPAPI_API_KEY", "key")
+        monkeypatch.delenv("EXA_API_KEY", raising=False)
+        monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+
+        with patch("kaos_web.search.backends._search_serpapi", new_callable=AsyncMock) as mock:
+            mock.return_value = [SearchResult(title="t", url="u", snippet="s")]
+            results = await search_web("test", backend="auto")
+            mock.assert_called_once()
+            assert results[0].title == "t"
+
+    @pytest.mark.asyncio()
+    async def test_auto_synonym_with_no_keys_uses_duckduckgo(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """``"auto"`` with no env keys must hit the DDG fallback path."""
+        monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+        monkeypatch.delenv("EXA_API_KEY", raising=False)
+        monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+        monkeypatch.delenv("KAOS_SEARCH_BACKEND", raising=False)
+
+        with patch("kaos_web.search.backends._search_duckduckgo", new_callable=AsyncMock) as mock:
+            mock.return_value = []
+            await search_web("test", backend="auto")
+            mock.assert_called_once()
+
+    @pytest.mark.asyncio()
+    async def test_auto_uppercase_also_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Casing variants of "auto" must also fall through — the
+        dispatcher lowercases the input before comparison."""
+        monkeypatch.setenv("SERPAPI_API_KEY", "key")
+        with patch("kaos_web.search.backends._search_serpapi", new_callable=AsyncMock) as mock:
+            mock.return_value = []
+            await search_web("test", backend="AUTO")
+            mock.assert_called_once()

@@ -86,7 +86,17 @@ async def search_web(
         raise ValueError(msg)
 
     s = _resolve_settings(settings)
-    resolved = (backend or s.search_backend).lower()
+    resolved = (backend or s.search_backend or "").lower()
+    # 0.1.1: the literal string "auto" is treated as a synonym for the
+    # auto-detect path (None / empty). LLMs (gpt-5.4-mini, Haiku 4.5)
+    # frequently pass the value "auto" because the public MCP tool
+    # description says "Default: auto-detect from env vars" — even
+    # though "auto" was never a real enum value. Fixing the tool
+    # description is necessary but not sufficient (training cutoff
+    # propagation, copy-paste from docs, etc.), so the dispatcher
+    # also recognizes the synonym deterministically. See #545.
+    if resolved == "auto":
+        resolved = ""  # fall through to auto-detect below
 
     if resolved:
         if resolved not in _BACKENDS:

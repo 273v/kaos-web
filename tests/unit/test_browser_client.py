@@ -16,13 +16,21 @@ from kaos_web.models import WebRequest
 
 class TestBrowserClientConfig:
     def test_default_config(self):
+        # 0.1.3: anti-bot defaults ported from kelvin-legal-intelligence
+        # (1365x768 viewport, en-US locale, America/New_York timezone,
+        # UA rotation, anti-bot Chrome header set, networkidle wait).
+        # See kaos_web.clients.config.BrowserClientConfig docstring.
         config = BrowserClientConfig()
         assert config.browser_type == "chromium"
         assert config.headless is True
         assert config.channel is None
-        assert config.viewport_width == 1280
-        assert config.viewport_height == 720
-        assert config.default_wait_until == "load"
+        assert config.viewport_width == 1365
+        assert config.viewport_height == 768
+        assert config.locale == "en-US"
+        assert config.timezone == "America/New_York"
+        assert config.default_wait_until == "networkidle"
+        assert config.randomize_user_agent is True
+        assert config.use_default_anti_bot_headers is True
         assert config.block_resources == []
 
     def test_chrome_channel_config(self):
