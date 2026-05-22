@@ -191,14 +191,13 @@ class HttpClient:
         url = validate_url(request.url)
         headers = {**request.headers} if request.headers else {}
 
-        # Per-domain UA routing — gov anti-bot hosts (sec.gov, govinfo,
-        # eCFR, …) return 403 for randomized Chrome UAs even with full
-        # realistic Accept/Accept-Language headers. They DO accept the
-        # honest ``KAOS_BOT_UA`` identifier. Override the client's
-        # baked-in UA per request when the host is on the bot-friendly
-        # list and the caller has not set User-Agent themselves.
-        # Caller-supplied headers always win — never clobber an explicit
-        # override.
+        # Per-domain UA routing — gov hosts (sec.gov, govinfo, eCFR,
+        # courtlistener, …) prefer the honest ``KAOS_BOT_UA`` identifier
+        # over randomized Chrome strings. Applied here for the rare
+        # httpx-direct path; the canonical anti-bot stack lives in
+        # ``BrowserClient`` (Playwright + viewport + locale + sec-ch-ua
+        # headers + UA rotation, ported from kelvin-legal-intelligence).
+        # Caller-supplied User-Agent always wins.
         if "User-Agent" not in headers and "user-agent" not in headers:
             from urllib.parse import urlsplit
 

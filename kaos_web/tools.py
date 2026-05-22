@@ -89,7 +89,7 @@ def _browser_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
 
 async def _fetch_html(
     url: str,
-    use_browser: bool = False,
+    use_browser: bool | None = None,
     context_id: str | None = None,
     *,
     dismiss_overlays: bool = True,
@@ -98,21 +98,40 @@ async def _fetch_html(
 ) -> tuple[str, str]:
     """Fetch HTML from a URL. Returns (html, final_url).
 
-    If ``context_id`` is provided with ``use_browser=True``, the browser page
-    is kept alive for subsequent interaction via browser tools.
+    **Default behaviour: Playwright-first.** When Playwright is
+    available (``kaos-web[browser]``) the realistic-browser path —
+    rotated desktop UA, 1365x768 viewport, en-US locale,
+    America/New_York timezone, full sec-ch-ua / sec-fetch / Accept
+    header set, configured in :class:`BrowserClient` — is used by
+    default. It passes Cloudflare, SEC.gov / EDGAR, and other
+    anti-bot stacks; the kelvin-legal-intelligence collector proves
+    this pattern in production.
+
+    The bare httpx path is only taken when:
+
+    * Playwright is not installed (no ``kaos-web[browser]`` extra)
+    * Caller explicitly passes ``use_browser=False`` (e.g. internal
+      JSON-API endpoints that don't need rendering)
+
+    A 403/406 on the httpx path triggers an automatic browser
+    fallback so legacy callers that hard-coded ``use_browser=False``
+    still benefit from anti-bot rendering when needed.
 
     Args:
         url: URL to fetch.
-        use_browser: Use Playwright browser rendering.
-        context_id: Named browser context for persistent sessions.
+        use_browser: ``True`` = force browser; ``False`` = force
+            httpx; ``None`` (default) = browser if available, httpx
+            otherwise.
+        context_id: Named browser context for persistent sessions
+            (cookies / storage across requests). Implies use_browser.
         dismiss_overlays: Auto-dismiss known cookie consent banners
-            (OneTrust, CookieBot, etc.) before extraction. Only applies
-            when using browser rendering. Defaults to True.
+            (OneTrust, CookieBot, etc.) before extraction. Browser
+            path only.
         wait_for_selector: CSS selector to wait for before extracting
-            content. Only applies when using browser rendering.
+            content. Browser path only.
         wait_for_settled: Wait for JS-rendered content to appear.
             Zero penalty on already-rendered pages. Skipped when
-            wait_for_selector is set. Defaults to True.
+            wait_for_selector is set. Browser path only.
     """
     from kaos_web.clients.http import HttpClient
     from kaos_web.models import WebRequest
@@ -131,7 +150,23 @@ async def _fetch_html(
             extra["wait_for_settled"] = True
         return extra
 
-    if use_browser:
+    # Resolve effective routing. context_id implies use_browser=True
+    # because named contexts only make sense with a real browser page.
+    effective_use_browser: bool
+    if context_id is not None:
+        effective_use_browser = True
+    elif use_browser is None:
+        # Auto-detect: browser if Playwright is importable, else httpx.
+        try:
+            import playwright  # noqa: F401 — probe only
+
+            effective_use_browser = True
+        except ImportError:
+            effective_use_browser = False
+    else:
+        effective_use_browser = use_browser
+
+    if effective_use_browser:
         try:
             if context_id:
                 # Use shared browser client so page persists for interaction
@@ -147,14 +182,22 @@ async def _fetch_html(
                     resp = await client.fetch(WebRequest(url=url, extra=_browser_extra()))
                     return resp.html, resp.url
         except ImportError:
-            pass  # Fall back to HTTP
+            # Playwright not installed at runtime. Fall through to httpx
+            # so the deployment stays usable on a minimal install — the
+            # caller's anti-bot coverage degrades, but they get *some*
+            # answer rather than an exception.
+            pass
 
     try:
         async with HttpClient() as client:
             resp = await client.fetch(WebRequest(url=url))
             return resp.html, resp.url
     except Exception as http_exc:
-        # Auto-fallback to browser on 403/bot-blocking errors
+        # 403/406 on the httpx path = bot-detection. Try the browser
+        # path as a fallback even when the caller passed
+        # use_browser=False — anti-bot defense is more important than
+        # honoring the legacy default. Silent skip if Playwright isn't
+        # installed; the original 403 propagates.
         status = getattr(http_exc, "status_code", None)
         if status in (403, 406):
             try:

@@ -187,6 +187,18 @@ class BrowserClient:
         """
         cfg = self._config
 
+        # Resolve effective User-Agent. Explicit config.user_agent wins;
+        # otherwise rotate through the curated DEFAULT_DESKTOP_UAS pool
+        # when randomize_user_agent=True so consecutive fetches don't
+        # share a fingerprint. Falling all the way through (no UA,
+        # randomize=False) lets Playwright apply its built-in headless
+        # Chromium UA — fine for testing, easily fingerprinted in prod.
+        effective_user_agent: str | None = cfg.user_agent
+        if effective_user_agent is None and cfg.randomize_user_agent:
+            from kaos_web.clients.user_agents import next_default_desktop_ua
+
+            effective_user_agent = next_default_desktop_ua()
+
         context_opts: dict[str, Any] = {
             "viewport": {
                 "width": cfg.viewport_width,
@@ -197,8 +209,8 @@ class BrowserClient:
             "ignore_https_errors": cfg.ignore_https_errors,
         }
 
-        if cfg.user_agent:
-            context_opts["user_agent"] = cfg.user_agent
+        if effective_user_agent:
+            context_opts["user_agent"] = effective_user_agent
         if cfg.locale:
             context_opts["locale"] = cfg.locale
         if cfg.timezone:
@@ -212,8 +224,19 @@ class BrowserClient:
                 "username": cfg.http_credentials[0],
                 "password": cfg.http_credentials[1],
             }
+
+        # Merge default anti-bot headers (sec-ch-ua / sec-fetch-* /
+        # accept-language / cache-control — the kelvin reference set)
+        # under any caller-supplied overrides. Caller wins on collision.
+        merged_headers: dict[str, str] = {}
+        if cfg.use_default_anti_bot_headers:
+            from kaos_web.clients.user_agents import DEFAULT_EXTRA_HEADERS
+
+            merged_headers.update(DEFAULT_EXTRA_HEADERS)
         if cfg.extra_headers:
-            context_opts["extra_http_headers"] = cfg.extra_headers
+            merged_headers.update(cfg.extra_headers)
+        if merged_headers:
+            context_opts["extra_http_headers"] = merged_headers
 
         # Named context: reuse or create. Keyed by (session_id, context_id)
         # so the same context_id from a different session resolves to a
