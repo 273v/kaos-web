@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.3] — 2026-05-22
+
+### Changed
+
+- **`_fetch_html` is Playwright-first.** When Playwright is available
+  (i.e. ``kaos-web[browser]`` extra is installed), the realistic-
+  browser path is now the default — not a 403/406 fallback. This is
+  the canonical pattern: realistic Chrome fingerprint, 1365x768
+  viewport, en-US locale, America/New_York timezone, rotated desktop
+  UA across :data:`DEFAULT_DESKTOP_UAS`, and the full
+  ``sec-ch-ua`` / ``sec-fetch-*`` / ``accept-language`` /
+  ``cache-control`` header set. Bare httpx is the explicit opt-out
+  (``use_browser=False`` for known-API JSON endpoints).
+- **BrowserClient defaults overhauled.** ``BrowserClientConfig`` now
+  ships with the production-validated anti-bot defaults ported from
+  ``kelvin-legal-intelligence/kelvin_firm_db/services/browser/
+  collector.py``: ``randomize_user_agent=True``,
+  ``use_default_anti_bot_headers=True``, viewport 1365x768,
+  locale ``en-US``, timezone ``America/New_York``,
+  ``default_wait_until="networkidle"``. Callers that want the old
+  bare-Playwright behavior can disable these explicitly.
+
+### Added
+
+- :data:`kaos_web.clients.user_agents.DEFAULT_DESKTOP_UAS` — curated,
+  market-share-weighted realistic desktop UA list (Chrome Win/Mac/
+  Linux, Safari, Edge, Firefox).
+- :data:`DEFAULT_EXTRA_HEADERS` — full anti-bot Chrome header set
+  (``sec-ch-ua``, ``sec-ch-ua-mobile``, ``sec-ch-ua-platform``,
+  ``sec-fetch-dest``, ``sec-fetch-mode``, ``sec-fetch-site``,
+  ``sec-fetch-user``, ``upgrade-insecure-requests``,
+  ``accept-language``, ``cache-control``, ``pragma``, ``accept``).
+- :func:`next_default_desktop_ua` — process-wide round-robin UA
+  rotation safe under asyncio concurrency.
+- Live regression tests in
+  ``tests/integration/test_playwright_anti_bot.py`` — SEC.gov press
+  releases, EDGAR CGI route, Cloudflare home page, UA rotation
+  invariant, sec-ch-ua header invariant, and explicit httpx fallback.
+  All 6 pass against real targets.
+
+
 ## [0.1.2] — 2026-05-22
 
 ### Fixed
