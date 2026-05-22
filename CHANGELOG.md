@@ -9,7 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
-## [0.1.3] — 2026-05-22
+## [0.1.4] — 2026-05-22
+
+Re-tag of 0.1.3 — the 0.1.3 publish failed pre-publish QA on three
+unit tests that pinned the old viewport / `_fetch_html` defaults.
+0.1.4 ships the same code with those tests updated to match the new
+anti-bot defaults. See 0.1.3 entry below for full content.
+
+## [0.1.3] — 2026-05-22 (failed publish — superseded by 0.1.4)
 
 ### Changed
 
