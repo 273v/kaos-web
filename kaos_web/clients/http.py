@@ -191,6 +191,29 @@ class HttpClient:
         url = validate_url(request.url)
         headers = {**request.headers} if request.headers else {}
 
+        # Per-domain UA routing — gov anti-bot hosts (sec.gov, govinfo,
+        # eCFR, …) return 403 for randomized Chrome UAs even with full
+        # realistic Accept/Accept-Language headers. They DO accept the
+        # honest ``KAOS_BOT_UA`` identifier. Override the client's
+        # baked-in UA per request when the host is on the bot-friendly
+        # list and the caller has not set User-Agent themselves.
+        # Caller-supplied headers always win — never clobber an explicit
+        # override.
+        if "User-Agent" not in headers and "user-agent" not in headers:
+            from urllib.parse import urlsplit
+
+            from kaos_web.clients.user_agents import (
+                KAOS_BOT_UA,
+                _host_matches_bot_friendly,
+            )
+
+            try:
+                host = urlsplit(url).hostname or ""
+            except (ValueError, AttributeError):
+                host = ""
+            if _host_matches_bot_friendly(host):
+                headers["User-Agent"] = KAOS_BOT_UA
+
         try:
             resp, body_bytes = await self._streamed_request(
                 method=request.method,

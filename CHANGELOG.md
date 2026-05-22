@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.2] — 2026-05-22
+
+### Fixed
+
+- **SEC.gov 403 cascade** (closes kaos-modules #444). The 2026-05-22
+  237-session production audit found 21 `kaos-web-fetch-page` failures
+  against `sec.gov` press releases + EDGAR routes, driving 30+ cascading
+  `max_iterations` and `wall_clock_exceeded` aborts. Root cause: the
+  randomized-Chrome desktop UA strategy that protects against
+  consumer-site bot detection is *inverted* on government domains —
+  SEC.gov specifically rejects Chrome UAs but accepts honest bot
+  identifiers like `KAOS-Web/0.1 (+https://273ventures.com/kaos-web)`.
+
+  `_raw_fetch` now overrides the client's baked-in UA per request when
+  the host matches `BOT_FRIENDLY_HOSTS` (sec.gov, govinfo.gov,
+  federalregister.gov, ecfr.gov, congress.gov, uscourts.gov,
+  courtlistener.com, irs.gov, fcc.gov, ftc.gov, doj.gov,
+  treasury.gov, data.gov, europa.eu). Verified live: SEC.gov press
+  releases + EDGAR company filings both return 200 instead of 403.
+  Caller-supplied `User-Agent` headers always win — explicit
+  overrides are never clobbered. (`tests/integration/test_sec_gov_anti_bot.py`,
+  `tests/unit/test_user_agents.py`)
+
+
 ## [0.1.1] — 2026-05-21
 
 ### Fixed
