@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
+from urllib.parse import urlsplit
 
 _DATA_FILE = Path(__file__).parent.parent / "data" / "user_agents.json"
 
@@ -72,3 +73,71 @@ def random_mobile_ua() -> str:
 def random_ua() -> str:
     """Return a random realistic browser user-agent (desktop or mobile)."""
     return random.choice(ALL_USER_AGENTS)
+
+
+# Hosts that block randomized Chrome desktop UAs but accept honest
+# bot identifiers (`KAOS_BOT_UA`). Verified empirically 2026-05-22:
+# SEC.gov returns 403 for Chrome UAs even with realistic Accept/
+# Accept-Language headers, but returns 200 for bot-style UAs that
+# identify the operator. This matches the SEC's published guidance
+# that automated requests must include a descriptive User-Agent.
+#
+# Match is suffix-based: ``sec.gov`` matches ``www.sec.gov`` and
+# ``efts.sec.gov`` but not ``not-sec.gov`` (a leading-dot boundary
+# is enforced; the bare host is also accepted as an exact match).
+BOT_FRIENDLY_HOSTS: frozenset[str] = frozenset(
+    {
+        # US federal government anti-bot domains
+        "sec.gov",  # SEC EDGAR + press releases
+        "govinfo.gov",  # GPO
+        "federalregister.gov",
+        "ecfr.gov",
+        "congress.gov",
+        "uscourts.gov",  # PACER + court opinions
+        "courtlistener.com",  # legal research (Free Law Project)
+        "irs.gov",
+        "fcc.gov",
+        "ftc.gov",
+        "doj.gov",
+        "treasury.gov",
+        "data.gov",
+        # Non-US gov bots that prefer honest identifiers
+        "europa.eu",  # EU institutions
+    }
+)
+
+
+def _host_matches_bot_friendly(host: str) -> bool:
+    """True iff ``host`` ends with a bot-friendly suffix.
+
+    Implements suffix match with a domain-boundary check so
+    ``not-sec.gov`` does not falsely match ``sec.gov``.
+    """
+    h = (host or "").lower().strip()
+    if not h:
+        return False
+    return any(h == suffix or h.endswith("." + suffix) for suffix in BOT_FRIENDLY_HOSTS)
+
+
+def pick_user_agent_for_url(url: str, *, default_random: bool = True) -> str:
+    """Pick the right User-Agent for ``url``.
+
+    Hosts in :data:`BOT_FRIENDLY_HOSTS` (SEC.gov, govinfo, eCFR, …)
+    get :data:`KAOS_BOT_UA` — they reject randomized Chrome UAs but
+    accept honest bot identifiers.
+
+    All other hosts get a random realistic desktop UA when
+    ``default_random=True``; otherwise :data:`KAOS_BOT_UA`. This
+    preserves the existing "look like a browser" strategy for
+    consumer sites that block obvious bots while fixing the
+    inverted-incentive failure on government domains.
+    """
+    try:
+        host = urlsplit(url).hostname or ""
+    except (ValueError, AttributeError):
+        host = ""
+    if _host_matches_bot_friendly(host):
+        return KAOS_BOT_UA
+    if default_random:
+        return random_desktop_ua()
+    return KAOS_BOT_UA
