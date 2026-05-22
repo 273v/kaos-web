@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 
+## [0.1.5] — 2026-05-22
+
+### Fixed
+
+- **`BrowserClient` consults `KaosWebSettings.browser_channel` +
+  auto-detect** when ``BrowserClientConfig.channel`` is None. Previously
+  the env var (``KAOS_WEB_BROWSER_CHANNEL`` / ``KAOS_BROWSER_CHANNEL``)
+  and `_detect_browser_channel()` (which selects system `chrome` when
+  Playwright's bundled Chromium isn't available, e.g. Ubuntu 26.04+)
+  were dead code unless callers built a custom `BrowserClientConfig`.
+  Default `BrowserClient()` now picks them up automatically. Verified
+  live against Cloudflare's home page (1.4MB rendered HTML) using
+  system `google-chrome` on Ubuntu 26.04.
+
+
 ## [0.1.4] — 2026-05-22
 
 Re-tag of 0.1.3 — the 0.1.3 publish failed pre-publish QA on three
