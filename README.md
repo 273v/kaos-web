@@ -115,7 +115,7 @@ DNS tools require the `[dns]` extra (`dnspython`).
 |---|---|
 | **Python** | 3.13, 3.14 (informational matrix entries for 3.14t free-threaded and 3.15-dev) |
 | **OS** | Linux, macOS, Windows (pure-Python wheel; no native code) |
-| **Maturity** | Alpha. The public API is documented in `kaos_web.__all__` (8 symbols) and the four `register_*_tools()` entry points. |
+| **Maturity** | Alpha. The public API is documented in `kaos_web.__all__` (10 symbols: `__version__`, the three extraction helpers `extract_content` / `extract_metadata` / `html_to_document`, `parse_html`, and the five `register_*_tools()` entry points including `register_web_all_tools`). |
 | **Stability policy** | Pre-1.0: minor bumps may change behaviour. Every change is documented in [`CHANGELOG.md`](CHANGELOG.md). The MCP tool surface and the `KAOS_WEB_*` environment-variable namespace are public API and follow the same policy. |
 | **Test coverage** | 1235 unit tests, 90% line coverage on 5609 statements. |
 | **Type checker** | Validated with [`ty`](https://docs.astral.sh/ty/), Astral's Python type checker. |
