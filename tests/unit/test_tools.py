@@ -37,11 +37,11 @@ _has_kaos_nlp_core = bool(sys.modules.get("kaos_nlp_core")) or (
 
 class TestRegisterTools:
     def test_register_web_tools(self) -> None:
-        """Register the 9 HTTP fetch / search tools — the `web` group."""
+        """Register the 10 HTTP fetch / feed / search tools — the `web` group."""
         runtime = KaosRuntime()
         count = register_web_tools(runtime)
 
-        assert count == 9, f"Expected 9 tools registered, got {count}"
+        assert count == 10, f"Expected 10 tools registered, got {count}"
 
         registered = runtime.tools.list_tools()
         expected_names = {
@@ -52,6 +52,7 @@ class TestRegisterTools:
             "kaos-web-search-page",
             "kaos-web-get-links",
             "kaos-web-get-images",
+            "kaos-web-fetch-feed",
         }
         for name in expected_names:
             assert name in registered, (
@@ -59,7 +60,7 @@ class TestRegisterTools:
             )
 
     def test_register_web_all_tools_union(self) -> None:
-        """`register_web_all_tools` registers all 45 tools across 4 groups.
+        """`register_web_all_tools` registers all 46 tools across 4 groups.
 
         Pins the convenience-union entry point: 9 web + 19 browser +
         14 netinfra + 3 crawl = 45. Registration itself is lazy with
@@ -71,7 +72,7 @@ class TestRegisterTools:
         runtime = KaosRuntime()
         count = register_web_all_tools(runtime)
         # 9 web + 19 browser + 14 netinfra + 3 crawl = 45.
-        assert count == 45, f"Expected 45 tools registered, got {count}"
+        assert count == 46, f"Expected 46 tools registered, got {count}"
 
         registered = runtime.tools.list_tools()
         # Spot-check one tool per group is present.
@@ -1015,10 +1016,11 @@ class TestWebSearchToolExecute:
 
 
 class TestRegisterCount:
-    def test_register_count_is_9(self) -> None:
+    def test_register_count_is_10(self) -> None:
         runtime = KaosRuntime()
         count = register_web_tools(runtime)
-        assert count == 9
+        assert count == 10
         names = runtime.tools.list_tools()
         assert "kaos-web-get-tables" in names
         assert "kaos-web-search" in names
+        assert "kaos-web-fetch-feed" in names
