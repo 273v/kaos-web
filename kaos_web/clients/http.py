@@ -353,49 +353,99 @@ class HttpClient:
 
         Either path raises ``BodyTooLargeError`` with the URL, observed
         size, and the configured cap so the agent can adjust.
-        """
-        async with self._client.stream(
-            method=method,
-            url=url,
-            headers=headers,
-            timeout=timeout,
-            follow_redirects=follow_redirects,
-        ) as resp:
-            declared = resp.headers.get("content-length")
-            if declared is not None:
-                try:
-                    declared_int = int(declared)
-                except ValueError:
-                    declared_int = -1
-                if declared_int > max_body_bytes:
-                    raise BodyTooLargeError(
-                        f"Response body for {url} declares "
-                        f"Content-Length: {declared_int} bytes (cap: "
-                        f"{max_body_bytes}). Aborting before body read. "
-                        f"Increase KAOS_WEB_MAX_BODY_BYTES if you intend "
-                        f"to fetch payloads of this size.",
-                        url=url,
-                        size_bytes=declared_int,
-                        max_bytes=max_body_bytes,
-                    )
 
-            chunks: list[bytes] = []
-            total = 0
-            async for chunk in resp.aiter_bytes():
-                total += len(chunk)
-                if total > max_body_bytes:
-                    raise BodyTooLargeError(
-                        f"Response body for {url} streamed past "
-                        f"{max_body_bytes} bytes (no Content-Length, or "
-                        f"server lied). Aborted at {total} bytes. "
-                        f"Increase KAOS_WEB_MAX_BODY_BYTES if you intend "
-                        f"to fetch payloads of this size.",
-                        url=url,
-                        size_bytes=total,
-                        max_bytes=max_body_bytes,
-                    )
-                chunks.append(chunk)
-            return resp, b"".join(chunks)
+        audit-04 F-001 (SECURITY): when ``follow_redirects`` is True we
+        do manual redirect handling so each redirect target is
+        revalidated against ``kaos_web.security.validate_url``. httpx's
+        built-in redirect handling only validates the original URL —
+        which the security policy gate previously documented as a known
+        gap. The manual loop preserves httpx's method-rewriting +
+        cross-origin header stripping (via ``response.next_request``)
+        while inserting the policy check on the redirect chain. Each
+        hop counts against ``self._config.max_redirects``; exhaustion
+        raises ``httpx.TooManyRedirects`` (mapped to ``WebRedirectError``
+        by the caller).
+        """
+        # Manual redirect loop with per-hop validate_url, per audit-04
+        # F-001. We always set follow_redirects=False on the inner
+        # httpx call and re-validate any Location target ourselves.
+        from kaos_web.security import validate_url
+
+        current_method = method
+        current_url = url
+        current_headers = headers
+        redirects_followed = 0
+        max_redirects = self._config.max_redirects
+
+        while True:
+            async with self._client.stream(
+                method=current_method,
+                url=current_url,
+                headers=current_headers,
+                timeout=timeout,
+                follow_redirects=False,
+            ) as resp:
+                if follow_redirects and resp.is_redirect:
+                    if redirects_followed >= max_redirects:
+                        raise httpx.TooManyRedirects(
+                            f"exceeded {max_redirects} redirects from {url}",
+                            request=resp.request,
+                        )
+                    nxt = resp.next_request
+                    if nxt is None:
+                        # 3xx with no Location — terminate at this response
+                        # rather than infinite-loop.
+                        pass
+                    else:
+                        next_url = str(nxt.url)
+                        # Re-validate against the policy gate. Raises
+                        # ``InvalidURLError`` (a ``WebError`` subclass) for
+                        # SSRF targets (loopback / RFC1918 / link-local /
+                        # metadata-service / non-http(s) schemes). The
+                        # caller's ``_raw_fetch`` exception mapping turns
+                        # that into the right user-facing error.
+                        validate_url(next_url)
+                        redirects_followed += 1
+                        current_url = next_url
+                        current_method = nxt.method
+                        current_headers = dict(nxt.headers.items())
+                        continue
+
+                declared = resp.headers.get("content-length")
+                if declared is not None:
+                    try:
+                        declared_int = int(declared)
+                    except ValueError:
+                        declared_int = -1
+                    if declared_int > max_body_bytes:
+                        raise BodyTooLargeError(
+                            f"Response body for {current_url} declares "
+                            f"Content-Length: {declared_int} bytes (cap: "
+                            f"{max_body_bytes}). Aborting before body read. "
+                            f"Increase KAOS_WEB_MAX_BODY_BYTES if you intend "
+                            f"to fetch payloads of this size.",
+                            url=current_url,
+                            size_bytes=declared_int,
+                            max_bytes=max_body_bytes,
+                        )
+
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > max_body_bytes:
+                        raise BodyTooLargeError(
+                            f"Response body for {current_url} streamed past "
+                            f"{max_body_bytes} bytes (no Content-Length, or "
+                            f"server lied). Aborted at {total} bytes. "
+                            f"Increase KAOS_WEB_MAX_BODY_BYTES if you intend "
+                            f"to fetch payloads of this size.",
+                            url=current_url,
+                            size_bytes=total,
+                            max_bytes=max_body_bytes,
+                        )
+                    chunks.append(chunk)
+                return resp, b"".join(chunks)
 
     async def close(self) -> None:
         """Release client resources."""
