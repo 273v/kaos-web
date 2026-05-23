@@ -8,6 +8,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **HttpClient now revalidates redirect targets through the URL
+  policy gate.** `HttpClient` previously delegated redirect handling
+  to httpx (`follow_redirects=True`), which validates only the
+  original request URL. A 3xx response with a `Location` pointing at
+  loopback, RFC1918, link-local metadata
+  (e.g. `http://169.254.169.254/latest/meta-data/`), or a non-(http|
+  https) scheme bypassed `kaos_web.security.validate_url` —
+  contradicting README:206's "enforced at every kaos-web fetch site"
+  promise and reintroducing the classic SSRF-via-redirect class.
+
+  `_streamed_request` now drives redirects manually: it always passes
+  `follow_redirects=False` to httpx and walks the chain itself,
+  re-entering `validate_url` on each `Location` target before any
+  socket I/O for the next hop. httpx's `response.next_request`
+  preserves the method-rewriting + cross-origin header stripping
+  behavior; only the policy check is added. Hop count is enforced
+  against `self._config.max_redirects` (raises
+  `httpx.TooManyRedirects` → `WebRedirectError`).
+
+  `tests/unit/test_redirect_revalidation.py` pins three contracts via
+  `httpx.MockTransport`: redirect to `127.0.0.1` is rejected, redirect
+  to `169.254.169.254` is rejected, and an allowed
+  public→public→public chain walks each hop. Closes
+  audit-04/kaos-web.md F-001.
+
+  This is the second security-class High in the audit-04 set
+  (kaos-mcp #30 was the first). Per the §10 stakeholder decision,
+  coordinate disclosure with kaos-mcp's GHSA window if both
+  advisories ship within 7 days of each other.
+
+  **Note**: `BrowserClient` (Playwright) is NOT covered by this fix —
+  Playwright's `page.goto()` follows redirects inside the browser
+  process and the kaos-web policy gate cannot intercept them. Per
+  the audit recommendation, this limitation should be documented
+  next to the `KAOS_SECURITY_*` table; high-risk callers needing
+  redirect-validated fetches should use `HttpClient` directly.
+
 
 ## [0.1.5] — 2026-05-22
 
