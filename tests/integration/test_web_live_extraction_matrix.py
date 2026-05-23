@@ -90,20 +90,61 @@ class TestRSSFeeds:
         )
 
     async def test_treasury_press_releases_rss(self, http_client):
-        """Treasury press releases RSS — second major US-gov feed."""
-        try:
-            resp = await http_client.fetch(
-                WebRequest(url="https://home.treasury.gov/news/press-releases/feed")
-            )
-        except WebClientError as exc:
-            pytest.skip(f"Treasury feed unreachable today: {exc}")
+        """Treasury press releases RSS — second major US-gov feed.
+
+        The WordPress-rendered Treasury site can ship either ``.rss`` or
+        ``/feed`` depending on plugin version. Both URLs tried here.
+        """
+        for url in (
+            "https://home.treasury.gov/news/press-releases.rss",
+            "https://home.treasury.gov/news/press-releases/feed",
+        ):
+            try:
+                resp = await http_client.fetch(WebRequest(url=url))
+            except WebClientError:
+                continue
+            if resp.status_code != 200:
+                continue
+            feed = parse_feed(resp.html or "")
+            if feed.format in ("rss", "atom") and feed.items:
+                assert len(feed.items) >= 1
+                return
+        pytest.skip("Treasury feed unreachable on both candidate URLs")
+
+    async def test_nasa_breaking_news_rss(self, http_client):
+        """NASA breaking-news RSS — a high-traffic feed with sustained
+        uptime. Useful as a 'feed parser still works' canary that doesn't
+        share infrastructure with SEC."""
+        resp = await http_client.fetch(WebRequest(url="https://www.nasa.gov/news-release/feed/"))
+        # NASA may serve HTML on the bare URL if the WordPress feed plugin
+        # is misrouted; accept either a parsed feed or skip cleanly.
         if resp.status_code != 200:
-            pytest.skip(f"Treasury feed returned {resp.status_code}")
+            pytest.skip(f"NASA feed returned {resp.status_code}")
         feed = parse_feed(resp.html or "")
-        # Treasury can ship either RSS or Atom depending on the WordPress
-        # plugin version. Accept either.
-        assert feed.format in ("rss", "atom"), f"Unexpected format {feed.format}"
-        assert len(feed.items) >= 1, "Treasury feed should have at least 1 item"
+        if feed.format == "unknown":
+            pytest.skip(f"NASA URL did not yield a feed (content_type={resp.content_type!r})")
+        assert feed.format in ("rss", "atom")
+        assert len(feed.items) >= 1
+        # First item should have a date — for "what's new" queries this is
+        # the key field.
+        assert feed.items[0].pub_date is not None
+
+    async def test_hacker_news_top_rss(self, http_client):
+        """Hacker News top-stories RSS — non-government, high cadence,
+        small feed size. Stable upstream — used as the 'developer query'
+        canary."""
+        resp = await http_client.fetch(WebRequest(url="https://hnrss.org/frontpage"))
+        if resp.status_code != 200:
+            pytest.skip(f"HN RSS returned {resp.status_code}")
+        feed = parse_feed(resp.html or "")
+        assert feed.format == "rss"
+        assert len(feed.items) >= 10, "HN frontpage typically returns 30 items"
+        # HN encodes Reddit-style comments URL in <comments>; we don't
+        # parse that yet but the basic title/link/pub_date contract must hold.
+        for item in feed.items[:5]:
+            assert item.title
+            assert item.link.startswith("http")
+            assert item.pub_date is not None
 
 
 class TestAtomFeeds:
@@ -124,6 +165,83 @@ class TestAtomFeeds:
         assert top.title.startswith("v3.")
         assert top.link.startswith("https://github.com/python/cpython/releases/tag/")
         assert top.pub_date is not None
+
+    async def test_github_commits_atom(self, http_client):
+        """GitHub commits Atom feed — exercises a different Atom shape
+        (per-commit entries vs per-release entries) with the same parser."""
+        resp = await http_client.fetch(
+            WebRequest(url="https://github.com/python/cpython/commits/main.atom")
+        )
+        if resp.status_code != 200:
+            pytest.skip(f"GitHub commits feed returned {resp.status_code}")
+        feed = parse_feed(resp.html or "")
+        assert feed.format == "atom"
+        assert len(feed.items) >= 5
+        # Commit feed titles are the commit subject line.
+        top = feed.items[0]
+        assert top.title
+        # Commit links use the /commit/{sha} pattern.
+        assert "/commit/" in top.link
+        assert top.pub_date is not None
+
+
+class TestFetchFeedToolLive:
+    """End-to-end live tests of the MCP tool wrapper.
+
+    These verify that the agent-visible surface (``kaos-web-fetch-feed``)
+    produces the same structured output as the underlying parser, with the
+    same publishers as ``TestRSSFeeds`` / ``TestAtomFeeds``.
+    """
+
+    async def test_tool_against_sec_rss(self):
+        from kaos_web.tools import FetchFeedTool
+
+        tool = FetchFeedTool()
+        result = await tool.execute(
+            {"url": "https://www.sec.gov/news/pressreleases.rss", "limit": 5}
+        )
+        assert result.isError is False
+        sc = result.structuredContent
+        assert sc is not None
+        assert sc["format"] == "rss"
+        assert len(sc["items"]) == 5
+        first = sc["items"][0]
+        assert first["title"]
+        assert first["link"].startswith("https://www.sec.gov")
+        assert first["pub_date"] is not None
+        # ISO-8601 with tz suffix
+        assert "T" in first["pub_date"]
+
+    async def test_tool_against_github_atom(self):
+        from kaos_web.tools import FetchFeedTool
+
+        tool = FetchFeedTool()
+        result = await tool.execute(
+            {"url": "https://github.com/python/cpython/releases.atom", "limit": 3}
+        )
+        assert result.isError is False
+        sc = result.structuredContent
+        assert sc is not None
+        assert sc["format"] == "atom"
+        assert len(sc["items"]) == 3
+        assert sc["items"][0]["title"].startswith("v3.")
+
+    async def test_tool_returns_typed_error_for_html_page(self):
+        """When the URL points to an HTML page (not a feed), the tool
+        must error AND tell the agent how to recover — the description
+        in the error message is the agent's recovery prompt."""
+        from kaos_web.tools import FetchFeedTool
+
+        tool = FetchFeedTool()
+        result = await tool.execute({"url": "https://en.wikipedia.org/wiki/RSS"})
+        assert result.isError is True
+        # ToolResult.content is a union of TextContent / ImageContent / etc.;
+        # narrow to the text-bearing variant.
+        body = getattr(result.content[0], "text", None)
+        assert isinstance(body, str), "Expected TextContent with .text"
+        assert "kaos-web-fetch-page" in body, (
+            "Recovery hint must steer the agent to the HTML fetch tool"
+        )
 
 
 class TestFeedParserDefensive:
