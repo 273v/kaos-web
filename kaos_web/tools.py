@@ -1014,6 +1014,151 @@ class GetPageTablesTool(KaosTool):
             )
 
 
+class FetchFeedTool(KaosTool):
+    """Fetch an RSS 2.0 or Atom 1.0 feed and return structured items.
+
+    Many publishers (SEC press releases, Federal Register, GitHub releases,
+    agency news) expose their freshest content via RSS/Atom long before the
+    sitemap.xml gets refreshed. Without this tool, the agent has to fetch
+    the raw XML via ``kaos-web-fetch-page`` and parse it in its head —
+    fragile and expensive. This tool reads the XML and returns parsed
+    items with parsed ``pub_date``, ``title``, ``link``, ``author``, and
+    ``description``.
+    """
+
+    @property
+    def metadata(self) -> ToolMetadata:
+        return ToolMetadata(
+            name="kaos-web-fetch-feed",
+            display_name="Fetch RSS/Atom Feed",
+            description=(
+                "Fetch an RSS 2.0 or Atom 1.0 feed URL and return its items "
+                "as structured data (title, link, pub_date, description, "
+                "author). Auto-detects format. ALWAYS PREFER THIS TOOL over "
+                "kaos-web-fetch-page when the user asks 'what's the most "
+                "recent X from publisher Y' and Y publishes a feed — RSS "
+                "is faster, smaller, and dated. Returns items in publisher "
+                "order (typically newest first). Common feed URLs: "
+                "https://www.sec.gov/news/pressreleases.rss, "
+                "https://github.com/{org}/{repo}/releases.atom."
+            ),
+            category=ToolCategory.DOCUMENT,
+            capability=ToolCapability.EXTRACT,
+            module_name=_MODULE,
+            version=_VERSION,
+            annotations=_WEB_ANNOTATIONS,
+            input_schema=[
+                ParameterSchema(
+                    name="url",
+                    type="string",
+                    description="Feed URL (RSS 2.0 or Atom 1.0).",
+                ),
+                ParameterSchema(
+                    name="limit",
+                    type="integer",
+                    description=(
+                        "Maximum items to return (most recent first). Default 20, "
+                        "max 100. Drop to 5-10 for 'what's new' queries to save "
+                        "tokens; raise for archival sweeps."
+                    ),
+                    required=False,
+                    default=20,
+                    constraints={"minimum": 1, "maximum": 100},
+                ),
+            ],
+        )
+
+    async def execute(
+        self, inputs: dict[str, Any], context: KaosContext | None = None
+    ) -> ToolResult:
+        from kaos_web.clients.config import HttpClientConfig
+        from kaos_web.clients.http import HttpClient
+        from kaos_web.extract import parse_feed
+        from kaos_web.models import WebRequest
+
+        url = inputs["url"]
+        limit = min(int(inputs.get("limit", 20) or 20), 100)
+
+        try:
+            cfg = HttpClientConfig(randomize_user_agent=True)
+            async with HttpClient(cfg) as client:
+                resp = await client.fetch(WebRequest(url=url))
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Failed to fetch feed {url}: {exc}. "
+                "Verify the URL is a public RSS or Atom feed. "
+                "Alternative: kaos-web-fetch-page for non-feed URLs."
+            )
+
+        feed = parse_feed(resp.html or "")
+        if feed.format == "unknown":
+            return ToolResult.create_error(
+                f"{url} did not parse as RSS 2.0 or Atom 1.0 (got "
+                f"content_type={resp.content_type!r}, {len(resp.html or '')} bytes). "
+                "Verify the URL is a feed endpoint (typically ending in .rss, "
+                ".atom, /feed, or /rss). Alternative: kaos-web-fetch-page if "
+                "the URL is an HTML page, then look for <link rel='alternate' "
+                "type='application/rss+xml'>."
+            )
+
+        items = feed.items[:limit]
+        if not items:
+            return ToolResult.create_success(
+                output=(
+                    f"Feed '{feed.title or url}' ({feed.format}) returned 0 items. "
+                    "The publisher may have cleared the feed or the URL points "
+                    "to a feed index. Try a sub-feed (e.g. category-specific) "
+                    "or kaos-web-fetch-page on the human-readable index."
+                ),
+                summary=f"empty feed (format={feed.format})",
+                structuredContent={
+                    "format": feed.format,
+                    "title": feed.title,
+                    "link": feed.link,
+                    "items": [],
+                },
+            )
+
+        lines = [
+            f"# {feed.title or url}",
+            f"format={feed.format} items_returned={len(items)} (of {len(feed.items)} total)",
+            "",
+        ]
+        for idx, item in enumerate(items, start=1):
+            date_str = item.pub_date.isoformat() if item.pub_date else "no-date"
+            lines.append(f"{idx}. **{item.title}** ({date_str})")
+            lines.append(f"   {item.link}")
+            if item.description:
+                snippet = item.description[:200].strip()
+                lines.append(f"   {snippet}")
+            lines.append("")
+
+        return ToolResult.create_success(
+            output="\n".join(lines),
+            summary=(
+                f"{len(items)} items from {feed.title or url} "
+                f"(format={feed.format}, top: {items[0].title[:60]!r})"
+            ),
+            structuredContent={
+                "format": feed.format,
+                "title": feed.title,
+                "link": feed.link,
+                "description": feed.description,
+                "items": [
+                    {
+                        "title": it.title,
+                        "link": it.link,
+                        "pub_date": it.pub_date.isoformat() if it.pub_date else None,
+                        "description": it.description,
+                        "author": it.author,
+                        "categories": list(it.categories),
+                    }
+                    for it in items
+                ],
+            },
+        )
+
+
 class WebSearchTool(KaosTool):
     """Search the web and return results with titles, URLs, and snippets."""
 
@@ -1110,16 +1255,16 @@ class WebSearchTool(KaosTool):
 
 
 def register_web_tools(runtime: KaosRuntime) -> int:
-    """Register the 9 HTTP fetch + search tools with the runtime.
+    """Register the 10 HTTP fetch + feed + search tools with the runtime.
 
     Pins the SessionToolSet ``web`` group entry point for kaos-web.
     Covers the "fetch a URL and extract text / markdown / metadata /
-    links / images / tables, or search the web" surface — every tool
-    that performs a single bounded HTTP GET via ``httpx`` (no
-    JS-rendering, no DNS / WHOIS / TLS introspection, no multi-URL
-    crawling).
+    links / images / tables / RSS-Atom feed, or search the web"
+    surface — every tool that performs a single bounded HTTP GET via
+    ``httpx`` (no JS-rendering, no DNS / WHOIS / TLS introspection,
+    no multi-URL crawling).
 
-    The full 45-tool kaos-web surface is split across 4 register
+    The full 46-tool kaos-web surface is split across 4 register
     functions: see :func:`register_web_all_tools` for the union, or
     call :func:`register_browser_tools` / :func:`register_crawl_tools`
     / :func:`register_domain_tools` (the ``netinfra`` group) directly
@@ -1138,6 +1283,7 @@ def register_web_tools(runtime: KaosRuntime) -> int:
         GetPageLinksTool(),
         GetPageImagesTool(),
         GetPageTablesTool(),
+        FetchFeedTool(),
         WebSearchTool(),
     ]
     for tool in tools:
