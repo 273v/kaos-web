@@ -5,7 +5,7 @@ All notable changes to `kaos-web` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
+
 ## [Unreleased]
 
 ### Changed
@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to `Development Status :: 5 - Production/Stable` to reflect the
   0.1.0 GA release (WU-L #543) that froze the public API for the
   0.1.x line. Closes audit-04/kaos-web.md Family D (classifier drift).
+
+### Documentation
+
+- **audit-04 README count drift.** README Maturity row updated from
+  "8 symbols" to the correct "10 symbols" and from "four
+  `register_*_tools()` entry points" to five (including
+  `register_web_all_tools`). Pre-fix counts dated from before the
+  `register_web_all_tools` addition and a third extraction helper
+  came online. The new wording enumerates each name so future drift
+  is immediately visible in diff review. No public API or behavior
+  change; doc-only fix closing audit-04/kaos-web.md README count
+  drift.
 
 
 ## [0.1.5] — 2026-05-22
