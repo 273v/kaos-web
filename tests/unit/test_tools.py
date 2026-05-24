@@ -1024,3 +1024,193 @@ class TestRegisterCount:
         assert "kaos-web-get-tables" in names
         assert "kaos-web-search" in names
         assert "kaos-web-fetch-feed" in names
+
+
+# ── Playwright-default routing (kaos-web 0.1.8+) ──────────────────────
+#
+# Goal: when an MCP tool is called without an explicit ``use_browser``
+# argument, the resolver picks Playwright (assuming the extra is
+# installed). This is the fix for the 2026-05-23 incident where
+# federalregister.gov and ecfr.gov returned 200 OK with a "Request
+# Access" anti-bot HTML body, the bare httpx path treated it as
+# success, and the agent fabricated FR climate-disclosure results.
+
+
+class TestBotChallengeFingerprint:
+    """``_looks_like_bot_challenge`` flags anti-bot interstitial HTML."""
+
+    def test_federal_register_request_access(self) -> None:
+        from kaos_web.tools import _looks_like_bot_challenge
+
+        # The exact 2026-05-23 FR / eCFR interstitial body.
+        html = (
+            "<!DOCTYPE html><html><head>"
+            "<title>Federal Register :: Request Access</title>"
+            "</head><body>Please wait...</body></html>"
+        )
+        assert _looks_like_bot_challenge(html) is True
+
+    def test_cloudflare_just_a_moment(self) -> None:
+        from kaos_web.tools import _looks_like_bot_challenge
+
+        html = (
+            "<html><head><title>Just a moment...</title></head><body>"
+            '<div class="cf-browser-verification">Checking your browser</div>'
+            "</body></html>"
+        )
+        assert _looks_like_bot_challenge(html) is True
+
+    def test_datadome_captcha(self) -> None:
+        from kaos_web.tools import _looks_like_bot_challenge
+
+        html = (
+            "<html><body>"
+            '<script src="https://geo.captcha-delivery.com/captcha/?initialCid=..."></script>'
+            "</body></html>"
+        )
+        assert _looks_like_bot_challenge(html) is True
+
+    def test_benign_html_is_not_a_challenge(self) -> None:
+        from kaos_web.tools import _looks_like_bot_challenge
+
+        # The article fixture is a real news article — must not trigger.
+        assert _looks_like_bot_challenge(ARTICLE_HTML) is False
+
+    def test_empty_html_is_not_a_challenge(self) -> None:
+        from kaos_web.tools import _looks_like_bot_challenge
+
+        assert _looks_like_bot_challenge("") is False
+        assert _looks_like_bot_challenge(None) is False
+
+
+class TestFetchHtmlDefaultsToPlaywright:
+    """``_fetch_html(use_browser=None)`` picks Playwright when importable.
+
+    The schema default for ``use_browser`` on every kaos-web MCP tool
+    is ``None``, and every resolver passes that through verbatim
+    (``inputs.get("use_browser")``). So the agent calling
+    ``kaos-web-fetch-page`` without overriding gets the realistic
+    browser fingerprint by default — the routing that passes
+    Cloudflare / SEC.gov / FR / eCFR / Investopedia anti-bot tiers.
+    """
+
+    @patch("kaos_web.clients.http.HttpClient", autospec=True)
+    async def test_none_takes_browser_path_when_playwright_importable(
+        self, mock_http_cls: Any
+    ) -> None:
+        # If Playwright is importable in this test env, the resolver
+        # should pick the browser path and never construct HttpClient.
+        # If it isn't, this test is moot.
+        try:
+            import playwright.async_api  # noqa: F401
+        except ImportError:
+            pytest.skip("playwright not installed; routing assertion N/A")
+
+        # Stub the BrowserClient so we don't actually launch Chromium.
+        with patch("kaos_web.clients.browser.BrowserClient") as mock_bc:
+            mock_inst = MagicMock()
+            mock_inst.__aenter__ = AsyncMock(return_value=mock_inst)
+            mock_inst.__aexit__ = AsyncMock(return_value=None)
+            mock_resp = MagicMock()
+            mock_resp.html = "<html><body>browser path</body></html>"
+            mock_resp.url = "https://example.com"
+            mock_inst.fetch = AsyncMock(return_value=mock_resp)
+            mock_bc.return_value = mock_inst
+
+            html, url = await _fetch_html("https://example.com", use_browser=None)
+            assert "browser path" in html
+            assert url == "https://example.com"
+
+        # HttpClient must NOT have been used.
+        mock_http_cls.assert_not_called()
+
+    @patch("kaos_web.clients.http.HttpClient", autospec=True)
+    async def test_explicit_false_takes_httpx_path(self, mock_http_cls: Any) -> None:
+        # When the agent explicitly opts out, we honor it.
+        mock_inst = MagicMock()
+        mock_inst.__aenter__ = AsyncMock(return_value=mock_inst)
+        mock_inst.__aexit__ = AsyncMock(return_value=None)
+        mock_resp = MagicMock()
+        mock_resp.html = "<html><body>httpx path</body></html>"
+        mock_resp.url = "https://example.com"
+        mock_inst.fetch = AsyncMock(return_value=mock_resp)
+        mock_http_cls.return_value = mock_inst
+
+        with patch("kaos_web.clients.browser.BrowserClient") as mock_bc:
+            html, _url = await _fetch_html("https://example.com", use_browser=False)
+            assert "httpx path" in html
+            mock_bc.assert_not_called()
+
+    @patch("kaos_web.clients.http.HttpClient", autospec=True)
+    async def test_httpx_200_with_bot_challenge_triggers_browser_fallback(
+        self, mock_http_cls: Any
+    ) -> None:
+        # The 2026-05-23 regression: httpx returns 200 OK with the FR
+        # "Request Access" interstitial body. The router must detect
+        # the fingerprint and retry on Playwright rather than handing
+        # the agent a useless challenge page that looks like success.
+        try:
+            import playwright.async_api  # noqa: F401
+        except ImportError:
+            pytest.skip("playwright not installed; fallback N/A")
+
+        # httpx returns a 200 with the FR interstitial body.
+        mock_http_inst = MagicMock()
+        mock_http_inst.__aenter__ = AsyncMock(return_value=mock_http_inst)
+        mock_http_inst.__aexit__ = AsyncMock(return_value=None)
+        challenge_resp = MagicMock()
+        challenge_resp.html = (
+            "<html><head><title>Federal Register :: Request Access</title>"
+            "</head><body>Please wait</body></html>"
+        )
+        challenge_resp.url = "https://www.federalregister.gov/search"
+        mock_http_inst.fetch = AsyncMock(return_value=challenge_resp)
+        mock_http_cls.return_value = mock_http_inst
+
+        # Browser fallback returns the real content.
+        with patch("kaos_web.clients.browser.BrowserClient") as mock_bc:
+            mock_browser_inst = MagicMock()
+            mock_browser_inst.__aenter__ = AsyncMock(return_value=mock_browser_inst)
+            mock_browser_inst.__aexit__ = AsyncMock(return_value=None)
+            real_resp = MagicMock()
+            real_resp.html = "<html><body>real FR search results</body></html>"
+            real_resp.url = "https://www.federalregister.gov/search"
+            mock_browser_inst.fetch = AsyncMock(return_value=real_resp)
+            mock_bc.return_value = mock_browser_inst
+
+            html, _ = await _fetch_html("https://www.federalregister.gov/search", use_browser=False)
+            assert "real FR search results" in html, (
+                "Bot-challenge body should trigger browser fallback even "
+                "with use_browser=False; the regression that fooled the "
+                "2026-05-23 agent is that the challenge HTML was returned "
+                "as if it were a successful fetch."
+            )
+
+
+class TestUseBrowserSchemaDefaultIsNone:
+    """Every MCP tool advertising ``use_browser`` defaults to ``None``.
+
+    ``None`` means "let the resolver pick" — which is Playwright when
+    the extra is installed. ``False`` would lock callers into the
+    bare httpx path that gets silently blocked by anti-bot tiers.
+    """
+
+    def test_fetch_page_default_none(self) -> None:
+        params = {p.name: p for p in FetchPageTool().metadata.input_schema}
+        assert params["use_browser"].default is None
+
+    def test_get_text_default_none(self) -> None:
+        params = {p.name: p for p in GetPageTextTool().metadata.input_schema}
+        assert params["use_browser"].default is None
+
+    def test_get_markdown_default_none(self) -> None:
+        params = {p.name: p for p in GetPageMarkdownTool().metadata.input_schema}
+        assert params["use_browser"].default is None
+
+    def test_search_page_default_none(self) -> None:
+        params = {p.name: p for p in SearchPageTool().metadata.input_schema}
+        assert params["use_browser"].default is None
+
+    def test_get_tables_default_none(self) -> None:
+        params = {p.name: p for p in GetPageTablesTool().metadata.input_schema}
+        assert params["use_browser"].default is None
