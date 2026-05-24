@@ -57,6 +57,19 @@ class DiscoverUrlsTool(KaosTool):
                     description="Domain or page URL to discover URLs from.",
                 ),
                 ParameterSchema(
+                    name="use_browser",
+                    type="boolean",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright with "
+                        "full browser fingerprint when the [browser] extra is "
+                        "installed — passes Cloudflare and other anti-bot "
+                        "tiers. Set false to force httpx (much faster for "
+                        "many-URL discovery on known-clean hosts)."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ParameterSchema(
                     name="sitemap",
                     type="string",
                     description=(
@@ -111,19 +124,50 @@ class DiscoverUrlsTool(KaosTool):
         inc = _split_patterns(inputs.get("include_patterns"))
         exc = _split_patterns(inputs.get("exclude_patterns"))
 
+        # 2026-05-24: Playwright-default routing per goal in task #634.
+        # Agent picks fetcher tier through ``use_browser``; we honor the
+        # explicit ``False`` opt-out but otherwise prefer Playwright when
+        # available (matches kaos-web-fetch-page default in tools.py).
+        use_browser = inputs.get("use_browser")
+        if use_browser is None:
+            try:
+                import playwright  # noqa: F401
+
+                use_browser = True
+            except ImportError:
+                use_browser = False
+
         try:
-            from kaos_web.clients.http import HttpClient
             from kaos_web.discover.discovery import discover_urls
 
-            async with HttpClient() as client:
-                result = await discover_urls(
-                    url,
-                    client.fetch,
-                    sitemap=sitemap,
-                    include_patterns=inc,
-                    exclude_patterns=exc,
-                    max_urls=max_urls,
-                )
+            if use_browser:
+                try:
+                    from kaos_web.clients.browser import BrowserClient
+
+                    async with BrowserClient() as client:
+                        result = await discover_urls(
+                            url,
+                            client.fetch,
+                            sitemap=sitemap,
+                            include_patterns=inc,
+                            exclude_patterns=exc,
+                            max_urls=max_urls,
+                        )
+                except ImportError:
+                    use_browser = False  # Playwright extra missing — fall through.
+
+            if not use_browser:
+                from kaos_web.clients.http import HttpClient
+
+                async with HttpClient() as client:
+                    result = await discover_urls(
+                        url,
+                        client.fetch,
+                        sitemap=sitemap,
+                        include_patterns=inc,
+                        exclude_patterns=exc,
+                        max_urls=max_urls,
+                    )
 
             return ToolResult.create_success(
                 output={
@@ -178,6 +222,21 @@ class BatchFetchTool(KaosTool):
                     ),
                 ),
                 ParameterSchema(
+                    name="use_browser",
+                    type="boolean",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright with "
+                        "full browser fingerprint when the [browser] extra is "
+                        "installed — passes Cloudflare, SEC.gov, "
+                        "FederalRegister, eCFR, Investopedia, and most "
+                        "anti-bot tiers. Set false to force the bare httpx "
+                        "path (much faster for many-URL batches on "
+                        "known-clean hosts)."
+                    ),
+                    required=False,
+                    default=None,
+                ),
+                ParameterSchema(
                     name="concurrency",
                     type="integer",
                     description="Max concurrent requests (default 5).",
@@ -217,11 +276,15 @@ class BatchFetchTool(KaosTool):
 
         concurrency = inputs.get("concurrency", 5)
         output_format = inputs.get("output_format", "markdown")
+        # 2026-05-24: Playwright-default routing per goal in task #634.
+        # ``None`` passes through to batch_fetch's resolver which probes
+        # for the [browser] extra. Explicit False opts out.
+        use_browser = inputs.get("use_browser")
 
         try:
             from kaos_web.discover.batch import batch_fetch
 
-            result = await batch_fetch(urls, concurrency=concurrency)
+            result = await batch_fetch(urls, concurrency=concurrency, use_browser=use_browser)
 
             has_context = context is not None and context.runtime is not None
             pages = []
@@ -284,6 +347,21 @@ class CrawlSiteTool(KaosTool):
                     name="url",
                     type="string",
                     description="Starting URL for the crawl.",
+                ),
+                ParameterSchema(
+                    name="use_browser",
+                    type="boolean",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright with "
+                        "full browser fingerprint when the [browser] extra is "
+                        "installed — passes Cloudflare, SEC.gov, "
+                        "FederalRegister, eCFR, Investopedia, and most "
+                        "anti-bot tiers. Set false to force the bare httpx "
+                        "path (much faster for many-page crawls on "
+                        "known-clean hosts)."
+                    ),
+                    required=False,
+                    default=None,
                 ),
                 ParameterSchema(
                     name="max_depth",
@@ -358,6 +436,10 @@ class CrawlSiteTool(KaosTool):
         concurrency = inputs.get("concurrency", 5)
         sitemap = inputs.get("sitemap", "include")
         output_format = inputs.get("output_format", "summary")
+        # 2026-05-24: Playwright-default routing per goal in task #634.
+        # ``None`` passes through to crawl_site's resolver which probes
+        # for the [browser] extra. Explicit False opts out.
+        use_browser = inputs.get("use_browser")
 
         inc = _split_patterns(inputs.get("include_patterns"))
         exc = _split_patterns(inputs.get("exclude_patterns"))
@@ -373,6 +455,7 @@ class CrawlSiteTool(KaosTool):
                 sitemap=sitemap,
                 include_patterns=inc,
                 exclude_patterns=exc,
+                use_browser=use_browser,
             )
 
             has_context = context is not None and context.runtime is not None

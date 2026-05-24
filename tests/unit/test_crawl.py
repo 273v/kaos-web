@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -78,7 +79,9 @@ class TestCrawlSite:
             }
         )
         with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
-            result = await crawl_site("https://example.com", max_depth=0, sitemap="skip")
+            result = await crawl_site(
+                "https://example.com", max_depth=0, sitemap="skip", use_browser=False
+            )
 
         assert result.total_extracted >= 1
         assert result.pages[0].url == "https://example.com"
@@ -98,7 +101,9 @@ class TestCrawlSite:
             }
         )
         with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
-            result = await crawl_site("https://example.com", max_depth=1, sitemap="skip")
+            result = await crawl_site(
+                "https://example.com", max_depth=1, sitemap="skip", use_browser=False
+            )
 
         assert result.total_extracted >= 2
         urls = {p.url for p in result.pages}
@@ -118,7 +123,9 @@ class TestCrawlSite:
             }
         )
         with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
-            result = await crawl_site("https://example.com", max_pages=2, sitemap="skip")
+            result = await crawl_site(
+                "https://example.com", max_pages=2, sitemap="skip", use_browser=False
+            )
 
         assert len(result.pages) <= 2
 
@@ -152,7 +159,9 @@ class TestCrawlSite:
         client.fetch = patched_fetch
 
         with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
-            result = await crawl_site("https://example.com", max_depth=1, sitemap="skip")
+            result = await crawl_site(
+                "https://example.com", max_depth=1, sitemap="skip", use_browser=False
+            )
 
         # Should have at least the start page despite errors
         assert len(result.pages) >= 1
@@ -169,7 +178,9 @@ class TestCrawlSite:
             }
         )
         with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
-            result = await crawl_site("https://example.com", max_depth=2, sitemap="skip")
+            result = await crawl_site(
+                "https://example.com", max_depth=2, sitemap="skip", use_browser=False
+            )
 
         urls = {p.url for p in result.pages}
         assert not any("other.com" in u for u in urls)
@@ -185,7 +196,9 @@ class TestCrawlSite:
             }
         )
         with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
-            result = await crawl_site("https://example.com", max_depth=0, sitemap="skip")
+            result = await crawl_site(
+                "https://example.com", max_depth=0, sitemap="skip", use_browser=False
+            )
         assert result.elapsed_ms > 0
 
     @pytest.mark.asyncio
@@ -200,5 +213,72 @@ class TestCrawlSite:
             }
         )
         with patch("kaos_web.discover.crawl.HttpClient", return_value=client):
-            result = await crawl_site("example.com", max_depth=0, sitemap="skip")
+            result = await crawl_site("example.com", max_depth=0, sitemap="skip", use_browser=False)
+        assert len(result.pages) >= 1
+
+
+# ── 2026-05-24: Playwright-default routing for crawl_site (task #634) ──
+
+
+class TestCrawlSiteUseBrowserRouting:
+    """``crawl_site`` honors ``use_browser`` and shares the resolver with batch_fetch."""
+
+    def _make_client_mock(self, responses: dict[str, tuple[int, str]]):
+        async def mock_fetch(request):
+            url = request.url
+            if url in responses:
+                status, html = responses[url]
+                return WebResponse(url=url, status_code=status, html=html)
+            return WebResponse(url=url, status_code=404, html="")
+
+        instance = AsyncMock()
+        instance.fetch = mock_fetch
+        instance.__aenter__ = AsyncMock(return_value=instance)
+        instance.__aexit__ = AsyncMock(return_value=False)
+        return instance
+
+    @pytest.mark.asyncio
+    async def test_explicit_true_routes_through_browser_client(self) -> None:
+        responses = {
+            "https://example.com/robots.txt": (404, ""),
+            "https://example.com/sitemap.xml": (404, ""),
+            "https://example.com/sitemap_index.xml": (404, ""),
+            "https://example.com": (200, PAGE_HTML),
+        }
+        fake_instance = self._make_client_mock(responses)
+        fake_browser_mod = MagicMock()
+        FakeBrowserClient = MagicMock(return_value=fake_instance)
+        fake_browser_mod.BrowserClient = FakeBrowserClient
+
+        with patch.dict(sys.modules, {"kaos_web.clients.browser": fake_browser_mod}):
+            result = await crawl_site(
+                "https://example.com",
+                max_depth=0,
+                sitemap="skip",
+                use_browser=True,
+            )
+        assert FakeBrowserClient.called
+        assert len(result.pages) >= 1
+
+    @pytest.mark.asyncio
+    async def test_explicit_false_routes_through_httpx(self) -> None:
+        """Even when Playwright is installed, ``use_browser=False`` forces httpx."""
+        responses = {
+            "https://example.com/robots.txt": (404, ""),
+            "https://example.com/sitemap.xml": (404, ""),
+            "https://example.com/sitemap_index.xml": (404, ""),
+            "https://example.com": (200, PAGE_HTML),
+        }
+        fake_instance = self._make_client_mock(responses)
+        with (
+            patch("kaos_web.discover.crawl.HttpClient", return_value=fake_instance) as MockHttp,
+            patch.dict(sys.modules, {"playwright": MagicMock()}),
+        ):
+            result = await crawl_site(
+                "https://example.com",
+                max_depth=0,
+                sitemap="skip",
+                use_browser=False,
+            )
+        assert MockHttp.called
         assert len(result.pages) >= 1

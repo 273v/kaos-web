@@ -649,3 +649,159 @@ class TestRegisterCrawlTools:
         count = register_crawl_tools(runtime)
         assert count == 3
         assert runtime.tools.register_tool.call_count == 3
+
+
+# ── 2026-05-24: Playwright-default routing for all 3 crawl tools (task #634) ──
+
+
+class TestUseBrowserSchemaDefaultIsNone:
+    """Pin the schema-default contract — regressing to False locks the agent into httpx.
+
+    The 0.1.8 release shipped this contract for the 5 fetch tools in
+    ``tools.py``. The 0.1.9 release extends it to the 3 crawl tools
+    here so the Playwright-default contract is uniform across every
+    kaos-web MCP tool that exposes ``use_browser``.
+    """
+
+    @pytest.mark.parametrize(
+        "tool_cls",
+        [DiscoverUrlsTool, BatchFetchTool, CrawlSiteTool],
+    )
+    def test_use_browser_schema_default_is_none(self, tool_cls: type) -> None:
+        meta = tool_cls().metadata
+        use_browser_params = [p for p in meta.input_schema if p.name == "use_browser"]
+        assert len(use_browser_params) == 1, (
+            f"{tool_cls.__name__} must expose exactly one 'use_browser' "
+            f"ParameterSchema; got {len(use_browser_params)}"
+        )
+        param = use_browser_params[0]
+        assert param.default is None, (
+            f"{tool_cls.__name__}.use_browser default must be None for "
+            f"Playwright-first auto-detection; got {param.default!r}"
+        )
+        assert param.required is False
+        assert "Playwright" in (param.description or "")
+
+
+@pytest.mark.asyncio
+class TestDiscoverUrlsToolRoutesByUseBrowser:
+    """DiscoverUrlsTool.execute() routes through BrowserClient vs HttpClient."""
+
+    async def test_use_browser_none_with_playwright_installed_uses_browser(self) -> None:
+        """When Playwright is importable, ``use_browser=None`` routes through BrowserClient."""
+        discovery = DiscoveryResult(urls=[], sitemap_count=0, page_link_count=0)
+        mock_browser = AsyncMock()
+        mock_browser.__aenter__ = AsyncMock(return_value=mock_browser)
+        mock_browser.__aexit__ = AsyncMock(return_value=None)
+        mock_browser.fetch = AsyncMock()
+
+        with (
+            patch(
+                "kaos_web.discover.discovery.discover_urls",
+                AsyncMock(return_value=discovery),
+            ) as mock_discover,
+            patch(
+                "kaos_web.clients.browser.BrowserClient",
+                MagicMock(return_value=mock_browser),
+            ) as mock_browser_cls,
+            patch.dict("sys.modules", {"playwright": MagicMock()}),
+        ):
+            result = await DiscoverUrlsTool().execute({"url": "https://example.com"})
+        assert not _is_error(result)
+        # BrowserClient was instantiated (Playwright path taken).
+        assert mock_browser_cls.called
+        # discover_urls received browser.fetch as the fetcher.
+        await_args = mock_discover.await_args
+        assert await_args is not None
+        assert await_args.args[1] is mock_browser.fetch
+
+    async def test_use_browser_false_forces_httpx(self) -> None:
+        """``use_browser=False`` opts out of Playwright even when installed."""
+        discovery = DiscoveryResult(urls=[], sitemap_count=0, page_link_count=0)
+        mock_http = AsyncMock()
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=None)
+        mock_http.fetch = AsyncMock()
+
+        with (
+            patch(
+                "kaos_web.discover.discovery.discover_urls",
+                AsyncMock(return_value=discovery),
+            ) as mock_discover,
+            patch(
+                "kaos_web.clients.http.HttpClient",
+                MagicMock(return_value=mock_http),
+            ) as mock_http_cls,
+        ):
+            result = await DiscoverUrlsTool().execute(
+                {"url": "https://example.com", "use_browser": False}
+            )
+        assert not _is_error(result)
+        assert mock_http_cls.called
+        await_args = mock_discover.await_args
+        assert await_args is not None
+        assert await_args.args[1] is mock_http.fetch
+
+
+@pytest.mark.asyncio
+class TestBatchFetchToolThreadsUseBrowser:
+    """BatchFetchTool.execute() passes ``use_browser`` through to ``batch_fetch``."""
+
+    async def test_use_browser_none_threads_through(self) -> None:
+        mock_batch = AsyncMock(return_value=BatchResult())
+        with patch("kaos_web.discover.batch.batch_fetch", mock_batch):
+            await BatchFetchTool().execute({"urls": "https://example.com/a"})
+        await_args = mock_batch.await_args
+        assert await_args is not None
+        kw = await_args.kwargs
+        assert kw["use_browser"] is None
+
+    async def test_explicit_false_threads_through(self) -> None:
+        mock_batch = AsyncMock(return_value=BatchResult())
+        with patch("kaos_web.discover.batch.batch_fetch", mock_batch):
+            await BatchFetchTool().execute({"urls": "https://example.com/a", "use_browser": False})
+        await_args = mock_batch.await_args
+        assert await_args is not None
+        kw = await_args.kwargs
+        assert kw["use_browser"] is False
+
+    async def test_explicit_true_threads_through(self) -> None:
+        mock_batch = AsyncMock(return_value=BatchResult())
+        with patch("kaos_web.discover.batch.batch_fetch", mock_batch):
+            await BatchFetchTool().execute({"urls": "https://example.com/a", "use_browser": True})
+        await_args = mock_batch.await_args
+        assert await_args is not None
+        kw = await_args.kwargs
+        assert kw["use_browser"] is True
+
+
+@pytest.mark.asyncio
+class TestCrawlSiteToolThreadsUseBrowser:
+    """CrawlSiteTool.execute() passes ``use_browser`` through to ``crawl_site``."""
+
+    async def test_use_browser_none_threads_through(self) -> None:
+        mock_crawl = AsyncMock(return_value=CrawlResult())
+        with patch("kaos_web.discover.crawl.crawl_site", mock_crawl):
+            await CrawlSiteTool().execute({"url": "https://example.com"})
+        await_args = mock_crawl.await_args
+        assert await_args is not None
+        kw = await_args.kwargs
+        assert kw["use_browser"] is None
+
+    async def test_explicit_false_threads_through(self) -> None:
+        mock_crawl = AsyncMock(return_value=CrawlResult())
+        with patch("kaos_web.discover.crawl.crawl_site", mock_crawl):
+            await CrawlSiteTool().execute({"url": "https://example.com", "use_browser": False})
+        await_args = mock_crawl.await_args
+        assert await_args is not None
+        kw = await_args.kwargs
+        assert kw["use_browser"] is False
+
+    async def test_explicit_true_threads_through(self) -> None:
+        mock_crawl = AsyncMock(return_value=CrawlResult())
+        with patch("kaos_web.discover.crawl.crawl_site", mock_crawl):
+            await CrawlSiteTool().execute({"url": "https://example.com", "use_browser": True})
+        await_args = mock_crawl.await_args
+        assert await_args is not None
+        kw = await_args.kwargs
+        assert kw["use_browser"] is True

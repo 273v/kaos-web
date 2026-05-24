@@ -8,8 +8,10 @@ are crawled before deep pages.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections import deque
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
@@ -17,7 +19,11 @@ from urllib.parse import urlparse
 from kaos_core.logging import get_logger
 from kaos_web.clients.config import HttpClientConfig
 from kaos_web.clients.http import HttpClient
+from kaos_web.discover.batch import _resolve_use_browser
+from kaos_web.discover.sitemap import FetchFn
 from kaos_web.models import WebRequest, WebResponse
+
+_Fetcher = FetchFn
 
 if TYPE_CHECKING:
     from kaos_web.settings import KaosWebSettings
@@ -73,6 +79,7 @@ async def crawl_site(
     respect_robots: bool = True,
     client_config: HttpClientConfig | None = None,
     settings: KaosWebSettings | None = None,
+    use_browser: bool | None = None,
 ) -> CrawlResult:
     """Crawl a site with sitemap-first discovery.
 
@@ -91,7 +98,14 @@ async def crawl_site(
         include_patterns: Regex patterns for URL paths to include.
         exclude_patterns: Regex patterns for URL paths to exclude.
         respect_robots: Whether to respect robots.txt Disallow rules.
-        client_config: Optional HTTP client configuration.
+        client_config: Optional HTTP client configuration. Ignored when
+            the browser path is selected.
+        use_browser: Playwright-default routing (kaos-web 0.1.9). ``None``
+            (default) auto-detects: browser when the ``[browser]`` extra
+            is installed, httpx otherwise. ``True`` forces browser;
+            ``False`` forces httpx. Matches the ``kaos-web-fetch-page``
+            agent surface so a many-page crawl gets the same anti-bot
+            coverage as a single fetch.
 
     Returns:
         CrawlResult with pages, errors, and statistics.
@@ -114,11 +128,11 @@ async def crawl_site(
     parsed = urlparse(start_url)
     base_domain = parsed.netloc.lower().removeprefix("www.")
 
-    async with HttpClient(config) as client:
+    async with _open_fetcher(use_browser, config) as fetch:
         # Step 1: Discovery
         discovery = await discover_urls(
             start_url,
-            client.fetch,
+            fetch,
             sitemap=sitemap,
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns,
@@ -149,7 +163,7 @@ async def crawl_site(
         async def _crawl_one(url: str, depth: int) -> CrawlPage | None:
             async with semaphore:
                 try:
-                    resp = await client.fetch(WebRequest(url=url, timeout=s.crawl_page_timeout))
+                    resp = await fetch(WebRequest(url=url, timeout=s.crawl_page_timeout))
                 except Exception as exc:
                     result.errors.append(CrawlError(url=url, error=str(exc), depth=depth))
                     return None
@@ -254,3 +268,35 @@ def _same_domain(url: str, base_domain: str) -> bool:
     """Check if URL belongs to the same domain."""
     host = urlparse(url).netloc.lower().removeprefix("www.")
     return host == base_domain
+
+
+@contextlib.asynccontextmanager
+async def _open_fetcher(
+    use_browser: bool | None,
+    config: HttpClientConfig,
+) -> AsyncIterator[_Fetcher]:
+    """Yield an async ``fetch(WebRequest) -> WebResponse`` callable.
+
+    Routes through ``BrowserClient`` when the Playwright-default
+    resolver returns True (and the extra is installed); falls back to
+    ``HttpClient`` otherwise. ImportError on the browser path degrades
+    to httpx with a warning so the deployment stays usable on a
+    minimal install — the same contract as
+    :func:`kaos_web.tools._fetch_html`.
+    """
+    effective = _resolve_use_browser(use_browser)
+    if effective:
+        try:
+            from kaos_web.clients.browser import BrowserClient
+
+            async with BrowserClient() as browser:
+                yield browser.fetch
+                return
+        except ImportError:
+            logger.warning(
+                "crawl_site: Playwright extra missing — falling back to httpx. "
+                "Install with `pip install 'kaos-web[browser]'` for anti-bot coverage."
+            )
+
+    async with HttpClient(config) as client:
+        yield client.fetch

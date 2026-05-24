@@ -6,6 +6,53 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.9] — 2026-05-24
+
+### Changed
+
+- **`use_browser` defaults to Playwright on the 3 crawl / discovery
+  MCP tools too.** The 0.1.8 release flipped the contract on the 5
+  fetch tools in `tools.py`; this release extends it to
+  `kaos-web-discover-urls`, `kaos-web-batch-fetch`, and
+  `kaos-web-crawl-site` so the agent surface is uniform. Schemas
+  default to `None`; resolvers pass `None` through to the new
+  `_resolve_use_browser` helper (lives in `kaos_web.discover.batch`)
+  which probes for the `[browser]` extra and routes through
+  `BrowserClient` when available, `HttpClient` otherwise. Explicit
+  `False` opts back into bare httpx for known-clean JSON-API hosts
+  where the browser path is pure overhead.
+
+- **`batch_fetch()` and `crawl_site()` accept `use_browser` directly.**
+  Public Python API gained a `use_browser: bool | None = None`
+  parameter on both. Previously these functions hard-constructed an
+  `HttpClient` internally, leaving callers with no anti-bot escape
+  hatch. `crawl_site()` routes both the discovery step and the BFS
+  fetch through the same fetcher (single browser context per crawl).
+  `ImportError` on the browser path degrades silently to httpx with
+  a logged warning — the deployment stays usable on a minimal install.
+
+### Tests
+
+- New `TestUseBrowserSchemaDefaultIsNone` parameterised class in
+  `test_crawl_tools.py` pins the schema-default contract across all
+  3 crawl tools. Regressing to `default=False` would re-lock the
+  agent into httpx and fire this test.
+- New `TestDiscoverUrlsToolRoutesByUseBrowser` covers the routing
+  matrix (browser vs httpx) on the discover-urls tool.
+- New `TestBatchFetchToolThreadsUseBrowser` and
+  `TestCrawlSiteToolThreadsUseBrowser` cover the kwarg threading
+  contract from the tool wrappers down to the inner functions.
+- New `TestResolveUseBrowser` covers the resolver: explicit
+  True/False, None + Playwright importable, None + Playwright
+  missing. Mirrors `_fetch_html`'s contract.
+- New `TestBatchFetchUseBrowserRouting` and
+  `TestCrawlSiteUseBrowserRouting` cover the inner-function routing
+  (BrowserClient vs HttpClient + ImportError fallback).
+- Existing tests in `test_batch.py` / `test_crawl.py` now pass
+  `use_browser=False` explicitly so the dev-venv-with-Playwright case
+  stays on the patched HttpClient path.
+
+
 ## [0.1.8] — 2026-05-24
 
 ### Changed
