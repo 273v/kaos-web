@@ -87,6 +87,44 @@ def _browser_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
     return kw
 
 
+# Anti-bot "you got a 200 but it's the challenge page" fingerprints.
+# Live-tested 2026-05-23 against federalregister.gov and ecfr.gov:
+# both return 200 OK with a 10 KB HTML payload titled "Request Access"
+# or "Just a moment..." when an httpx UA hits them. We treat any
+# match here as a soft failure and retry on the browser path.
+_BOT_CHALLENGE_FINGERPRINTS: tuple[str, ...] = (
+    # Federal Register / eCFR shared anti-bot interstitial
+    "request access",
+    # Cloudflare interactive challenge
+    "just a moment",
+    "checking your browser",
+    "cf-browser-verification",
+    # datadome (used by WSJ, Reuters, others)
+    'src="https://geo.captcha-delivery.com',
+    'class="ctp-c"',
+    # Akamai bot manager
+    "ak_bmsc",
+    "/_Incapsula_",
+    # PerimeterX / HUMAN
+    "px-captcha",
+    "perimeterx",
+)
+
+
+def _looks_like_bot_challenge(html: str | None) -> bool:
+    """Return True if ``html`` looks like an anti-bot interstitial.
+
+    Used after a 200-status httpx fetch to detect challenge pages
+    that lie about success. When True the caller should fall back
+    to the Playwright path (which carries a full browser
+    fingerprint and passes most of these tiers).
+    """
+    if not html:
+        return False
+    head = html[:8192].lower()
+    return any(fp in head for fp in _BOT_CHALLENGE_FINGERPRINTS)
+
+
 async def _fetch_html(
     url: str,
     use_browser: bool | None = None,
@@ -103,25 +141,34 @@ async def _fetch_html(
     rotated desktop UA, 1365x768 viewport, en-US locale,
     America/New_York timezone, full sec-ch-ua / sec-fetch / Accept
     header set, configured in :class:`BrowserClient` — is used by
-    default. It passes Cloudflare, SEC.gov / EDGAR, and other
-    anti-bot stacks; the kelvin-legal-intelligence collector proves
-    this pattern in production.
+    default. It passes Cloudflare, SEC.gov / EDGAR, FederalRegister,
+    eCFR, Investopedia, and other anti-bot stacks; the
+    kelvin-legal-intelligence collector proves this pattern in
+    production. Live-tested 2026-05-23: httpx returns 200 OK with a
+    "Request Access" HTML body from federalregister.gov / ecfr.gov,
+    which silently looked like success to the agent and triggered
+    fabrication. Playwright pulls the real page cleanly.
 
-    The bare httpx path is only taken when:
+    The bare httpx path is only taken when the caller **explicitly**
+    passes ``use_browser=False`` (e.g. an internal connector that
+    knows the endpoint is a JSON API and Playwright would be pure
+    overhead). When Playwright is not installed we degrade silently
+    to httpx and log a warning — the deployment stays usable.
 
-    * Playwright is not installed (no ``kaos-web[browser]`` extra)
-    * Caller explicitly passes ``use_browser=False`` (e.g. internal
-      JSON-API endpoints that don't need rendering)
+    Failure fallbacks (both directions):
 
-    A 403/406 on the httpx path triggers an automatic browser
-    fallback so legacy callers that hard-coded ``use_browser=False``
-    still benefit from anti-bot rendering when needed.
+    * ``httpx 403/406`` → automatic browser retry.
+    * ``httpx 200 + bot-challenge body fingerprint`` (Cloudflare,
+      datadome, Akamai, PerimeterX, the FR "Request Access" page) →
+      automatic browser retry. This is the fix for the silent
+      "200-but-actually-blocked" failure observed 2026-05-23.
 
     Args:
         url: URL to fetch.
         use_browser: ``True`` = force browser; ``False`` = force
-            httpx; ``None`` (default) = browser if available, httpx
-            otherwise.
+            httpx; ``None`` (default, and the value passed by every
+            MCP tool unless the caller overrides) = browser if
+            Playwright is importable, else httpx.
         context_id: Named browser context for persistent sessions
             (cookies / storage across requests). Implies use_browser.
         dismiss_overlays: Auto-dismiss known cookie consent banners
@@ -191,7 +238,20 @@ async def _fetch_html(
     try:
         async with HttpClient() as client:
             resp = await client.fetch(WebRequest(url=url))
-            return resp.html, resp.url
+        # httpx 200 but body is a bot-challenge interstitial — the
+        # silent failure mode that fooled the agent into fabricating
+        # FR climate-disclosure results on 2026-05-23. Treat as a
+        # soft failure and retry on the browser path.
+        if _looks_like_bot_challenge(resp.html):
+            try:
+                from kaos_web.clients.browser import BrowserClient
+
+                async with BrowserClient() as browser:
+                    browser_resp = await browser.fetch(WebRequest(url=url, extra=_browser_extra()))
+                    return browser_resp.html, browser_resp.url
+            except ImportError:
+                pass  # Playwright not installed — return the challenge HTML
+        return resp.html, resp.url
     except Exception as http_exc:
         # 403/406 on the httpx path = bot-detection. Try the browser
         # path as a fallback even when the caller passed
@@ -235,9 +295,18 @@ class FetchPageTool(KaosTool):
                 ParameterSchema(
                     name="use_browser",
                     type="boolean",
-                    description="Use browser rendering for JS pages (requires playwright).",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright with "
+                        "full browser fingerprint — passes Cloudflare, "
+                        "SEC.gov, FederalRegister, eCFR, Investopedia, and "
+                        "most anti-bot tiers. Set false to force the bare "
+                        "httpx path (faster, lower memory, but blocked by "
+                        "most major news/regulator sites — only use for "
+                        "JSON APIs and known-clean hosts). Set true to "
+                        "force browser even when a httpx fast-path exists."
+                    ),
                     required=False,
-                    default=False,
+                    default=None,
                 ),
                 ParameterSchema(
                     name="raw",
@@ -259,7 +328,7 @@ class FetchPageTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         url = inputs["url"]
-        use_browser = inputs.get("use_browser", False)
+        use_browser = inputs.get("use_browser")
         raw = inputs.get("raw", False)
         content_scope = inputs.get("content_scope", 0.5)
 
@@ -346,9 +415,14 @@ class GetPageTextTool(KaosTool):
                 ParameterSchema(
                     name="use_browser",
                     type="boolean",
-                    description="Use browser rendering for JS pages.",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright — "
+                        "passes Cloudflare, SEC.gov, FR, eCFR, and other "
+                        "anti-bot tiers. Set false to force httpx (faster, "
+                        "but silently blocked on most major sites)."
+                    ),
                     required=False,
-                    default=False,
+                    default=None,
                 ),
                 ParameterSchema(
                     name="raw",
@@ -370,7 +444,7 @@ class GetPageTextTool(KaosTool):
         content_scope = inputs.get("content_scope", 0.5)
         try:
             html, final_url = await _fetch_html(
-                url, inputs.get("use_browser", False), **_browser_inputs(inputs)
+                url, inputs.get("use_browser"), **_browser_inputs(inputs)
             )
         except Exception as exc:
             return ToolResult.create_error(
@@ -446,9 +520,14 @@ class GetPageMarkdownTool(KaosTool):
                 ParameterSchema(
                     name="use_browser",
                     type="boolean",
-                    description="Use browser rendering for JS pages.",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright — "
+                        "passes Cloudflare, SEC.gov, FR, eCFR, and other "
+                        "anti-bot tiers. Set false to force httpx (faster, "
+                        "but silently blocked on most major sites)."
+                    ),
                     required=False,
-                    default=False,
+                    default=None,
                 ),
                 ParameterSchema(
                     name="raw",
@@ -470,7 +549,7 @@ class GetPageMarkdownTool(KaosTool):
         content_scope = inputs.get("content_scope", 0.5)
         try:
             html, final_url = await _fetch_html(
-                url, inputs.get("use_browser", False), **_browser_inputs(inputs)
+                url, inputs.get("use_browser"), **_browser_inputs(inputs)
             )
         except Exception as exc:
             return ToolResult.create_error(
@@ -613,9 +692,14 @@ class SearchPageTool(KaosTool):
                 ParameterSchema(
                     name="use_browser",
                     type="boolean",
-                    description="Use browser rendering for JS pages.",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright — "
+                        "passes Cloudflare, SEC.gov, FR, eCFR, and other "
+                        "anti-bot tiers. Set false to force httpx (faster, "
+                        "but silently blocked on most major sites)."
+                    ),
                     required=False,
-                    default=False,
+                    default=None,
                 ),
                 _CONTENT_SCOPE_PARAM,
                 *_BROWSER_PARAMS,
@@ -638,7 +722,7 @@ class SearchPageTool(KaosTool):
 
         try:
             html, final_url = await _fetch_html(
-                url, inputs.get("use_browser", False), **_browser_inputs(inputs)
+                url, inputs.get("use_browser"), **_browser_inputs(inputs)
             )
         except Exception as exc:
             return ToolResult.create_error(
@@ -933,9 +1017,13 @@ class GetPageTablesTool(KaosTool):
                 ParameterSchema(
                     name="use_browser",
                     type="boolean",
-                    description="Use headless browser for JS-rendered pages.",
+                    description=(
+                        "Fetcher selection. DEFAULT (unset): Playwright — "
+                        "needed for JS-rendered tables on most modern news "
+                        "and regulator sites. Set false to force httpx."
+                    ),
                     required=False,
-                    default=False,
+                    default=None,
                 ),
                 ParameterSchema(
                     name="format",
@@ -955,7 +1043,7 @@ class GetPageTablesTool(KaosTool):
         self, inputs: dict[str, Any], context: KaosContext | None = None
     ) -> ToolResult:
         url = inputs["url"]
-        use_browser = inputs.get("use_browser", False)
+        use_browser = inputs.get("use_browser")
         fmt = inputs.get("format", "tsv")
 
         try:

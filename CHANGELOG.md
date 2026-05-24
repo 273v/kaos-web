@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.8] — 2026-05-24
+
+### Changed
+
+- **`use_browser` defaults to Playwright on every MCP tool that exposes
+  it.** `kaos-web-fetch-page`, `kaos-web-get-text`, `kaos-web-get-markdown`,
+  `kaos-web-search-page`, and `kaos-web-get-tables` previously advertised
+  `default=False` on the `use_browser` schema and called
+  `inputs.get("use_browser", False)` in the resolver, which locked
+  every callsite into the bare httpx path. Schemas now default to
+  `None` and resolvers pass `None` through to `_fetch_html`, which
+  auto-detects: Playwright when the `[browser]` extra is installed
+  (the production shape), httpx as a fallback when it isn't. The agent
+  surface now passes Cloudflare / SEC.gov / FR / eCFR / Investopedia
+  out of the box.
+
+### Fixed
+
+- **httpx 200-with-bot-challenge bodies no longer count as success**
+  (P0). `_fetch_html` now sniffs the response body after a successful
+  httpx fetch for known anti-bot interstitial fingerprints (Federal
+  Register / eCFR "Request Access", Cloudflare "Just a moment...",
+  datadome captcha, Akamai bot manager, PerimeterX). When a fingerprint
+  matches, the router retries on the Playwright path even when the
+  caller explicitly passed `use_browser=False`. Live-verified
+  2026-05-23: `federalregister.gov/search` and
+  `ecfr.gov/current/title-17/.../240.10b-5` now return real content
+  (411 KB and 131 KB respectively) instead of the 10 KB challenge
+  body that previously fooled the agent into fabricating answers.
+
+### Tests
+
+- New `TestBotChallengeFingerprint` unit class covers the five
+  challenge families (FR/eCFR, Cloudflare, datadome, Akamai,
+  PerimeterX) plus benign and empty-body negatives.
+- New `TestFetchHtmlDefaultsToPlaywright` unit class covers the
+  routing matrix: `use_browser=None` → browser, explicit `False` →
+  httpx, httpx 200-with-challenge → automatic browser fallback.
+- New `TestUseBrowserSchemaDefaultIsNone` unit class pins the
+  schema-default contract across all five tools that expose
+  `use_browser`. Prevents regressing back to `default=False`.
+
+
 ## [0.1.7] — 2026-05-23
 
 ### Added
