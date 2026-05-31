@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [Unreleased]
+## [0.1.11] — 2026-05-31
 
 ### Fixed
 
@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before. New internal helpers `_artifact_id_from_handle` /
   `_maybe_load_handle_document`; regression tests in
   `tests/unit/test_tools.py::TestArtifactHandleComposition`.
+
+
+## [0.1.10] — 2026-05-29
+
+### Changed
+
+- Dependency maintenance: bumped the `deps-minor` group (8 updates)
+  via Dependabot. No public API, CLI, or MCP schema changes.
 
 
 ## [0.1.9] — 2026-05-24
