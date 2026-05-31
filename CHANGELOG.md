@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Fixed
+
+- **Page tools now compose with their own `kaos://` artifact handles.**
+  `kaos-web-fetch-page` (and the other extract tools) tier a large page
+  into an artifact and return its body as a `kaos://artifacts/<id>/body`
+  / `kaos://content/<id>/...` handle. Feeding that handle to a follow-up
+  page tool (e.g. `kaos-web-search-page` — "fetch this page, then find X
+  in it") previously failed: the handle was routed through the web
+  fetcher, and the `kaos_core` URL-security gate correctly blocked the
+  non-`(http|https)` `kaos://` scheme, so the agent could not read the
+  content it had just fetched. The page tools (`kaos-web-search-page`,
+  `kaos-web-get-text`, `kaos-web-get-markdown`, `kaos-web-get-tables`)
+  now detect a `kaos://artifacts/` / `kaos://content/` handle and
+  resolve the already-stored `ContentDocument` from the artifact store
+  (`kaos_content.load_document`) instead of re-fetching it — no network
+  call, no re-store. Ordinary `http(s)` URLs are fetched exactly as
+  before. New internal helpers `_artifact_id_from_handle` /
+  `_maybe_load_handle_document`; regression tests in
+  `tests/unit/test_tools.py::TestArtifactHandleComposition`.
+
+
 ## [0.1.9] — 2026-05-24
 
 ### Changed

@@ -22,6 +22,7 @@ from kaos_web.tools import (
     GetPageTextTool,
     SearchPageTool,
     WebSearchTool,
+    _artifact_id_from_handle,
     _browser_inputs,
     _fetch_html,
     register_web_tools,
@@ -244,6 +245,92 @@ class TestSearchPageTool:
         assert "text" in first, "Each result should have a 'text' field"
         assert "score" in first, "Each result should have a 'score' field"
         assert "block_ref" in first, "Each result should have a 'block_ref' field"
+
+
+class TestArtifactHandleComposition:
+    """Page tools must compose with their OWN artifact handles.
+
+    Regression for the artifact/VFS failure where `kaos-web-fetch-page`
+    returns a large page's body as a ``kaos://artifacts/<id>/body``
+    handle, and a follow-up page tool (e.g. `kaos-web-search-page`) then
+    fed that handle could not read it — the URL security gate correctly
+    blocks the non-(http|https) ``kaos://`` scheme. The page tools now
+    resolve the handle from the artifact store instead of re-fetching.
+    """
+
+    def test_artifact_id_from_handle(self) -> None:
+        assert _artifact_id_from_handle("kaos://artifacts/abc-123/body") == "abc-123"
+        assert _artifact_id_from_handle("kaos://content/xyz-9/sections") == "xyz-9"
+        assert _artifact_id_from_handle("kaos://content/only-id") == "only-id"
+        # Ordinary URLs are fetched normally → not a handle.
+        assert _artifact_id_from_handle("https://example.com/page") is None
+        assert _artifact_id_from_handle("http://x.test") is None
+        # Degenerate / empty handles resolve to None (caller errors clearly).
+        assert _artifact_id_from_handle("kaos://artifacts/") is None
+
+    @pytest.mark.asyncio
+    @patch("kaos_web.tools._fetch_html", new_callable=AsyncMock)
+    async def test_get_markdown_reads_handle_without_fetching(self, mock_fetch: AsyncMock) -> None:
+        """A kaos:// handle resolves to the stored document's markdown
+        WITHOUT touching the web fetcher."""
+        mock_fetch.side_effect = AssertionError("must not fetch a kaos:// handle")
+        from kaos_web.extract import html_to_document
+
+        doc = html_to_document(ARTICLE_HTML, url="https://example.com/article")
+        ctx = MagicMock()
+        ctx.runtime = MagicMock()
+        with patch(
+            "kaos_content.artifacts.load_document", new_callable=AsyncMock, return_value=doc
+        ) as mock_load:
+            tool = GetPageMarkdownTool()
+            result = await tool.execute({"url": "kaos://content/art-9/markdown"}, context=ctx)
+
+        assert result.isError is not True, f"Should resolve handle, got: {result.content}"
+        mock_fetch.assert_not_called()
+        mock_load.assert_awaited_once_with("art-9", ctx.runtime, max_bytes=None)
+
+    @pytest.mark.asyncio
+    @patch("kaos_web.tools._fetch_html", new_callable=AsyncMock)
+    async def test_handle_without_runtime_errors_clearly(self, mock_fetch: AsyncMock) -> None:
+        """A handle passed without a runtime/artifact store fails with a
+        cause-naming error, not a fetch attempt or an opaque 404."""
+        mock_fetch.side_effect = AssertionError("must not fetch a kaos:// handle")
+        tool = GetPageMarkdownTool()
+        result = await tool.execute({"url": "kaos://artifacts/abc/body"}, context=None)
+        assert result.isError is True
+        mock_fetch.assert_not_called()
+
+    @pytest.mark.skipif(not _has_kaos_nlp_core, reason="kaos-nlp-core not installed")
+    @pytest.mark.asyncio
+    @patch("kaos_web.tools._fetch_html", new_callable=AsyncMock)
+    async def test_search_page_searches_handle_without_fetching(
+        self, mock_fetch: AsyncMock
+    ) -> None:
+        """`kaos-web-search-page` on a kaos:// handle searches the stored
+        document directly (the exact reported failure)."""
+        mock_fetch.side_effect = AssertionError("must not fetch a kaos:// handle")
+        from kaos_web.extract import html_to_document
+
+        doc = html_to_document(ARTICLE_HTML, url="https://example.com/article")
+        ctx = MagicMock()
+        ctx.runtime = MagicMock()
+        handle = "kaos://artifacts/abc-123/body"
+        with patch(
+            "kaos_content.artifacts.load_document", new_callable=AsyncMock, return_value=doc
+        ) as mock_load:
+            tool = SearchPageTool()
+            result = await tool.execute(
+                {"url": handle, "query": "blockquote important statement", "top_k": 5},
+                context=ctx,
+            )
+
+        assert result.isError is not True, f"Should search handle, got: {result.content}"
+        mock_fetch.assert_not_called()
+        mock_load.assert_awaited_once_with("abc-123", ctx.runtime, max_bytes=None)
+        data = result.structuredContent
+        assert data is not None
+        assert data["url"] == handle, "result should attribute the source to the handle"
+        assert len(data["results"]) > 0, "should find matches in the stored document"
 
 
 class TestGetPageLinksTool:

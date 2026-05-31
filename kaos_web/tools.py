@@ -7,9 +7,12 @@ summary + resource links following the artifact tiering model.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from kaos_core import KaosContext, KaosRuntime, KaosTool, ToolMetadata, ToolResult
+
+if TYPE_CHECKING:
+    from kaos_content.model.document import ContentDocument
 from kaos_core.types.annotations import ToolAnnotations
 from kaos_core.types.enums import ToolCapability, ToolCategory
 from kaos_core.types.parameters import ParameterSchema
@@ -271,6 +274,54 @@ async def _fetch_html(
         raise
 
 
+# Internal artifact/content handles that the page tools emit (e.g.
+# FetchPageTool returns ``body_uri = kaos://artifacts/<id>/body`` and
+# ``sections_uri = kaos://content/<id>/sections``). When an agent chains
+# a page tool onto one of these handles ("fetch this page, then search
+# within it"), the handle must NOT be routed through the web fetcher: the
+# security gate correctly rejects the non-(http|https) ``kaos://`` scheme,
+# which left the agent unable to read content it had just fetched. Instead
+# we resolve the already-stored ContentDocument from the artifact store.
+_ARTIFACT_HANDLE_PREFIXES = ("kaos://artifacts/", "kaos://content/")
+
+
+def _artifact_id_from_handle(url: str) -> str | None:
+    """Return the artifact id from a ``kaos://artifacts/<id>/...`` or
+    ``kaos://content/<id>/...`` handle, or ``None`` when ``url`` is an
+    ordinary (http/https/…) URL that should be fetched normally."""
+    for prefix in _ARTIFACT_HANDLE_PREFIXES:
+        if url.startswith(prefix):
+            artifact_id = url[len(prefix) :].split("/", 1)[0].strip()
+            return artifact_id or None
+    return None
+
+
+async def _maybe_load_handle_document(
+    url: str, context: KaosContext | None
+) -> ContentDocument | None:
+    """Resolve a ``kaos://`` artifact/content handle to its stored
+    ContentDocument, composing with :class:`FetchPageTool`'s ``body_uri``
+    output. Returns ``None`` for ordinary URLs so the caller fetches them
+    as before.
+
+    Raises a clear error when a handle is passed but no runtime/artifact
+    store is available, so the failure names the cause instead of a 404.
+    """
+    artifact_id = _artifact_id_from_handle(url)
+    if artifact_id is None:
+        return None
+    if context is None or context.runtime is None:
+        raise ValueError(
+            f"Reading {url} requires a KaosRuntime with artifact storage — this "
+            "handle was produced by an earlier page fetch in the same session."
+        )
+    from kaos_content.artifacts import load_document
+
+    # ``max_bytes=None``: the page already passed the per-fetch body cap
+    # when it was stored, so the artifact is bounded by that.
+    return await load_document(artifact_id, context.runtime, max_bytes=None)
+
+
 class FetchPageTool(KaosTool):
     """Fetch a web page and extract it into a ContentDocument artifact."""
 
@@ -443,6 +494,21 @@ class GetPageTextTool(KaosTool):
         raw = inputs.get("raw", False)
         content_scope = inputs.get("content_scope", 0.5)
         try:
+            handle_doc = await _maybe_load_handle_document(url, context)
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Failed to load {url}: {exc}. "
+                "Verify the URL is correct and the site is accessible."
+            )
+        if handle_doc is not None:
+            # ``url`` is a kaos:// handle from an earlier fetch in this
+            # session — return the stored document's text directly (it is
+            # already an artifact; no re-fetch, no re-store).
+            from kaos_content.serializers.text import serialize_text
+
+            return ToolResult.create_success(serialize_text(handle_doc))
+
+        try:
             html, final_url = await _fetch_html(
                 url, inputs.get("use_browser"), **_browser_inputs(inputs)
             )
@@ -547,6 +613,21 @@ class GetPageMarkdownTool(KaosTool):
         url = inputs["url"]
         raw = inputs.get("raw", False)
         content_scope = inputs.get("content_scope", 0.5)
+        try:
+            handle_doc = await _maybe_load_handle_document(url, context)
+        except Exception as exc:
+            return ToolResult.create_error(
+                f"Failed to load {url}: {exc}. "
+                "Verify the URL is correct and the site is accessible."
+            )
+        if handle_doc is not None:
+            # ``url`` is a kaos:// handle from an earlier fetch in this
+            # session — return the stored document's markdown directly (it
+            # is already an artifact; no re-fetch, no re-store).
+            from kaos_content.serializers.markdown import serialize_markdown
+
+            return ToolResult.create_success(serialize_markdown(handle_doc))
+
         try:
             html, final_url = await _fetch_html(
                 url, inputs.get("use_browser"), **_browser_inputs(inputs)
@@ -721,9 +802,21 @@ class SearchPageTool(KaosTool):
             )
 
         try:
-            html, final_url = await _fetch_html(
-                url, inputs.get("use_browser"), **_browser_inputs(inputs)
-            )
+            handle_doc = await _maybe_load_handle_document(url, context)
+            if handle_doc is not None:
+                # ``url`` is a kaos:// artifact/content handle from an
+                # earlier fetch in this session — search the stored
+                # document directly instead of re-fetching it through the
+                # web gate (which blocks the non-http ``kaos://`` scheme).
+                doc, source = handle_doc, url
+            else:
+                html, final_url = await _fetch_html(
+                    url, inputs.get("use_browser"), **_browser_inputs(inputs)
+                )
+                from kaos_web.extract import html_to_document
+
+                doc = html_to_document(html, url=final_url, content_scope=content_scope)
+                source = final_url
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. "
@@ -732,13 +825,11 @@ class SearchPageTool(KaosTool):
 
         try:
             from kaos_content.search import search_document
-            from kaos_web.extract import html_to_document
 
-            doc = html_to_document(html, url=final_url, content_scope=content_scope)
             search_results = search_document(doc, query, top_k=top_k, level=level)
 
             result_data = {
-                "url": final_url,
+                "url": source,
                 "results": [
                     {
                         "text": r.text,
@@ -756,7 +847,7 @@ class SearchPageTool(KaosTool):
             }
             more = " (has more)" if search_results.has_more else ""
             summary = (
-                f"Found {search_results.total_matches} matches for '{query}' on {final_url}{more}"
+                f"Found {search_results.total_matches} matches for '{query}' on {source}{more}"
             )
             return ToolResult.create_success(output=result_data, summary=summary)
         except Exception as exc:
@@ -1047,24 +1138,33 @@ class GetPageTablesTool(KaosTool):
         fmt = inputs.get("format", "tsv")
 
         try:
-            html, final_url = await _fetch_html(
-                url, use_browser=use_browser, **_browser_inputs(inputs)
-            )
+            from kaos_content.bridges.content_to_tabular import extract_tables_as_tabular
+
+            handle_doc = await _maybe_load_handle_document(url, context)
+            if handle_doc is not None:
+                # ``url`` is a kaos:// handle from an earlier fetch in this
+                # session — pull tables from the stored document instead of
+                # re-fetching it through the web gate.
+                doc, source = handle_doc, url
+            else:
+                html, final_url = await _fetch_html(
+                    url, use_browser=use_browser, **_browser_inputs(inputs)
+                )
+                from kaos_web.extract.html_to_ast import html_to_document
+
+                doc = html_to_document(html, url=final_url, extract_content=False)
+                source = final_url
         except Exception as exc:
             return ToolResult.create_error(
                 f"Failed to fetch {url}: {exc}. Try use_browser=true for JS-rendered pages."
             )
 
         try:
-            from kaos_content.bridges.content_to_tabular import extract_tables_as_tabular
-            from kaos_web.extract.html_to_ast import html_to_document
-
-            doc = html_to_document(html, url=final_url, extract_content=False)
             tabular_doc = extract_tables_as_tabular(doc)
 
             if not tabular_doc.tables:
                 return ToolResult.create_text(
-                    f"No tables found on {final_url}. "
+                    f"No tables found on {source}. "
                     "The page may use CSS grid/flex layouts instead of <table> elements. "
                     "Try kaos-web-get-markdown for the full page content."
                 )
@@ -1091,7 +1191,7 @@ class GetPageTablesTool(KaosTool):
             return ToolResult.create_success(
                 output="\n".join(parts),
                 summary=(
-                    f"Found {len(tabular_doc.tables)} table(s) on {final_url}. "
+                    f"Found {len(tabular_doc.tables)} table(s) on {source}. "
                     + ", ".join(f"{t.name}: {t.row_count} rows" for t in tabular_doc.tables)
                 ),
             )
