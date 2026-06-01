@@ -25,6 +25,7 @@ from kaos_web.tools import (
     _artifact_id_from_handle,
     _browser_inputs,
     _fetch_html,
+    _load_handle_or_signal,
     register_web_tools,
 )
 
@@ -267,6 +268,31 @@ class TestArtifactHandleComposition:
         assert _artifact_id_from_handle("http://x.test") is None
         # Degenerate / empty handles resolve to None (caller errors clearly).
         assert _artifact_id_from_handle("kaos://artifacts/") is None
+
+    @pytest.mark.asyncio
+    async def test_load_handle_or_signal_contract(self) -> None:
+        """The shared seam the four page tools route through returns exactly
+        one of three signals: fetch-me / rendered-doc / clear-error."""
+        # 1. Ordinary URL → (None, None): caller fetches as before.
+        doc, err = await _load_handle_or_signal("https://example.com/page", None)
+        assert doc is None and err is None
+
+        # 2. Handle + working runtime → (doc, None): resolved, no fetch.
+        from kaos_web.extract import html_to_document
+
+        loaded = html_to_document(ARTICLE_HTML, url="https://example.com/article")
+        ctx = MagicMock()
+        ctx.runtime = MagicMock()
+        with patch(
+            "kaos_content.artifacts.load_document", new_callable=AsyncMock, return_value=loaded
+        ):
+            doc, err = await _load_handle_or_signal("kaos://artifacts/abc-1/body", ctx)
+        assert doc is loaded and err is None
+
+        # 3. Handle but no runtime → (None, error): names the cause, not a 404.
+        doc, err = await _load_handle_or_signal("kaos://artifacts/abc-1/body", None)
+        assert doc is None
+        assert err is not None and err.isError is True
 
     @pytest.mark.asyncio
     @patch("kaos_web.tools._fetch_html", new_callable=AsyncMock)

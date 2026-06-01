@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.1.12] — 2026-06-01
+
+### Changed
+
+- **Internal: unified the four page tools' `kaos://` handle branching
+  into one seam.** `kaos-web-get-text` / `-get-markdown` / `-search-page`
+  / `-get-tables` previously each duplicated the "is this url a stored
+  artifact handle? if so resolve it, else fetch" logic. They now route
+  through a single `_load_handle_or_signal()` helper with a three-signal
+  contract (resolve-and-render / fetch-me / clear-error). No public API,
+  CLI, MCP schema, or behavior change — handle resolution and the
+  `http(s)` fetch paths are byte-for-byte the same; this removes the
+  drift-prone duplication. Adds a direct contract test for the seam.
+
+
 ## [0.1.11] — 2026-05-31
 
 ### Fixed
