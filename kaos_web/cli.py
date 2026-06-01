@@ -52,6 +52,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_search.add_argument("--json", action="store_true", help="Structured JSON output")
 
+    # browser-doctor
+    p_doctor = sub.add_parser(
+        "browser-doctor", help="Check whether a browser can actually launch (preflight)"
+    )
+    p_doctor.add_argument("--json", action="store_true", help="Structured JSON output")
+
     # serve
     p_serve = sub.add_parser("serve", help="Start MCP server")
     p_serve.add_argument("--http", action="store_true", help="Use HTTP transport")
@@ -72,6 +78,7 @@ def main(argv: list[str] | None = None) -> None:
         "metadata": _cmd_metadata,
         "fetch": _cmd_fetch,
         "search": _cmd_search,
+        "browser-doctor": _cmd_browser_doctor,
         "serve": _cmd_serve,
     }
     handlers[args.command](args)
@@ -262,6 +269,36 @@ def _cmd_search(args: argparse.Namespace) -> None:
         for line in r.text.splitlines():
             print(f"    {line}")
         print()
+
+
+def _cmd_browser_doctor(args: argparse.Namespace) -> None:
+    """Preflight the browser stack and report whether it can launch."""
+    import asyncio
+
+    from kaos_web.clients.browser import browser_doctor
+
+    report = asyncio.run(browser_doctor())
+    if args.json:
+        _json_out(
+            {
+                "command": "browser-doctor",
+                "status": report.status,
+                "extra_installed": report.extra_installed,
+                "effective_channel": report.effective_channel,
+                "launched": report.launched,
+                "detail": report.detail,
+                "remedy": report.remedy,
+            }
+        )
+    else:
+        mark = "OK" if report.ok else "UNAVAILABLE"
+        print(f"browser: {mark}")
+        print(f"  channel: {report.effective_channel or '<bundled>'}")
+        print(f"  {report.detail}")
+        if report.remedy:
+            print(f"  remedy: {report.remedy}")
+    if not report.ok:
+        sys.exit(2)
 
 
 def _cmd_serve(args: argparse.Namespace) -> None:

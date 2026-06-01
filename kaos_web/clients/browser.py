@@ -21,7 +21,8 @@ from __future__ import annotations
 
 import contextlib
 import re
-from typing import Any, Never, Self
+from dataclasses import dataclass
+from typing import Any, Literal, Never, Self
 
 from kaos_core.logging import get_logger
 from kaos_web.clients.config import BrowserClientConfig
@@ -1171,3 +1172,113 @@ def _raise_browser_error(exc: Exception, url: str, operation: str = "navigation"
         url=url,
         retryable=False,
     ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserDoctorReport:
+    """Result of :func:`browser_doctor` — is a browser actually launchable?"""
+
+    status: Literal["ok", "unavailable"]
+    extra_installed: bool
+    effective_channel: str | None
+    launched: bool
+    detail: str
+    remedy: str | None
+
+    @property
+    def ok(self) -> bool:
+        return self.status == "ok"
+
+
+async def browser_doctor(config: BrowserClientConfig | None = None) -> BrowserDoctorReport:
+    """Preflight the browser stack: can a browser actually launch *now*?
+
+    Turns the silent runtime failure mode — Playwright's bundled Chromium
+    has no build for the host OS (e.g. ``BrowserType.launch: Executable
+    doesn't exist`` on Ubuntu 26.04, where ``playwright install`` itself
+    refuses) — into an explicit, actionable report at boot/CLI time
+    instead of deep inside a tool call.
+
+    Resolves the **same** effective channel :class:`BrowserClient` uses
+    (explicit ``config.channel`` → ``KaosWebSettings.browser_channel`` →
+    system-Chrome auto-detect), then attempts a real headless launch and a
+    trivial page op. Never raises — every failure becomes a report with a
+    ``remedy``.
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return BrowserDoctorReport(
+            status="unavailable",
+            extra_installed=False,
+            effective_channel=None,
+            launched=False,
+            detail="Playwright is not installed (the [browser] extra is absent).",
+            remedy="Install the browser extra: pip install 'kaos-web[browser]'",
+        )
+
+    cfg = config or BrowserClientConfig()
+    effective_channel: str | None = cfg.channel
+    if effective_channel is None:
+        try:
+            from kaos_web.settings import KaosWebSettings, _detect_browser_channel
+
+            settings = KaosWebSettings()
+            effective_channel = settings.browser_channel
+            if effective_channel is None and settings.browser_auto_detect_channel:
+                effective_channel = _detect_browser_channel()
+        except Exception:  # best-effort; mirror BrowserClient
+            effective_channel = None
+
+    pw = None
+    browser = None
+    try:
+        pw = await async_playwright().start()
+        engine = getattr(pw, cfg.browser_type)
+        launch_kwargs: dict[str, Any] = {"headless": cfg.headless}
+        if effective_channel:
+            launch_kwargs["channel"] = effective_channel
+        browser = await engine.launch(**launch_kwargs)
+        page = await browser.new_page()
+        await page.set_content("<html><body>kaos-web browser_doctor ok</body></html>")
+        await page.close()
+        via = (
+            f"system channel '{effective_channel}'"
+            if effective_channel
+            else "Playwright's bundled browser"
+        )
+        return BrowserDoctorReport(
+            status="ok",
+            extra_installed=True,
+            effective_channel=effective_channel,
+            launched=True,
+            detail=f"{cfg.browser_type} launched via {via}.",
+            remedy=None,
+        )
+    except Exception as exc:
+        return BrowserDoctorReport(
+            status="unavailable",
+            extra_installed=True,
+            effective_channel=effective_channel,
+            launched=False,
+            detail=(
+                f"{cfg.browser_type} failed to launch "
+                f"(channel={effective_channel or '<bundled>'}): "
+                f"{type(exc).__name__}: {exc}"
+            ),
+            remedy=(
+                "Either (a) run 'playwright install chromium' if your OS has a "
+                "published Playwright build, or (b) install a system "
+                "Chrome/Chromium and set KAOS_WEB_BROWSER_CHANNEL=chrome "
+                "(auto-detected on Linux when 'google-chrome' is on PATH). "
+                "Bundled Chromium has no build for some newer hosts (e.g. "
+                "Ubuntu 26.04)."
+            ),
+        )
+    finally:
+        if browser is not None:
+            with contextlib.suppress(Exception):
+                await browser.close()
+        if pw is not None:
+            with contextlib.suppress(Exception):
+                await pw.stop()
