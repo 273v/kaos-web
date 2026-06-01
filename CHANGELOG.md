@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+
+- **`browser_doctor()` preflight + `kaos-web browser-doctor` CLI.** Turns
+  the silent runtime failure — Playwright's bundled Chromium having no
+  build for the host OS (e.g. `BrowserType.launch: Executable doesn't
+  exist` on Ubuntu 26.04, where `playwright install` itself refuses) —
+  into an explicit, never-raising report. Resolves the same effective
+  channel `BrowserClient` uses (explicit `channel` →
+  `KAOS_WEB_BROWSER_CHANNEL` → system-Chrome auto-detect), attempts a real
+  headless launch, and reports `status` (ok / unavailable), the effective
+  channel, and an actionable `remedy`. CLI exits non-zero (2) when a
+  browser can't launch, so deploys can gate on it instead of discovering
+  the failure mid-tool-call. New `BrowserDoctorReport` value type;
+  regression tests in `tests/unit/test_browser_doctor.py`.
+
+
 ## [0.1.12] — 2026-06-01
 
 ### Changed
