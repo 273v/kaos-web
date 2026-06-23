@@ -171,13 +171,13 @@ async def dismiss_cookie_banners(
         return []
 
     cmp = cmps[matched_index]
-    logger.info("Cookie banner detected: %s (%s)", cmp.name, cmp.detect)
+    logger.debug("Cookie banner detected: %s (%s)", cmp.name, cmp.detect)
 
     # Phase 2: click the dismiss button for the matched CMP.
     try:
         button = page.locator(cmp.dismiss).first
         await button.click(timeout=timeout_ms)
-        logger.info("Cookie banner dismissed: %s (%s)", cmp.name, cmp.dismiss)
+        logger.debug("Cookie banner dismissed: %s (%s)", cmp.name, cmp.dismiss)
         return [cmp.name]
     except Exception:
         logger.debug("Cookie banner dismiss click failed: %s", cmp.name)
@@ -257,7 +257,7 @@ async def wait_for_content_settled(
     except Exception:
         return True  # Page may be closed; let caller handle extraction
 
-    logger.info("Page content not yet rendered, waiting for DOM to settle")
+    logger.debug("Page content not yet rendered, waiting for DOM to settle")
 
     # Phase 2: slow path — MutationObserver wait.
     try:
