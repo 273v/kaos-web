@@ -374,4 +374,4 @@ class CacheMiddleware:
                 logger.debug("Failed to load cache entry %s", json_file)
 
         if loaded:
-            logger.info("Loaded %d cached entries from disk (%s)", loaded, self._cache_dir)
+            logger.debug("Loaded %d cached entries from disk (%s)", loaded, self._cache_dir)
