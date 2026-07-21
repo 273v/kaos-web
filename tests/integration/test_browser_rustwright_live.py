@@ -30,7 +30,8 @@ def _find_chromium() -> str | None:
     if env:
         return env
     ms_playwright = Path.home() / ".cache" / "ms-playwright"
-    bundled = sorted(ms_playwright.glob("chromium*/chrome-linux/chrome"))
+    # Playwright's chromium dir is chrome-linux on some builds, chrome-linux64 on others.
+    bundled = sorted(ms_playwright.glob("chromium*/chrome-linux*/chrome"))
     if bundled:
         return str(bundled[0])
     for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "chrome"):
