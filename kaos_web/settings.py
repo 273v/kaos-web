@@ -53,6 +53,10 @@ class KaosWebSettings(ModuleSettings):
     """
 
     # Browser
+    browser_backend: Literal["playwright", "rustwright"] = "playwright"
+    """CDP engine for browser fetches. ``playwright`` (default) or the
+    experimental ``rustwright`` (native-Rust CDP, Chromium-only, needs the
+    ``kaos-web[browser-rust]`` extra). Env: ``KAOS_WEB_BROWSER_BACKEND``."""
     browser_type: Literal["chromium", "firefox", "webkit"] = "chromium"
     browser_headless: bool = True
     browser_channel: str | None = None

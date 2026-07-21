@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+
+### Added
+
+- **Experimental `rustwright` browser backend (opt-in).** `BrowserClient`
+  can now drive Skyvern's [`rustwright`](https://github.com/Skyvern-AI/rustwright)
+  — an in-process, native-Rust CDP engine with a Playwright-compatible
+  API — as an alternative to Playwright, with no Node driver process.
+  Select it per-client via `BrowserClientConfig(backend="rustwright")` or
+  globally via `KAOS_WEB_BROWSER_BACKEND=rustwright`; `backend=None` (the
+  default) resolves from that setting and falls back to `playwright`, so
+  existing behavior is unchanged. Install the `[browser-rust]` extra
+  (`rustwright>=0.1.1`, MIT). rustwright is Chromium-only and ships no
+  browser: supply one via the new `BrowserClientConfig.executable_path`,
+  the `RUSTWRIGHT_CHROMIUM` env var, or a system Chrome/Chromium on
+  `PATH`. All existing session-scoping, header masking, body-size, and
+  `kaos_web.security` URL-gating guarantees apply unchanged — only the
+  underlying CDP engine differs. New config fields
+  `BrowserClientConfig.backend` / `.executable_path` and setting
+  `KaosWebSettings.browser_backend`.
+
+
 ## [0.1.14] - 2026-06-23
 
 ### Changed
