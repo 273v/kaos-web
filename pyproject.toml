@@ -53,6 +53,12 @@ dependencies = [
 
 [project.optional-dependencies]
 browser = ["playwright>=1.50.0"]
+# Experimental in-process, native-Rust CDP browser backend (Skyvern's
+# rustwright; MIT). Playwright-compatible API, Chromium-only, no Node driver.
+# Opt in via BrowserClientConfig(backend="rustwright") or
+# KAOS_WEB_BROWSER_BACKEND=rustwright. Ships no browser — provide one via
+# executable_path / RUSTWRIGHT_CHROMIUM / a system Chrome.
+browser-rust = ["rustwright>=0.1.1"]
 dns = ["dnspython>=2.6.0"]
 mcp = ["kaos-mcp>=0.1.0,<0.2"]
 nlp = ["kaos-nlp-core>=0.1.0,<0.2"]
@@ -66,6 +72,9 @@ dev = [
   "kaos-mcp>=0.1.0,<0.2",
   "kaos-nlp-core>=0.1.0,<0.2",
   "playwright>=1.58.0",
+  # Experimental optional browser backend — kept in dev so the backend-
+  # selection path is type-checked and unit-tested alongside Playwright.
+  "rustwright>=0.1.1",
   "pytest>=8.3.5",
   "pytest-asyncio>=0.26.0",
   "pytest-benchmark>=5.2.3",

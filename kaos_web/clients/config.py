@@ -94,6 +94,25 @@ class BrowserClientConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # Browser
+    backend: Literal["playwright", "rustwright"] | None = None
+    """Which browser-automation engine drives the CDP session.
+
+    ``None`` (the default) resolves from ``KaosWebSettings.browser_backend``
+    (env ``KAOS_WEB_BROWSER_BACKEND``), falling back to ``"playwright"``.
+
+    - ``"playwright"`` — the battle-tested default (bundled Chromium, Firefox,
+      or WebKit; drives the browser through Playwright's Node driver).
+    - ``"rustwright"`` — EXPERIMENTAL, opt-in via the ``[browser-rust]`` extra.
+      A native-Rust CDP engine (Skyvern's rustwright) with a ~96%
+      Playwright-compatible API and no Node subprocess. Chromium-only, and it
+      does NOT bundle a browser — resolve one via ``executable_path``, the
+      ``RUSTWRIGHT_CHROMIUM`` env var, or a system Chrome/Chromium on PATH.
+    """
+    executable_path: str | None = None
+    """Explicit path to a Chromium/Chrome executable. Required for the
+    ``rustwright`` backend when neither ``RUSTWRIGHT_CHROMIUM`` nor a
+    system browser is discoverable; ignored by the Playwright backend, which
+    ships its own browsers (use ``channel`` there instead)."""
     browser_type: Literal["chromium", "firefox", "webkit"] = "chromium"
     headless: bool = True
     channel: str | None = None

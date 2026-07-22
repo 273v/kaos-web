@@ -149,59 +149,133 @@ class BrowserClient:
         self._logging_config: dict[tuple[str, str], dict[str, Any]] = {}
 
     async def _ensure_browser(self) -> Any:
-        """Launch browser lazily on first use."""
+        """Launch browser lazily on first use.
+
+        The CDP engine is selected by :attr:`BrowserClientConfig.backend`
+        (or, when unset, ``KAOS_WEB_BROWSER_BACKEND`` / the default
+        ``playwright``). ``rustwright`` is an experimental, in-process Rust
+        engine behind the ``[browser-rust]`` extra; it is Chromium-only and
+        ships no browser, so ``channel`` is replaced by ``executable_path``
+        resolution for that backend.
+        """
         if self._browser is not None:
             return self._browser
 
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            msg = "Playwright is not installed. Install with: pip install kaos-web[browser]"
-            raise ImportError(msg)  # noqa: B904
+        cfg = self._config
+        backend = self._resolve_backend()
+        async_playwright = self._import_async_playwright(backend)
 
         self._playwright = await async_playwright().start()
 
         # Select browser engine
-        cfg = self._config
         engine = getattr(self._playwright, cfg.browser_type)
 
-        # Resolve effective browser channel. Explicit ``cfg.channel``
-        # always wins. Otherwise consult :class:`KaosWebSettings` —
-        # the existing ``browser_channel`` env override + auto-detect
-        # (uses system ``google-chrome`` on Linux when Playwright's
-        # bundled Chromium isn't supported, e.g. Ubuntu 26.04+).
-        # Without this wiring, ``BrowserClient()`` ignored the env
-        # var and the auto-detect, leaving the bundled-Chromium
-        # failure surface live.
-        effective_channel: str | None = cfg.channel
-        if effective_channel is None:
-            try:
-                from kaos_web.settings import (
-                    KaosWebSettings,
-                    _detect_browser_channel,
-                )
-
-                settings = KaosWebSettings()
-                effective_channel = settings.browser_channel
-                if effective_channel is None and settings.browser_auto_detect_channel:
-                    effective_channel = _detect_browser_channel()
-            except Exception as exc:  # settings is best-effort; never block fetch
-                logger.debug("browser_channel auto-detect failed: %s", exc)
-
         launch_kwargs: dict[str, Any] = {"headless": cfg.headless}
-        if effective_channel:
-            launch_kwargs["channel"] = effective_channel
         if cfg.proxy:
             launch_kwargs["proxy"] = {"server": cfg.proxy}
 
+        effective_channel: str | None = None
+        if backend == "rustwright":
+            # rustwright is Chromium-only, CDP-direct, and bundles no browser:
+            # resolve an executable rather than a Playwright "channel".
+            executable = self._resolve_chromium_executable()
+            if executable:
+                launch_kwargs["executable_path"] = executable
+        else:
+            # Playwright: explicit ``cfg.channel`` wins; otherwise consult
+            # :class:`KaosWebSettings` — the ``browser_channel`` env override +
+            # auto-detect (system ``google-chrome`` on Linux when the bundled
+            # Chromium isn't supported, e.g. Ubuntu 26.04+).
+            effective_channel = cfg.channel
+            if effective_channel is None:
+                try:
+                    from kaos_web.settings import (
+                        KaosWebSettings,
+                        _detect_browser_channel,
+                    )
+
+                    settings = KaosWebSettings()
+                    effective_channel = settings.browser_channel
+                    if effective_channel is None and settings.browser_auto_detect_channel:
+                        effective_channel = _detect_browser_channel()
+                except Exception as exc:  # settings is best-effort; never block fetch
+                    logger.debug("browser_channel auto-detect failed: %s", exc)
+            if effective_channel:
+                launch_kwargs["channel"] = effective_channel
+
         self._browser = await engine.launch(**launch_kwargs)
         logger.debug(
-            "Launched %s browser (channel=%s, headless=%s)",
+            "Launched %s browser via %s (channel=%s, headless=%s)",
             cfg.browser_type,
-            effective_channel or "<bundled>",
+            backend,
+            effective_channel or launch_kwargs.get("executable_path") or "<bundled>",
             cfg.headless,
         )
         return self._browser
+
+    def _resolve_backend(self) -> str:
+        """Effective browser backend: config override, else settings, else playwright."""
+        backend = self._config.backend
+        if backend is not None:
+            return backend
+        try:
+            from kaos_web.settings import KaosWebSettings
+
+            return KaosWebSettings().browser_backend or "playwright"
+        except Exception as exc:  # settings is best-effort
+            logger.debug("browser_backend resolution failed: %s", exc)
+            return "playwright"
+
+    def _import_async_playwright(self, backend: str) -> Any:
+        """Lazily import the ``async_playwright`` entrypoint for ``backend``.
+
+        Both backends expose a Playwright-compatible ``async_playwright()``, so
+        the rest of this client is engine-agnostic.
+        """
+        if backend == "rustwright":
+            try:
+                from rustwright.async_api import async_playwright
+            except ImportError:
+                msg = (
+                    "The 'rustwright' browser backend is not installed. "
+                    "Install with: pip install kaos-web[browser-rust] "
+                    "(or use backend='playwright')."
+                )
+                raise ImportError(msg) from None
+            return async_playwright
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            msg = "Playwright is not installed. Install with: pip install kaos-web[browser]"
+            raise ImportError(msg) from None
+        return async_playwright
+
+    def _resolve_chromium_executable(self) -> str | None:
+        """Find a Chromium/Chrome executable for the rustwright backend.
+
+        Order: explicit ``config.executable_path`` -> ``RUSTWRIGHT_CHROMIUM``
+        env -> a system browser on ``PATH``. Returns ``None`` to let rustwright
+        surface its own actionable "Could not find a Chromium executable" error.
+        """
+        import os
+        import shutil
+
+        if self._config.executable_path:
+            return self._config.executable_path
+        env = os.environ.get("RUSTWRIGHT_CHROMIUM")
+        if env:
+            return env
+        for name in (
+            "chromium",
+            "chromium-browser",
+            "google-chrome",
+            "google-chrome-stable",
+            "chrome",
+        ):
+            path = shutil.which(name)
+            if path:
+                return path
+        return None
 
     async def _get_or_create_context(
         self, browser: Any, session_id: str, context_id: str | None
