@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] - 2026-09-21
+
 ### Added
 
 - **Experimental `rustwright` browser backend (opt-in).** `BrowserClient`
