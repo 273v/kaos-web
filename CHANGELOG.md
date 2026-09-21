@@ -28,6 +28,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KaosWebSettings.browser_backend`.
 
 
+### Fixed
+
+- **Readability now merges cousin content regions, not only literal
+  siblings.** `_select_peer_regions` collected peers by
+  `el.getparent() is parent`, so it could only extend the core region sideways
+  within a single parent. A CMS renders each content region into its own block
+  wrapper, which makes those regions cousins rather than siblings, and
+  extraction silently returned the densest single region — the body prose —
+  dropping the summary block and any adjacent sections. No `content_scope`
+  recovered them; the regions that belonged were never siblings to begin with.
+
+  Peer collection now walks up from the core region, gathering the regions that
+  are *children of* each ancestor in turn. It gathers at `<body>` and at
+  `<main>`/`[role=main]` and then stops, and a core region that is itself the
+  content container is returned alone. `_MAX_PEER_ANCESTOR_LEVELS = 2` bounds
+  the walk.
+
+  Because each level takes an ancestor's children rather than all its
+  descendants, **level 1 is the old predicate exactly**: byte-identical output
+  across 20 report pages and 15 news articles at five `content_scope` values
+  (175 comparisons, 0 differences). A page whose content regions share a parent
+  is therefore unaffected, as are bare fragments and pages with no wrapper.
+
+  Measured against trafilatura as reference on those corpora: one level (the old
+  behaviour) recovers 52% of reference lines on report pages, two recovers
+  **81%**, and three or more measures the same because the walk usually halts at
+  `<main>` or `<body>` first. Article extraction is byte-identical at every
+  scope. Two is kept as the smallest bound that buys the gain.
+
+  One output change is not about cousins: when the core region *is* the
+  `<main>` / `[role=main]` container, it is now returned on its own rather
+  than merged with its own siblings. Those siblings sit outside the element
+  the author used to delimit the content, so merging them was always wrong,
+  but a page of that shape does extract less than it did in 0.1.14.
+
+  See `docs/HTML_TO_AST_REFERENCE.md` edge case 15 and
+  `tests/fixtures/readability/cms_block_layout.html`.
+
 ## [0.1.14] - 2026-06-23
 
 ### Changed

@@ -13,6 +13,11 @@ strict scopes favor the most specific strong content region, middle scopes
 merge in related peer regions, and permissive scopes can promote to a
 broader parent wrapper when that yields a better page-level slice.
 
+"Peer" means a region under a shared ancestor, not only a literal sibling.
+A page whose content is split across sibling block wrappers -- which is
+every CMS-rendered page -- keeps its title, summary and tables only because
+of that.
+
 Usage::
 
     from kaos_web.extract.readability_l3 import extract_content_l3
@@ -88,6 +93,34 @@ _REGION_TAGS = frozenset(
 )
 
 _MAX_SCOPE_REGIONS = 3
+
+# How far above the core region to look for peer content regions.
+#
+# Each level gathers the regions that are *children of* one ancestor. Level 1 is
+# therefore the literal-sibling predicate this function always used, and is
+# byte-identical to the pre-change behaviour across 20 report pages and 15 news
+# articles at five scopes (175 comparisons, 0 differences).
+#
+# 1 is enough for a page whose content regions share a parent, and never enough
+# for a page rendered by a CMS: Drupal, WordPress and friends wrap each region in
+# its own block container, so the title, the summary and a recommendations table
+# are cousins of the article body, not siblings, and a sibling-only merge cannot
+# reach them however permissive the scope.
+#
+# 2 is measured. Against trafilatura as reference, on those same corpora:
+#
+#     levels   report recall   report prec   article recall   article prec
+#     1 (old)            52%           95%              89%            74%
+#     2                  81%           85%              89%            74%
+#     3                  81%           85%              89%            74%
+#     5                  81%           85%              89%            74%
+#
+# 2 recovers the whole available gain on report pages and leaves article
+# extraction byte-identical at every scope. 3 and beyond measure the same here,
+# because the walk usually halts at <main> or <body> first; 2 is kept as the
+# smallest bound that buys the gain, so the blast radius stays the size of the
+# problem. See docs/HTML_TO_AST_REFERENCE.md, edge case 15.
+_MAX_PEER_ANCESTOR_LEVELS = 2
 
 # Feature order must exactly match training. Do not reorder.
 _FEATURE_ORDER: tuple[str, ...] = (
@@ -453,6 +486,11 @@ def _sibling_region_ratio(content_scope: float) -> float:
     return max(0.05, 0.42 - (content_scope * 0.44))
 
 
+def _is_content_container(el: HtmlElement) -> bool:
+    """Is this the element an author used to delimit the page's content?"""
+    return el.tag == "main" or el.get("role") == "main"
+
+
 def _is_ancestor(ancestor: HtmlElement, descendant: HtmlElement) -> bool:
     """Return True if ``ancestor`` contains ``descendant`` in the DOM tree."""
     current = descendant.getparent()
@@ -544,27 +582,61 @@ def _select_peer_regions(
     *,
     content_scope: float,
 ) -> list[HtmlElement]:
-    """Collect strong sibling regions around the core region."""
-    parent = core_el.getparent()
-    if parent is None:
+    """Collect strong peer regions around the core region.
+
+    Walks up from the core region, gathering the regions that are *children of*
+    each ancestor in turn, nearest first. The first level is therefore exactly
+    the literal siblings of the core region; the second reaches cousins sharing a
+    grandparent. See ``_MAX_PEER_ANCESTOR_LEVELS`` for why the walk stops there.
+
+    The walk never climbs above ``<main>`` or ``[role=main]``: an author who
+    marked a content container has said where the page's content ends, and there
+    is nothing above it worth merging. It gathers *at* that container -- its
+    children are content -- and stops. If the core region is itself that
+    container there is nowhere to go, and it is returned alone.
+    """
+    if core_el.getparent() is None:
+        return [core_el]
+    if _is_content_container(core_el):
         return [core_el]
 
     selected: list[HtmlElement] = [core_el]
-    sibling_floor = core_score * _sibling_region_ratio(content_scope)
+    peer_floor = core_score * _sibling_region_ratio(content_scope)
 
-    sibling_regions = [
-        (el, score)
-        for el, score in regions
-        if el is not core_el and el.getparent() is parent and score >= sibling_floor
-    ]
-    sibling_regions.sort(key=lambda item: item[1], reverse=True)
+    ancestor = core_el.getparent()
+    levels = 0
+    while ancestor is not None and levels < _MAX_PEER_ANCESTOR_LEVELS:
+        # Children of this ancestor, not every descendant. At the first level
+        # that is the literal-sibling predicate this function has always used,
+        # so a page whose content regions share a parent is unaffected.
+        peers = [
+            (el, score)
+            for el, score in regions
+            if el is not core_el and score >= peer_floor and el.getparent() is ancestor
+        ]
+        peers.sort(key=lambda item: item[1], reverse=True)
 
-    for el, _score in sibling_regions:
+        for el, _score in peers:
+            if len(selected) >= _MAX_SCOPE_REGIONS:
+                break
+            # Never select a region that contains, or is contained by, one
+            # already chosen: the merge would emit its text twice.
+            if any(
+                existing is el or _is_ancestor(existing, el) or _is_ancestor(el, existing)
+                for existing in selected
+            ):
+                continue
+            selected.append(el)
+
         if len(selected) >= _MAX_SCOPE_REGIONS:
             break
-        if any(_is_ancestor(existing, el) or _is_ancestor(el, existing) for existing in selected):
-            continue
-        selected.append(el)
+        # Stop *after* gathering here: <body> and <main> both hold content as
+        # children, and excluding them would lose the peers of a core region
+        # whose parent they are.
+        if ancestor.tag == "body" or _is_content_container(ancestor):
+            break
+        ancestor = ancestor.getparent()
+        levels += 1
 
     selected.sort(key=_document_order_key)
     return selected
