@@ -57,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<main>` or `<body>` first. Article extraction is byte-identical at every
   scope. Two is kept as the smallest bound that buys the gain.
 
+  One output change is not about cousins: when the core region *is* the
+  `<main>` / `[role=main]` container, it is now returned on its own rather
+  than merged with its own siblings. Those siblings sit outside the element
+  the author used to delimit the content, so merging them was always wrong,
+  but a page of that shape does extract less than it did in 0.1.14.
+
   See `docs/HTML_TO_AST_REFERENCE.md` edge case 15 and
   `tests/fixtures/readability/cms_block_layout.html`.
 
