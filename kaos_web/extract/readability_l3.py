@@ -13,6 +13,11 @@ strict scopes favor the most specific strong content region, middle scopes
 merge in related peer regions, and permissive scopes can promote to a
 broader parent wrapper when that yields a better page-level slice.
 
+"Peer" means a region under a shared ancestor, not only a literal sibling.
+A page whose content is split across sibling block wrappers -- which is
+every CMS-rendered page -- keeps its title, summary and tables only because
+of that.
+
 Usage::
 
     from kaos_web.extract.readability_l3 import extract_content_l3
@@ -88,6 +93,22 @@ _REGION_TAGS = frozenset(
 )
 
 _MAX_SCOPE_REGIONS = 3
+
+# How far above the core region to look for peer content regions.
+#
+# 1 means literal siblings only, which is what this did before. That is enough
+# for a page whose content regions share a parent, and never enough for a page
+# rendered by a CMS: Drupal, WordPress and friends wrap each region in its own
+# block container, so the title, the summary and a recommendations table are
+# cousins of the article body, not siblings, and a sibling-only merge cannot
+# reach them however permissive the scope.
+#
+# 2 is measured, not chosen. Across 20 GAO report pages and 15 news articles,
+# against trafilatura as the reference: 1 recovers 52% of reference lines on the
+# reports, 2 recovers 81% with no loss of precision on the articles, and 3 or
+# more recovers nothing further while pulling in neighbouring material (85% ->
+# 81% precision). See docs/HTML_TO_AST_REFERENCE.md, edge case 15.
+_MAX_PEER_ANCESTOR_LEVELS = 2
 
 # Feature order must exactly match training. Do not reorder.
 _FEATURE_ORDER: tuple[str, ...] = (
@@ -544,27 +565,51 @@ def _select_peer_regions(
     *,
     content_scope: float,
 ) -> list[HtmlElement]:
-    """Collect strong sibling regions around the core region."""
-    parent = core_el.getparent()
-    if parent is None:
+    """Collect strong peer regions around the core region.
+
+    Walks up from the core region, gathering strong regions under each ancestor
+    in turn, nearest first. Literal siblings are the first level; cousins under a
+    shared block wrapper are the second. See ``_MAX_PEER_ANCESTOR_LEVELS`` for
+    why the walk stops where it does.
+
+    Climbing stops at ``<main>`` or ``[role=main]``, because an author who marked
+    a content container has said where the page's content ends, and there is
+    nothing above it worth merging.
+    """
+    if core_el.getparent() is None:
         return [core_el]
 
     selected: list[HtmlElement] = [core_el]
-    sibling_floor = core_score * _sibling_region_ratio(content_scope)
+    peer_floor = core_score * _sibling_region_ratio(content_scope)
 
-    sibling_regions = [
-        (el, score)
-        for el, score in regions
-        if el is not core_el and el.getparent() is parent and score >= sibling_floor
-    ]
-    sibling_regions.sort(key=lambda item: item[1], reverse=True)
+    ancestor = core_el.getparent()
+    levels = 0
+    while ancestor is not None and ancestor.tag != "body" and levels < _MAX_PEER_ANCESTOR_LEVELS:
+        peers = [
+            (el, score)
+            for el, score in regions
+            if el is not core_el and score >= peer_floor and _is_ancestor(ancestor, el)
+        ]
+        peers.sort(key=lambda item: item[1], reverse=True)
 
-    for el, _score in sibling_regions:
+        for el, _score in peers:
+            if len(selected) >= _MAX_SCOPE_REGIONS:
+                break
+            # Never select a region that contains, or is contained by, one
+            # already chosen: the merge would emit its text twice.
+            if any(
+                existing is el or _is_ancestor(existing, el) or _is_ancestor(el, existing)
+                for existing in selected
+            ):
+                continue
+            selected.append(el)
+
         if len(selected) >= _MAX_SCOPE_REGIONS:
             break
-        if any(_is_ancestor(existing, el) or _is_ancestor(el, existing) for existing in selected):
-            continue
-        selected.append(el)
+        if ancestor.tag == "main" or ancestor.get("role") == "main":
+            break
+        ancestor = ancestor.getparent()
+        levels += 1
 
     selected.sort(key=_document_order_key)
     return selected

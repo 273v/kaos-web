@@ -263,3 +263,62 @@ class TestPublicApiConsistency:
         html = (FIXTURES / "article.html").read_text()
         result = extract_content_heuristic(html)
         assert result is not None
+
+
+class TestCmsBlockLayout:
+    """Content split across cousin block wrappers, which is every CMS page.
+
+    A Drupal or WordPress page wraps each content region in its own block
+    container, so the title, the body and a recommendations section share a
+    grandparent rather than a parent. Merging only literal siblings reaches none
+    of them, and extraction silently returns the single densest region -- the
+    body prose -- while dropping the title and the findings around it.
+    """
+
+    @pytest.fixture
+    def cms_html(self) -> str:
+        return (READABILITY_FIXTURES / "cms_block_layout.html").read_text()
+
+    def test_cousin_regions_are_merged(self, cms_html: str):
+        result = extract_content_l3(cms_html, content_scope=0.5)
+        assert result is not None
+        text = result.text_content() or ""
+
+        # The densest region. Sibling-only merging found this and stopped here.
+        assert "Officials at three of the four agencies" in text
+        # Its cousins under ``node__content``, which were the silent loss: a
+        # summary block and a recommendations section, each in its own wrapper.
+        assert "Fast Facts" in text
+        assert "Recommendations for Executive Action" in text
+
+    def test_the_title_block_is_not_reached_and_does_not_need_to_be(self, cms_html: str) -> None:
+        """The page title sits four levels up, outside the merge, and below the
+        peer floor besides. That is deliberate: ``html_to_document`` reads the
+        title from ``<title>`` into ``DocumentMetadata``, so pulling the title
+        block into the body would duplicate it rather than recover it."""
+        from kaos_web.extract.html_to_ast import html_to_document
+
+        result = extract_content_l3(cms_html, content_scope=0.5)
+        assert result is not None
+        assert "Additional Collaboration Could Reduce" not in (result.text_content() or "")
+        assert html_to_document(cms_html).metadata.title == (
+            "Regional Development Oversight | Example Agency"
+        )
+
+    def test_page_chrome_is_still_excluded(self, cms_html: str):
+        """Reaching cousins must not become reaching everything."""
+        result = extract_content_l3(cms_html, content_scope=0.5)
+        assert result is not None
+        text = result.text_content() or ""
+        assert "Privacy policy" not in text
+        assert "Accessibility statement" not in text
+
+    def test_no_region_is_emitted_twice(self, cms_html: str):
+        """Merging an ancestor and its descendant would duplicate the text."""
+        result = extract_content_l3(cms_html, content_scope=0.5)
+        assert result is not None
+        text = result.text_content() or ""
+        # Text from the core region, which every merge selects, so this counts
+        # duplication rather than incidentally re-testing selection.
+        assert text.count("Officials at three of the four agencies") == 1
+        assert text.count("Recommendations for Executive Action") == 1

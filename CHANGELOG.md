@@ -28,6 +28,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `KaosWebSettings.browser_backend`.
 
 
+### Fixed
+
+- **Readability now merges cousin content regions, not only literal
+  siblings.** `_select_peer_regions` collected peers by
+  `el.getparent() is parent`, so it could only ever extend the core region
+  sideways within one parent. A CMS renders each content region into its own
+  block wrapper, which makes those regions cousins rather than siblings, and
+  extraction silently returned the single densest region — the body prose —
+  dropping the summary block and any adjacent sections. No `content_scope`
+  recovered them; the regions that belonged were never siblings to begin with.
+
+  Peer collection now walks up from the core region, gathering strong regions
+  under each ancestor in turn and stopping at `<main>` or `[role=main]`. The
+  walk is bounded by the new `_MAX_PEER_ANCESTOR_LEVELS = 2`, measured across 20
+  government report pages and 15 news articles against trafilatura as reference:
+  one level (the old behavior) recovers 52% of reference lines on report pages,
+  two recovers **81%** with article extraction byte-identical, and three or more
+  recovers nothing further while costing article precision (85% → 81%).
+
+  Article, listing and docket extraction are unchanged — a page whose content
+  regions do share a parent takes the same path it always did, since literal
+  siblings are simply the first level of the walk. See
+  `docs/HTML_TO_AST_REFERENCE.md` edge case 15 and
+  `tests/fixtures/readability/cms_block_layout.html`.
+
 ## [0.1.14] - 2026-06-23
 
 ### Changed
