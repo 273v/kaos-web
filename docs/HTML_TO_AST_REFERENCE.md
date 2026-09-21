@@ -287,23 +287,37 @@ Two boundaries matter, and both were wrong in the first version of this fix:
   markup is most explicit about the boundary.
 
 Levels gather children of one ancestor rather than all its descendants, so level
-1 is byte-identical to the pre-change behaviour: verified across 35 pages at five
-scopes, 175 comparisons, 0 differences.
+1 is byte-identical to the pre-change behaviour: verified across the 35 corpus
+pages below plus the 11 HTML fixtures in `tests/fixtures/`, at five
+`content_scope` values — 230 comparisons, 0 differences.
 
-The bound is measured. Against trafilatura as reference, over 20 government
-report pages and 15 news articles:
+The bound is measured. Against trafilatura (`include_tables=True`,
+`include_comments=False`) as reference, over 20 government report pages and 15
+news articles, at `content_scope=0.5`.
+
+**Metric**: word-multiset overlap. Both texts are lowercased and split on `\w+`
+into multisets; recall is the share of the reference's words recovered,
+precision the share of extracted words that appear in the reference. This is
+deliberately stated because the numbers are metric-dependent — a line-level
+metric scores the same runs differently, chiefly because `text_content()` emits
+long run-together lines that rarely match a reference line verbatim.
 
 | levels | report recall | report precision | article recall | article precision |
 |---|---|---|---|---|
-| 1 (siblings only) | 52% | 95% | 89% | 74% |
-| **2 (cousins)** | **81%** | 85% | 89% | 74% |
-| 3 | 81% | 85% | 89% | 74% |
-| 5 | 81% | 85% | 89% | 74% |
+| 1 (siblings only) | 71.9% | 100.0% | 96.9% | 82.4% |
+| **2 (cousins)** | **98.4%** | 95.6% | 96.9% | 82.4% |
+| 3 | 98.4% | 95.6% | 96.9% | 82.4% |
+| 5 | 98.4% | 93.7% | 96.9% | 82.4% |
 
-Two goes from losing half the reference content on report pages to recovering
-four fifths of it, and leaves article extraction byte-identical at every scope.
-Three and beyond measure the same here, because the walk usually halts at
-`<main>` or `<body>` first; two is kept as the smallest bound that buys the gain.
+Two recovers essentially all of the reference content on report pages, against
+roughly seven tenths at one level, and leaves article extraction byte-identical
+at every scope. Three measures the same as two, because the walk usually halts
+at `<main>` or `<body>` before it could spend a third level.
+
+The bound still earns its place at the far end: by five levels the walk does
+reach past the content and report precision falls from 95.6% to 93.7%. Two is
+the smallest bound that buys the whole gain, and the ceiling is what stops the
+walk on a page deep enough not to hit `<main>` or `<body>` first.
 
 What is *not* recovered is the page title, which sits further up still and below
 the peer floor. That is correct: `html_to_document` reads the title from

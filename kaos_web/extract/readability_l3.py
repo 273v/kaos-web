@@ -98,8 +98,9 @@ _MAX_SCOPE_REGIONS = 3
 #
 # Each level gathers the regions that are *children of* one ancestor. Level 1 is
 # therefore the literal-sibling predicate this function always used, and is
-# byte-identical to the pre-change behaviour across 20 report pages and 15 news
-# articles at five scopes (175 comparisons, 0 differences).
+# byte-identical to the pre-change behaviour across 20 report pages, 15 news
+# articles and the 11 HTML fixtures in tests/fixtures/, at five scopes
+# (230 comparisons, 0 differences).
 #
 # 1 is enough for a page whose content regions share a parent, and never enough
 # for a page rendered by a CMS: Drupal, WordPress and friends wrap each region in
@@ -107,19 +108,26 @@ _MAX_SCOPE_REGIONS = 3
 # are cousins of the article body, not siblings, and a sibling-only merge cannot
 # reach them however permissive the scope.
 #
-# 2 is measured. Against trafilatura as reference, on those same corpora:
+# 2 is measured. Against trafilatura as reference, on those same corpora, at
+# content_scope=0.5. The metric is word-multiset overlap: both texts lowercased
+# and split on \w+, recall the share of reference words recovered, precision the
+# share of extracted words present in the reference. Stated because the numbers
+# are metric-dependent -- a line-level metric scores these same runs differently.
 #
 #     levels   report recall   report prec   article recall   article prec
-#     1 (old)            52%           95%              89%            74%
-#     2                  81%           85%              89%            74%
-#     3                  81%           85%              89%            74%
-#     5                  81%           85%              89%            74%
+#     1 (old)          71.9%        100.0%            96.9%          82.4%
+#     2                98.4%         95.6%            96.9%          82.4%
+#     3                98.4%         95.6%            96.9%          82.4%
+#     5                98.4%         93.7%            96.9%          82.4%
 #
 # 2 recovers the whole available gain on report pages and leaves article
-# extraction byte-identical at every scope. 3 and beyond measure the same here,
-# because the walk usually halts at <main> or <body> first; 2 is kept as the
-# smallest bound that buys the gain, so the blast radius stays the size of the
-# problem. See docs/HTML_TO_AST_REFERENCE.md, edge case 15.
+# extraction byte-identical at every scope. 3 measures the same, because the walk
+# usually halts at <main> or <body> before it could spend a third level. The
+# ceiling still earns its place at the far end: by 5 the walk reaches past the
+# content and report precision falls to 93.7%. 2 is the smallest bound that buys
+# the whole gain, and the ceiling is what stops the walk on a page deep enough
+# not to hit <main> or <body> first.
+# See docs/HTML_TO_AST_REFERENCE.md, edge case 15.
 _MAX_PEER_ANCESTOR_LEVELS = 2
 
 # Feature order must exactly match training. Do not reorder.
