@@ -322,3 +322,59 @@ class TestCmsBlockLayout:
         # duplication rather than incidentally re-testing selection.
         assert text.count("Officials at three of the four agencies") == 1
         assert text.count("Recommendations for Executive Action") == 1
+
+
+class TestPeerWalkBoundaries:
+    """The two shapes where climbing must not change what siblings already did.
+
+    Both were regressions in the first version of the cousin walk, and both were
+    invisible to the rest of the suite.
+    """
+
+    _PROSE = (
+        "<p>The commission said on Tuesday that it had opened a formal inquiry "
+        "into the pricing practices of three regional distributors.</p>"
+        "<p>A spokesperson declined to name the companies under review, saying "
+        "the inquiry was at an early stage and no finding had been made.</p>"
+    )
+
+    def test_regions_directly_under_body_still_merge(self):
+        """A page with no wrapper at all puts its regions under ``<body>``.
+
+        Excluding ``<body>`` from the walk silently dropped every peer of a core
+        region whose parent it was -- a page that used to merge three regions
+        returned one. lxml synthesises ``<html>/<body>`` around a bare fragment,
+        so this is also every fragment passed to ``extract_content``.
+        """
+        html = (
+            f"<html><body>"
+            f"<div>SUMMARY {self._PROSE}</div>"
+            f"<div>BODY {self._PROSE}{self._PROSE}</div>"
+            f"<div>RECS {self._PROSE}</div>"
+            f"</body></html>"
+        )
+        result = extract_content_l3(html, content_scope=0.5)
+        assert result is not None
+        text = result.text_content() or ""
+        assert "BODY" in text
+        assert "SUMMARY" in text
+        assert "RECS" in text
+
+    def test_walk_does_not_climb_out_of_the_content_container(self):
+        """``<main>`` bounds the content, including when it is the core region.
+
+        Testing the stop only on the ancestor being walked meant that a core
+        region which *was* ``<main>`` started the walk at main's parent and
+        gathered from outside it -- the one case where the markup is explicit.
+        """
+        html = (
+            f"<html><body><div>"
+            f"<div>OUTSIDE {self._PROSE}{self._PROSE}</div>"
+            f"<main>INSIDE {self._PROSE}{self._PROSE}{self._PROSE}</main>"
+            f"</div></body></html>"
+        )
+        result = extract_content_l3(html, content_scope=0.5)
+        assert result is not None
+        text = result.text_content() or ""
+        assert "INSIDE" in text
+        assert "OUTSIDE" not in text

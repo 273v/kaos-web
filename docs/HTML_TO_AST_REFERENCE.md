@@ -270,32 +270,46 @@ siblings finds nothing to add, at any `content_scope`, because the regions that
 belong were never siblings to begin with.
 
 **Solution**: `_select_peer_regions` walks up from the core region and gathers
-strong regions under each ancestor in turn, nearest first, stopping at `<main>`
-or `[role=main]`. `_MAX_PEER_ANCESTOR_LEVELS = 2` bounds the walk: one level is
-literal siblings, two reaches cousins, three or more starts pulling in
-neighbouring material.
+the regions that are *children of* each ancestor in turn, stopping at `<main>`
+or `[role=main]` and never climbing above `<body>`.
+`_MAX_PEER_ANCESTOR_LEVELS = 2` bounds the walk: one level is the literal-sibling
+predicate the function always used, two reaches cousins.
 
-The bound is measured, not chosen. Across 20 government report pages and 15 news
-articles, scored against trafilatura as reference:
+Two boundaries matter, and both were wrong in the first version of this fix:
+
+- The walk gathers **at** `<body>` and `<main>` before stopping. Excluding them
+  drops every peer of a core region whose parent they are — which is any page
+  with no wrapper element, and any bare fragment, since lxml synthesises
+  `<html>/<body>` around one.
+- The `<main>` stop is tested on the **core region** as well as on each ancestor.
+  Testing it only on the ancestor means a core region that *is* `<main>` starts
+  the walk at main's parent and gathers from outside it — precisely where the
+  markup is most explicit about the boundary.
+
+Levels gather children of one ancestor rather than all its descendants, so level
+1 is byte-identical to the pre-change behaviour: verified across 35 pages at five
+scopes, 175 comparisons, 0 differences.
+
+The bound is measured. Against trafilatura as reference, over 20 government
+report pages and 15 news articles:
 
 | levels | report recall | report precision | article recall | article precision |
 |---|---|---|---|---|
 | 1 (siblings only) | 52% | 95% | 89% | 74% |
 | **2 (cousins)** | **81%** | 85% | 89% | 74% |
-| 3 | 81% | 85% | 89% | 70% |
-| 5 | 81% | 84% | 89% | 70% |
+| 3 | 81% | 85% | 89% | 74% |
+| 5 | 81% | 85% | 89% | 74% |
 
 Two goes from losing half the reference content on report pages to recovering
-four fifths of it, and leaves article extraction byte-identical. Three buys
-nothing and costs article precision.
+four fifths of it, and leaves article extraction byte-identical at every scope.
+Three and beyond measure the same here, because the walk usually halts at
+`<main>` or `<body>` first; two is kept as the smallest bound that buys the gain.
 
 What is *not* recovered is the page title, which sits further up still and below
 the peer floor. That is correct: `html_to_document` reads the title from
 `<title>` into `DocumentMetadata`, so merging the title block would duplicate it.
 
 **Fixture**: `tests/fixtures/readability/cms_block_layout.html`.
-
----
 
 ---
 

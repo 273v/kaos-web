@@ -96,18 +96,30 @@ _MAX_SCOPE_REGIONS = 3
 
 # How far above the core region to look for peer content regions.
 #
-# 1 means literal siblings only, which is what this did before. That is enough
-# for a page whose content regions share a parent, and never enough for a page
-# rendered by a CMS: Drupal, WordPress and friends wrap each region in its own
-# block container, so the title, the summary and a recommendations table are
-# cousins of the article body, not siblings, and a sibling-only merge cannot
+# Each level gathers the regions that are *children of* one ancestor. Level 1 is
+# therefore the literal-sibling predicate this function always used, and is
+# byte-identical to the pre-change behaviour across 20 report pages and 15 news
+# articles at five scopes (175 comparisons, 0 differences).
+#
+# 1 is enough for a page whose content regions share a parent, and never enough
+# for a page rendered by a CMS: Drupal, WordPress and friends wrap each region in
+# its own block container, so the title, the summary and a recommendations table
+# are cousins of the article body, not siblings, and a sibling-only merge cannot
 # reach them however permissive the scope.
 #
-# 2 is measured, not chosen. Across 20 GAO report pages and 15 news articles,
-# against trafilatura as the reference: 1 recovers 52% of reference lines on the
-# reports, 2 recovers 81% with no loss of precision on the articles, and 3 or
-# more recovers nothing further while pulling in neighbouring material (85% ->
-# 81% precision). See docs/HTML_TO_AST_REFERENCE.md, edge case 15.
+# 2 is measured. Against trafilatura as reference, on those same corpora:
+#
+#     levels   report recall   report prec   article recall   article prec
+#     1 (old)            52%           95%              89%            74%
+#     2                  81%           85%              89%            74%
+#     3                  81%           85%              89%            74%
+#     5                  81%           85%              89%            74%
+#
+# 2 recovers the whole available gain on report pages and leaves article
+# extraction byte-identical at every scope. 3 and beyond measure the same here,
+# because the walk usually halts at <main> or <body> first; 2 is kept as the
+# smallest bound that buys the gain, so the blast radius stays the size of the
+# problem. See docs/HTML_TO_AST_REFERENCE.md, edge case 15.
 _MAX_PEER_ANCESTOR_LEVELS = 2
 
 # Feature order must exactly match training. Do not reorder.
@@ -474,6 +486,11 @@ def _sibling_region_ratio(content_scope: float) -> float:
     return max(0.05, 0.42 - (content_scope * 0.44))
 
 
+def _is_content_container(el: HtmlElement) -> bool:
+    """Is this the element an author used to delimit the page's content?"""
+    return el.tag == "main" or el.get("role") == "main"
+
+
 def _is_ancestor(ancestor: HtmlElement, descendant: HtmlElement) -> bool:
     """Return True if ``ancestor`` contains ``descendant`` in the DOM tree."""
     current = descendant.getparent()
@@ -567,16 +584,20 @@ def _select_peer_regions(
 ) -> list[HtmlElement]:
     """Collect strong peer regions around the core region.
 
-    Walks up from the core region, gathering strong regions under each ancestor
-    in turn, nearest first. Literal siblings are the first level; cousins under a
-    shared block wrapper are the second. See ``_MAX_PEER_ANCESTOR_LEVELS`` for
-    why the walk stops where it does.
+    Walks up from the core region, gathering the regions that are *children of*
+    each ancestor in turn, nearest first. The first level is therefore exactly
+    the literal siblings of the core region; the second reaches cousins sharing a
+    grandparent. See ``_MAX_PEER_ANCESTOR_LEVELS`` for why the walk stops there.
 
-    Climbing stops at ``<main>`` or ``[role=main]``, because an author who marked
-    a content container has said where the page's content ends, and there is
-    nothing above it worth merging.
+    The walk never climbs above ``<main>`` or ``[role=main]``: an author who
+    marked a content container has said where the page's content ends, and there
+    is nothing above it worth merging. It gathers *at* that container -- its
+    children are content -- and stops. If the core region is itself that
+    container there is nowhere to go, and it is returned alone.
     """
     if core_el.getparent() is None:
+        return [core_el]
+    if _is_content_container(core_el):
         return [core_el]
 
     selected: list[HtmlElement] = [core_el]
@@ -584,11 +605,14 @@ def _select_peer_regions(
 
     ancestor = core_el.getparent()
     levels = 0
-    while ancestor is not None and ancestor.tag != "body" and levels < _MAX_PEER_ANCESTOR_LEVELS:
+    while ancestor is not None and levels < _MAX_PEER_ANCESTOR_LEVELS:
+        # Children of this ancestor, not every descendant. At the first level
+        # that is the literal-sibling predicate this function has always used,
+        # so a page whose content regions share a parent is unaffected.
         peers = [
             (el, score)
             for el, score in regions
-            if el is not core_el and score >= peer_floor and _is_ancestor(ancestor, el)
+            if el is not core_el and score >= peer_floor and el.getparent() is ancestor
         ]
         peers.sort(key=lambda item: item[1], reverse=True)
 
@@ -606,7 +630,10 @@ def _select_peer_regions(
 
         if len(selected) >= _MAX_SCOPE_REGIONS:
             break
-        if ancestor.tag == "main" or ancestor.get("role") == "main":
+        # Stop *after* gathering here: <body> and <main> both hold content as
+        # children, and excluding them would lose the peers of a core region
+        # whose parent they are.
+        if ancestor.tag == "body" or _is_content_container(ancestor):
             break
         ancestor = ancestor.getparent()
         levels += 1

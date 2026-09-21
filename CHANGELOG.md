@@ -32,25 +32,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Readability now merges cousin content regions, not only literal
   siblings.** `_select_peer_regions` collected peers by
-  `el.getparent() is parent`, so it could only ever extend the core region
-  sideways within one parent. A CMS renders each content region into its own
-  block wrapper, which makes those regions cousins rather than siblings, and
-  extraction silently returned the single densest region — the body prose —
+  `el.getparent() is parent`, so it could only extend the core region sideways
+  within a single parent. A CMS renders each content region into its own block
+  wrapper, which makes those regions cousins rather than siblings, and
+  extraction silently returned the densest single region — the body prose —
   dropping the summary block and any adjacent sections. No `content_scope`
   recovered them; the regions that belonged were never siblings to begin with.
 
-  Peer collection now walks up from the core region, gathering strong regions
-  under each ancestor in turn and stopping at `<main>` or `[role=main]`. The
-  walk is bounded by the new `_MAX_PEER_ANCESTOR_LEVELS = 2`, measured across 20
-  government report pages and 15 news articles against trafilatura as reference:
-  one level (the old behavior) recovers 52% of reference lines on report pages,
-  two recovers **81%** with article extraction byte-identical, and three or more
-  recovers nothing further while costing article precision (85% → 81%).
+  Peer collection now walks up from the core region, gathering the regions that
+  are *children of* each ancestor in turn. It gathers at `<body>` and at
+  `<main>`/`[role=main]` and then stops, and a core region that is itself the
+  content container is returned alone. `_MAX_PEER_ANCESTOR_LEVELS = 2` bounds
+  the walk.
 
-  Article, listing and docket extraction are unchanged — a page whose content
-  regions do share a parent takes the same path it always did, since literal
-  siblings are simply the first level of the walk. See
-  `docs/HTML_TO_AST_REFERENCE.md` edge case 15 and
+  Because each level takes an ancestor's children rather than all its
+  descendants, **level 1 is the old predicate exactly**: byte-identical output
+  across 20 report pages and 15 news articles at five `content_scope` values
+  (175 comparisons, 0 differences). A page whose content regions share a parent
+  is therefore unaffected, as are bare fragments and pages with no wrapper.
+
+  Measured against trafilatura as reference on those corpora: one level (the old
+  behaviour) recovers 52% of reference lines on report pages, two recovers
+  **81%**, and three or more measures the same because the walk usually halts at
+  `<main>` or `<body>` first. Article extraction is byte-identical at every
+  scope. Two is kept as the smallest bound that buys the gain.
+
+  See `docs/HTML_TO_AST_REFERENCE.md` edge case 15 and
   `tests/fixtures/readability/cms_block_layout.html`.
 
 ## [0.1.14] - 2026-06-23
