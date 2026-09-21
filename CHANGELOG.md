@@ -8,7 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] - 2026-09-21
+
+0.1.16 is 0.1.15 plus a release-infrastructure fix. **0.1.15 was tagged and
+published as a GitHub release but never reached PyPI**, so `pip install
+kaos-web==0.1.15` does not resolve; 0.1.16 is the first release carrying the
+changes listed under 0.1.15 below, and those entries are not repeated here.
+
+The 0.1.15 upload was rejected by PyPI with `InvalidDistribution: Invalid
+distribution metadata: '2.5' is not a valid metadata version`. Hatchling now
+emits `Metadata-Version: 2.5`, and the release workflow pinned
+`pypa/gh-action-pypi-publish` at v1.14.1, whose bundled Twine predates support
+for it. Nothing was uploaded — the rejection happened before any file was
+accepted — so no artifact was yanked and no version was reused. The `v0.1.15`
+tag and its GitHub release (wheel, sdist, CycloneDX SBOM) are left in place
+rather than deleted, because they record a real build; only PyPI is missing it.
+
+### Fixed
+
+- Pin `pypa/gh-action-pypi-publish` to v1.14.2, whose bundled Twine v7 accepts
+  core metadata 2.5. Local `twine check --strict` never caught this because
+  `uvx --from twine` resolves current Twine, which already accepts 2.5; only
+  the action's older pinned copy rejected the wheel.
+
+### Documentation
+
+- State the metric behind the `_MAX_PEER_ANCESTOR_LEVELS` measurement table in
+  `docs/HTML_TO_AST_REFERENCE.md` edge case 15 and above the constant itself
+  (word-multiset overlap at `content_scope=0.5`), since the figures are
+  metric-dependent and the table did not say which one produced them. The
+  bound's justification now rests on report precision falling 95.6% → 93.7% by
+  five levels, rather than on a precision cliff at three levels that turned out
+  to be an artifact of a predicate fixed before release.
+
 ## [0.1.15] - 2026-09-21
+
+Tagged and released on GitHub, but **never published to PyPI** — see 0.1.16.
 
 ### Added
 
