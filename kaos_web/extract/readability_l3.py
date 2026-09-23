@@ -44,6 +44,7 @@ from kaos_web.extract.readability import (
     _link_density,
     _tag_weight,
     _text_content,
+    document_body,
 )
 
 # ---------------------------------------------------------------------------
@@ -675,7 +676,7 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
     except Exception:
         return None
 
-    body = doc.body
+    body = document_body(doc)
     if body is None:
         return None
 
