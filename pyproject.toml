@@ -60,7 +60,7 @@ browser = ["playwright>=1.50.0"]
 # executable_path / RUSTWRIGHT_CHROMIUM / a system Chrome.
 browser-rust = ["rustwright>=0.1.1"]
 dns = ["dnspython>=2.6.0"]
-mcp = ["kaos-mcp>=0.1.0,<0.2"]
+mcp = ["kaos-mcp>=0.1.5,<0.2"]
 nlp = ["kaos-nlp-core>=0.1.0,<0.2"]
 
 [dependency-groups]
@@ -69,8 +69,11 @@ nlp = ["kaos-nlp-core>=0.1.0,<0.2"]
 # CI. Bumps go through dependabot.
 dev = [
   "dnspython>=2.8.0",
-  "kaos-mcp>=0.1.0,<0.2",
+  "kaos-mcp>=0.1.5,<0.2",
   "kaos-nlp-core>=0.1.0,<0.2",
+  # tests/integration imports the MCP SDK directly (mcp.server.fastmcp,
+  # removed in mcp 2.0), so bound it here rather than rely on kaos-mcp.
+  "mcp>=1.28.1,<2",
   "playwright>=1.58.0",
   # Experimental optional browser backend — kept in dev so the backend-
   # selection path is type-checked and unit-tested alongside Playwright.
