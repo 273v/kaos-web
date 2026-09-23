@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fetching a page whose HTML has no `<body>` (e.g. `<html></html>`) no longer
+  crashes with `list index out of range` on lxml 5.x, which the declared
+  `lxml>=5.3.0` floor allows. lxml 5's `HtmlElement.body` raises `IndexError`
+  there instead of returning `None`; the readability, L3 and `html_to_ast`
+  extraction paths now go through a `document_body()` helper, so `FetchPage`
+  returns its "No content extracted" guidance again.
+
+### Changed
+
+- The `mcp` extra now requires `kaos-mcp>=0.1.5`. Earlier kaos-mcp releases
+  left `mcp` unbounded, so a lowest-version resolve could install `mcp` 2.x,
+  which removed `mcp.server.fastmcp`. kaos-mcp 0.1.5 pins `mcp>=1.28.1,<2`.
+
 ## [0.1.16] - 2026-09-21
 
 0.1.16 is 0.1.15 plus a release-infrastructure fix. **0.1.15 was tagged and
