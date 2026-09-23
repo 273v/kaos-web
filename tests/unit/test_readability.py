@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
-from lxml.html import tostring
+from lxml.html import HtmlElement, tostring
 
-from kaos_web.extract.readability import extract_content
+from kaos_web.extract.html_to_ast import html_to_document
+from kaos_web.extract.readability import document_body, extract_content
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 
@@ -65,3 +67,20 @@ class TestReadability:
         text = tostring(result, encoding="unicode", method="text")
         assert "First paragraph" in text
         assert "Second paragraph" in text
+
+
+class _BodylessDoc:
+    """Stand-in for lxml 5.x, whose ``.body`` raises on a body-less document."""
+
+    @property
+    def body(self) -> None:
+        raise IndexError("list index out of range")
+
+
+class TestDocumentBody:
+    def test_bodyless_doc_returns_none(self) -> None:
+        assert document_body(cast("HtmlElement", _BodylessDoc())) is None
+
+    def test_empty_html_extracts_to_empty_document(self) -> None:
+        doc = html_to_document("<html></html>", url="https://example.com")
+        assert not doc.body

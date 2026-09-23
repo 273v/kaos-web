@@ -39,5 +39,7 @@ jobs:
       - name: Install with lowest-direct resolution
         run: uv sync --group dev --resolution=lowest-direct --python 3.13
 
+      # --no-sync: plain `uv run` would re-sync to the locked (highest)
+      # versions and silently skip testing the minimums.
       - name: Run tests
-        run: uv run pytest -m "not live and not network and not slow and not integration" --no-cov -q
+        run: uv run --no-sync pytest -m "not live and not network and not slow and not integration" --no-cov -q

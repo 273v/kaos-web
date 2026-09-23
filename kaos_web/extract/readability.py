@@ -85,6 +85,19 @@ _SCORE_TAGS = frozenset({"p", "pre", "td"})
 # ---------------------------------------------------------------------------
 
 
+def document_body(doc: HtmlElement) -> HtmlElement | None:
+    """Return the document's ``<body>`` element, or ``None`` if it has none.
+
+    ``HtmlElement.body`` raises ``IndexError`` on lxml 5.x when the parsed
+    document has no ``<body>`` (e.g. ``"<html></html>"``); newer libxml2
+    always synthesizes one. Normalize both to ``None``.
+    """
+    try:
+        return doc.body
+    except IndexError:
+        return None
+
+
 def _class_id_string(el: HtmlElement) -> str:
     """Combine class and id into a single string for regex matching."""
     parts: list[str] = []
@@ -305,7 +318,7 @@ def extract_content(html: str) -> HtmlElement | None:
     except Exception:
         return None
 
-    body = doc.body
+    body = document_body(doc)
     if body is None:
         return None
 

@@ -19,6 +19,7 @@ from unittest.mock import patch
 import pytest
 from kaos_mcp import create_app
 from mcp import types
+from mcp.client.session import ClientSession
 from mcp.shared.memory import create_connected_server_and_client_session
 from pydantic import AnyUrl
 
@@ -31,6 +32,26 @@ pytestmark = pytest.mark.integration
 
 FIXTURES = Path(__file__).parent.parent / "fixtures"
 ARTICLE_HTML = (FIXTURES / "article.html").read_text()
+
+
+async def _read_resource_as(
+    session: ClientSession, uri: str, client_id: str
+) -> types.ReadResourceResult:
+    """Read a resource presenting ``_meta.client_id`` as the caller identity.
+
+    kaos-mcp isolates artifacts per caller session and takes that identity
+    only from ``_meta.client_id`` (``clientInfo.name`` is a product name,
+    not a tenant id), so cross-request artifact reads must supply it.
+    """
+    request = types.ClientRequest(
+        types.ReadResourceRequest(
+            params=types.ReadResourceRequestParams(
+                uri=AnyUrl(uri),
+                _meta=types.RequestParams.Meta.model_validate({"client_id": client_id}),
+            ),
+        )
+    )
+    return await session.send_request(request, types.ReadResourceResult)
 
 
 def _make_runtime(tmp_path: Path) -> KaosRuntime:
@@ -141,10 +162,7 @@ async def test_fetch_page_artifact_resources_via_mcp(tmp_path: Path) -> None:
 
     app = create_app(runtime)
 
-    async with create_connected_server_and_client_session(
-        app,
-        client_info=types.Implementation(name=client_id, version="test"),
-    ) as session:
+    async with create_connected_server_and_client_session(app) as session:
         # List resource templates
         templates = await session.list_resource_templates()
         template_uris = {t.uriTemplate for t in templates.resourceTemplates}
@@ -152,15 +170,17 @@ async def test_fetch_page_artifact_resources_via_mcp(tmp_path: Path) -> None:
         assert "kaos://content/{artifact_id}/outline" in template_uris
 
         # Read markdown view
-        md_result = await session.read_resource(AnyUrl(f"kaos://content/{artifact_id}/markdown"))
+        md_result = await _read_resource_as(
+            session, f"kaos://content/{artifact_id}/markdown", client_id
+        )
         md_text = md_result.contents[0]
         assert isinstance(md_text, types.TextResourceContents)
         assert len(md_text.text) > 0
         assert "Main Article Heading" in md_text.text
 
         # Read outline
-        outline_result = await session.read_resource(
-            AnyUrl(f"kaos://content/{artifact_id}/outline")
+        outline_result = await _read_resource_as(
+            session, f"kaos://content/{artifact_id}/outline", client_id
         )
         outline_text = outline_result.contents[0]
         assert isinstance(outline_text, types.TextResourceContents)
@@ -168,7 +188,9 @@ async def test_fetch_page_artifact_resources_via_mcp(tmp_path: Path) -> None:
         assert isinstance(outline, list)
 
         # Read metadata
-        meta_result = await session.read_resource(AnyUrl(f"kaos://content/{artifact_id}/metadata"))
+        meta_result = await _read_resource_as(
+            session, f"kaos://content/{artifact_id}/metadata", client_id
+        )
         meta_text = meta_result.contents[0]
         assert isinstance(meta_text, types.TextResourceContents)
         meta = json.loads(meta_text.text)

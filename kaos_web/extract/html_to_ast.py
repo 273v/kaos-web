@@ -28,6 +28,7 @@ from kaos_content.parsers.html import (
     strip_inline_xbrl,
 )
 from kaos_core.logging import get_logger
+from kaos_web.extract.readability import document_body
 from kaos_web.extract.readability import extract_content as readability_extract
 from kaos_web.extract.readability_l3 import extract_content_l3
 
@@ -167,12 +168,13 @@ def html_to_document(
                     exc,
                 )
                 full_doc = None
-            if full_doc is not None and full_doc.body is not None:
-                body_words = len((full_doc.body.text_content() or "").split())
+            full_body = document_body(full_doc) if full_doc is not None else None
+            if full_body is not None:
+                body_words = len((full_body.text_content() or "").split())
                 if body_words > _MIN_READABILITY_WORDS * 4:
                     # Extraction returned too little -- try semantic containers.
-                    semantic = _find_semantic_container(full_doc.body)
-                    root = semantic if semantic is not None else full_doc.body
+                    semantic = _find_semantic_container(full_body)
+                    root = semantic if semantic is not None else full_body
 
     if root is None:
         # Parse full document and use <body>.
@@ -185,7 +187,7 @@ def html_to_document(
                     exc,
                 )
                 return empty_document()
-        root = full_doc.body if full_doc is not None else None
+        root = document_body(full_doc) if full_doc is not None else None
         if root is None:
             return empty_document()
 
