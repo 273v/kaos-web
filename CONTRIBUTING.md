@@ -35,7 +35,7 @@ Run the local quality gate:
 uv run ruff format --check kaos_web tests
 uv run ruff check kaos_web tests
 uv run ty check kaos_web tests
-uv run pytest -m "not live and not network and not slow" --no-cov
+uv run pytest -m "not live and not network and not slow and not integration" --no-cov
 ```
 
 When packaging, metadata, README rendering, or release behavior changes,
@@ -102,7 +102,7 @@ Before requesting review, confirm:
   `TestUrlPolicyGate` regression classes for the wiring pattern.
 - Tests that hit live network must be marked `integration`, `network`,
   or `live` so CI's unit gate (`-m "not live and not network and not
-  slow"`) does not collect them.
+  slow and not integration"`) does not collect them.
 - Browser tests must not launch a real Chromium process from the unit
   tier — `tests/unit/conftest.py` blocks Playwright launches via an
   autouse fixture; new tests should reuse it rather than add another.
