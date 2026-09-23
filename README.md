@@ -170,7 +170,7 @@ Manual QA commands (the same set CI runs):
 uv run ruff format --check kaos_web tests
 uv run ruff check kaos_web tests
 uv run ty check kaos_web tests
-uv run pytest -m "not live and not network and not slow"
+uv run pytest -m "not live and not network and not slow and not integration"
 ```
 
 ## Build from source
