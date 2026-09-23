@@ -1515,7 +1515,7 @@ def register_web_all_tools(runtime: KaosRuntime) -> int:
     Convenience union for callers that want the full kaos-web
     surface registered in one call. Composes:
 
-    - :func:`register_web_tools` — 9 tools, SessionToolSet ``web``
+    - :func:`register_web_tools` — 10 tools, SessionToolSet ``web``
       group (HTTP fetch + search)
     - :func:`register_browser_tools` — 19 tools, SessionToolSet
       ``browser`` group (Playwright; requires ``[browser]`` extra
