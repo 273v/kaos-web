@@ -11,24 +11,24 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for 
 exclude-newer-span = "PT72H"
 
 [options.exclude-newer-package]
-kaos-source = false
-kaos-llm-client = false
-kaos-citations = false
-kaos-web = false
-starlette = false
-kaos-content = false
-kaos-mcp = false
-kaos-llm-core = false
-kaos-office = false
 idna = false
+kaos-citations = false
+kaos-content = false
+kaos-core = false
 kaos-graph = false
+kaos-llm-client = false
+kaos-llm-core = false
+kaos-mcp = false
 kaos-ml-core = false
+kaos-names = false
 kaos-nlp-core = false
 kaos-nlp-transformers = false
-kaos-tabular = false
-kaos-core = false
+kaos-office = false
 kaos-pdf = false
-kaos-names = false
+kaos-source = false
+kaos-tabular = false
+kaos-web = false
+starlette = false
 
 [[package]]
 name = "annotated-doc"
@@ -439,16 +439,16 @@ wheels = [
 
 [[package]]
 name = "kaos-content"
-version = "0.1.6"
+version = "0.1.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kaos-core" },
     { name = "pydantic" },
     { name = "uuid6", marker = "python_full_version < '3.14'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7e/05/6cae7aa58928fa6f24a52108a952e752d2f40289e5506e32b82979ab3b72/kaos_content-0.1.6.tar.gz", hash = "sha256:8ac15d4d1cedf86de7fbe093453f3a27e3057c08244ba117787782a2e3f9457d", size = 1139969, upload-time = "2026-06-02T21:43:26.748Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cc/49/a1e5b12da3e837cc25c91a6e37e17041a8caa562649826695051edaf5b86/kaos_content-0.1.8.tar.gz", hash = "sha256:ed5718e3e33f175fb648b92cf82bb9f9f8e6bc962e97203685806e6722854f60", size = 1149241, upload-time = "2026-09-25T23:03:01.992Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d5/3d/9edd0d5cb99b1aead2da00e4302886fab7b4efcf3b5b0f280558fa3e42f8/kaos_content-0.1.6-py3-none-any.whl", hash = "sha256:7164225bf99522f91bb29355ff03aeb498b5ad3064773861b7bd004bbed967ef", size = 289337, upload-time = "2026-06-02T21:43:25.078Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/58/0454c15433175da4ceb3f5d1e9e4e0ad784693000bd341e834718cd45dc0/kaos_content-0.1.8-py3-none-any.whl", hash = "sha256:a996f1c686640c6b4a8596813da9beb0575f44844bddc140be7e88d2d0fd68b3", size = 291057, upload-time = "2026-09-25T23:03:00.553Z" },
 ]
 
 [package.optional-dependencies]
@@ -552,7 +552,7 @@ dev = [
 requires-dist = [
     { name = "dnspython", marker = "extra == 'dns'", specifier = ">=2.6.0" },
     { name = "httpx", extras = ["http2"], specifier = ">=0.28.0" },
-    { name = "kaos-content", specifier = ">=0.1.0,<0.2" },
+    { name = "kaos-content", specifier = ">=0.1.8,<0.2" },
     { name = "kaos-core", specifier = ">=0.1.0,<0.2" },
     { name = "kaos-mcp", marker = "extra == 'mcp'", specifier = ">=0.1.5,<0.2" },
     { name = "kaos-nlp-core", marker = "extra == 'nlp'", specifier = ">=0.1.0,<0.2" },

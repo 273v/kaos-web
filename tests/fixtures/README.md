@@ -21,6 +21,7 @@ internal share, or pseudonymized client document.
 | `httpbin.html` | https://httpbin.org/html (Kenneth Reitz / Postman httpbin reference service — Moby-Dick excerpt by Herman Melville) | httpbin: ISC / MIT (https://github.com/postmanlabs/httpbin); Moby-Dick text: public-domain (pre-1924) | 2026-04-01 (first git commit `17dece7`) | `3f324f9914742e62cf082861ba03b207282dba781c3349bee9d7c1b5ef8e0bfe` |
 | `books_toscrape.html` | https://books.toscrape.com/ — "A Light in the Attic" product page (scrapinghub.com training sandbox, explicitly published for scraping practice) | Public training sandbox by Scrapinghub/Zyte; book metadata is fictional/test content | 2026-04-01 (first git commit `17dece7`) | `a6e572bec156bf80ff3149b89b6d218cdcf8866ccc26ccf69a5431db8e142c6a` |
 | `article.html` | hand-crafted by 273V for kaos-web readability regression (synthetic `example.com` URLs, fictional "Jane Doe" author, fictional "Test Article" body — no real-world source) | hand-crafted, 273V | 2026-04-01 (first git commit `b5945f6`) | `a034f2b59eca39b463e4476803760f3b9f4b9f317a6256fe82db95e19a5bb086` |
+| `ixbrl_annual_report.htm` | hand-crafted by 273V: synthetic Inline XBRL (iXBRL 1.1) annual report. All names, numbers and text are fictional; only the markup layout follows what filing tools emit (XML declaration, hidden `ix:header` in a `display:none` div, flat `<body>` of sibling paragraph divs with `<hr>` page breaks, `ix:nonNumeric`/`ix:continuation` text blocks, `ix:nonFraction` values, financial tables with hidden empty cells). Hidden sentinels `0009999999`, `HIDDENFACTFY`, `2025-01-01`, `iso4217:USD` must never appear in extracted text. | hand-crafted, 273V | 2026-09-25 | `e02258cd5ba92b32221c16707bf936e5b0e55effcc85f039ebcdd1e28107849f` |
 
 ## Notes
 
@@ -32,6 +33,10 @@ internal share, or pseudonymized client document.
   endpoint, and used in offline form for fuzz tests.
 - `books_toscrape.html` is referenced by
   `tests/unit/test_readability_l3.py` and `tests/integration/test_crawl.py`.
+- `ixbrl_annual_report.htm` is used by
+  `tests/unit/test_html_to_ast_inline_xbrl.py`: with container-scoring
+  extraction it reduces to one financial table, so it guards the whole-document
+  path for iXBRL input.
 - `article.html` is the canonical "clean article" fixture for L3
   readability scope tuning tests.
 
