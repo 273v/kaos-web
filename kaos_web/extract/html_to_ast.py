@@ -25,7 +25,6 @@ from kaos_content.parsers.html import (
     parse_html,
     pre_content_scope,
     process_children_as_blocks,
-    strip_inline_xbrl,
 )
 from kaos_core.logging import get_logger
 from kaos_web.extract.readability import document_body
@@ -103,6 +102,12 @@ def html_to_document(
             namespace elements that lxml and readability models
             cannot process.  This parameter enables the kaos-web
             pipeline to handle EDGAR filings natively.
+
+            Inline XBRL input (``strip_xbrl=True``, or auto-detected)
+            is converted whole, as with ``extract_content=False``:
+            such documents have no navigation or other page chrome,
+            and their text is laid out as many sibling page blocks
+            that content extraction cannot select as one region.
         pre_content_mode: How to interpret ``<pre>`` tag content.
             ``"code"`` (default) emits a ``CodeBlock`` preserving
             whitespace. ``"prose"`` treats the inner text as
@@ -114,22 +119,24 @@ def html_to_document(
     Returns:
         ContentDocument with Block/Inline AST nodes and provenance.
     """
+    # Inline XBRL filings are converted whole. They carry no site chrome,
+    # and their text is a flat run of sibling page/paragraph blocks under
+    # <body> with no article container, so container-scoring extraction
+    # can only pick a table or a few page blocks and drops the rest.
+    is_xbrl = strip_xbrl is True or (strip_xbrl is None and looks_like_xbrl(html_content))
+
     # For raw (no-readability) conversion, delegate to kaos-content.
-    if not extract_content:
+    if not extract_content or is_xbrl:
         with extractor_scope("kaos-web"):
             return parse_html(
                 html_content,
                 url=url,
-                strip_xbrl=strip_xbrl,
+                strip_xbrl=is_xbrl,
                 pre_content_mode=pre_content_mode,
             )
 
     if not html_content or not html_content.strip():
         return empty_document()
-
-    # Strip Inline XBRL if requested or auto-detected.
-    if strip_xbrl is True or (strip_xbrl is None and looks_like_xbrl(html_content)):
-        html_content = strip_inline_xbrl(html_content)
 
     root: HtmlElement | None = None
     full_doc: HtmlElement | None = None  # Parsed once, reused if needed

@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `html_to_document()` no longer reduces Inline XBRL (iXBRL) filings to a
+  single table or a few page blocks. Those documents lay their text out as a
+  flat run of sibling paragraph/page `<div>`s under `<body>`, with no article
+  container; the L3 extractor only aggregates scores into region containers
+  below `<body>` and merges at most three peer regions, so it returned one
+  financial table (about 1% of the visible text on a public 10-K) or three
+  page blocks. That was still more than 50 words, so the small-result
+  fallback never fired. iXBRL input (`strip_xbrl=True` or auto-detected) is
+  now converted whole through `kaos_content.parsers.html.parse_html`, the
+  same path as `extract_content=False`, with provenance extractor
+  `kaos-web`. Ordinary HTML is unaffected; this relies on the stricter
+  `looks_like_xbrl` detection from 273v/kaos-content#76; the `kaos-content`
+  floor is raised to the release that ships it.
+
 ## [0.1.17] - 2026-09-23
 
 ### Fixed
