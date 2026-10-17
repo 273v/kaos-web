@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `html_to_document()` keeps a table or list whole when the learned
+  extractor returns it as the content region. The region was walked child
+  by child, so a `<table>` region became one paragraph per cell (numbers
+  detached from their row and column labels, e.g. Federal Reserve
+  statistical releases) and a `<ul>` / `<ol>` region lost its list
+  structure. A region that is a table, list, definition list, `<pre>`,
+  `<blockquote>`, `<figure>`, paragraph or heading is now converted as one
+  element, and a wrapper holding only table rows is treated as a table.
+  Layout tables (nested tables, a single row or column, or one cell holding
+  at least half of the text) are still walked as blocks. On 2,444 public
+  U.S. government pages this changed 37 documents (1.5%), all of them
+  tables or lists that now keep their rows and items.
+
+### Fixed
+
 - `html_to_document()` no longer returns a navigation drawer, sidebar or
   footer when the page declares its main region. If the page has a
   `<main>` or `role="main"` element with at least 50 words and the region

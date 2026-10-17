@@ -25,6 +25,7 @@ from kaos_content.parsers.html import (
     parse_html,
     pre_content_scope,
     process_children_as_blocks,
+    process_element,
 )
 from kaos_core.logging import get_logger
 from kaos_web.extract.readability import document_body
@@ -110,6 +111,79 @@ def _outside_declared_main(root: HtmlElement, main_el: HtmlElement) -> bool:
         return True
     inside = _word_trigrams(main_el.text_content() or "")
     return len(region & inside) < 0.5 * len(region)
+
+
+# Extracted regions that are themselves a structural element: their
+# children (rows, items) only mean something inside it, so the region is
+# converted as one element instead of child by child.
+_STRUCTURAL_ROOT_TAGS = frozenset(
+    {
+        "table",
+        "ul",
+        "ol",
+        "dl",
+        "pre",
+        "blockquote",
+        "figure",
+        "p",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+    }
+)
+_TABLE_PART_TAGS = frozenset({"tr", "thead", "tbody", "tfoot"})
+
+
+def _root_blocks(root: HtmlElement, url: str) -> list:
+    """Convert the extracted region to blocks, keeping a table or list whole.
+
+    The learned extractor can return a ``<table>`` / ``<ul>`` / ``<ol>`` itself,
+    or a wrapper holding only table rows (sibling row regions it merged).
+    Walking such a root child by child turned every cell into its own
+    paragraph and detached values from their row and column labels.
+    """
+    tag = root.tag.lower() if isinstance(root.tag, str) else ""
+    if tag in ("tbody", "thead", "tfoot"):
+        tag = root.tag = "table"
+    elif tag != "table":
+        kids = [c for c in root if isinstance(c.tag, str)]
+        if kids and all(c.tag.lower() in _TABLE_PART_TAGS for c in kids):
+            tag = root.tag = "table"
+    if tag == "table" and _is_layout_table(root):
+        return process_children_as_blocks(root, url)
+    if tag in _STRUCTURAL_ROOT_TAGS:
+        return process_element(root, url)
+    return process_children_as_blocks(root, url)
+
+
+def _is_layout_table(table: HtmlElement) -> bool:
+    """True if ``table`` lays out page content rather than holding data.
+
+    Structural tests in the spirit of Readability's data-table check: a
+    nested table, a single row or a single column, or one cell holding at
+    least half of the table's text (an article placed in a layout cell).
+    """
+    if table.find(".//table") is not None:
+        return True
+    rows = list(table.iter("tr"))
+    if len(rows) <= 1:
+        return True
+    widths = [
+        sum(1 for c in r if isinstance(c.tag, str) and c.tag.lower() in ("td", "th")) for r in rows
+    ]
+    if max(widths, default=0) <= 1:
+        return True
+    total = len((table.text_content() or "").strip())
+    if total == 0:
+        return True
+    biggest = max(
+        (len((c.text_content() or "").strip()) for r in rows for c in r if isinstance(c.tag, str)),
+        default=0,
+    )
+    return biggest >= 200 and biggest * 2 >= total
 
 
 def html_to_document(
@@ -257,7 +331,7 @@ def html_to_document(
     # Nest ``pre_content_scope`` so the chosen ``<pre>`` interpretation
     # applies equally when readability extraction surfaces a ``<pre>``.
     with extractor_scope("kaos-web"), pre_content_scope(pre_content_mode):
-        blocks = process_children_as_blocks(root, url)
+        blocks = _root_blocks(root, url)
 
     # Extract title from the original HTML for metadata.
     title: str | None = None

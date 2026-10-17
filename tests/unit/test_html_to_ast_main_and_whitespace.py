@@ -132,3 +132,63 @@ class TestWordSpacing:
         text = serialize_text(html_to_document(html))
         assert "Respondent) operates facility 0 at 1100 Lincoln Road." in text
         assert "Respondent)operates" not in text
+
+
+_ROWS = "".join(f"<tr><td>Q{i}</td><td>{i}.5</td><td>{i}.7</td></tr>" for i in range(1, 30))
+_TABLE = (
+    "<table><tr><th>Quarter</th><th>Feeder cattle loans</th><th>Other loans</th></tr>"
+    + _ROWS
+    + "</table>"
+)
+
+
+def _table_region(html: str, content_scope: float = 0.5) -> HtmlElement | None:
+    del content_scope
+    return lxml_html.document_fromstring(html).find(".//table")
+
+
+def _rows_wrapper(html: str, content_scope: float = 0.5) -> HtmlElement | None:
+    del content_scope
+    doc = lxml_html.document_fromstring(html)
+    wrapper = lxml_html.fragment_fromstring("<div></div>", create_parent=False)
+    for tr in doc.findall(".//tr"):
+        tr.getparent().remove(tr)
+        wrapper.append(tr)
+    return wrapper
+
+
+class TestStructuralRoot:
+    def test_table_region_keeps_rows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Federal Reserve E.15 tables: the extractor returns the <table> itself.
+        monkeypatch.setattr(html_to_ast, "extract_content_l3", _table_region)
+        text = serialize_text(html_to_document(f"<html><body>{_TABLE}</body></html>"))
+        assert "Quarter | Feeder cattle loans | Other loans" in text
+        assert "Q3 | 3.5 | 3.7" in text
+
+    def test_wrapper_of_rows_is_a_table(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(html_to_ast, "extract_content_l3", _rows_wrapper)
+        text = serialize_text(html_to_document(f"<html><body>{_TABLE}</body></html>"))
+        assert "Q3 | 3.5 | 3.7" in text
+
+    def test_list_region_keeps_items(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def ul_region(html: str, content_scope: float = 0.5) -> HtmlElement | None:
+            del content_scope
+            return lxml_html.document_fromstring(html).find(".//ul")
+
+        monkeypatch.setattr(html_to_ast, "extract_content_l3", ul_region)
+        items = "".join(f"<li>Item number {i} with several words of text</li>" for i in range(20))
+        text = serialize_text(html_to_document(f"<html><body><ul>{items}</ul></body></html>"))
+        assert "- Item number 3 with several words of text" in text
+
+    def test_layout_table_region_is_walked_as_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(html_to_ast, "extract_content_l3", _table_region)
+        article = "".join(
+            f"<p>Paragraph {i} of the consent order analysis text.</p>" for i in range(12)
+        )
+        html = (
+            f"<html><body><table><tr><td></td><td>{article}</td></tr>"
+            "<tr><td>x</td><td>y</td></tr></table></body></html>"
+        )
+        text = serialize_text(html_to_document(html))
+        assert "Paragraph 3 of the consent order analysis text." in text
+        assert "| Paragraph" not in text
