@@ -205,7 +205,7 @@ def text_fingerprint(text: str) -> str:
     ``boilerplate``.
     """
     words = _FINGERPRINT_WORD.findall(text.lower())
-    return hashlib.sha1(" ".join(words).encode("utf-8")).hexdigest()
+    return hashlib.sha1(" ".join(words).encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 def _region_text(el: HtmlElement, url: str) -> str:
