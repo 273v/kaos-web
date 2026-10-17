@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `html_to_document(..., boilerplate=...)` and `kaos_web.extract.text_fingerprint`.
+  Callers that extract many pages of one site can pass the fingerprints of
+  regions that repeat identically on many different pages (a translation
+  widget, a grant sidebar, a search-facet list). A candidate region whose
+  whole text matches is never selected: the next-best region wins, then the
+  page's declared `<main>`, then heuristic readability, then the whole body.
+  A fingerprint matches a region's entire text only, so content that merely
+  contains a shared block (a disclaimer) is never rejected. The source used
+  is recorded in `metadata.extra["region_source"]`. `extract_content_l3`
+  gains a keyword-only `reject` predicate. Without `boilerplate` nothing
+  changes.
+
 ### Fixed
 
 - `html_to_document()` keeps a table or list whole when the learned

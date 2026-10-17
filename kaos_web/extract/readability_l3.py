@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 
 from lxml import html as lxml_html
 from lxml.html import HtmlElement
@@ -651,7 +652,12 @@ def _select_peer_regions(
     return selected
 
 
-def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | None:
+def extract_content_l3(
+    html: str,
+    content_scope: float = 0.5,
+    *,
+    reject: Callable[[HtmlElement], bool] | None = None,
+) -> HtmlElement | None:
     """Extract main content using the Level 3 learned model.
 
     Scores every candidate block-level element in the DOM, then selects
@@ -662,6 +668,9 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
         html: Raw HTML string.
         content_scope: Extraction breadth from 0.0 (strict) to 1.0
             (permissive). Default 0.5 matches balanced precision/recall.
+        reject: Optional predicate; candidate regions for which it returns
+            True (for example known site boilerplate) are never selected.
+            Returns ``None`` when every candidate region is rejected.
 
     Returns:
         Content element subtree, or ``None`` if no content found.
@@ -716,8 +725,16 @@ def extract_content_l3(html: str, content_scope: float = 0.5) -> HtmlElement | N
     # Step 4: Aggregate node scores into region candidates.
     node_threshold = _node_content_threshold(content_scope)
     regions = _collect_region_candidates(scored, node_threshold=node_threshold)
+    if reject is not None:
+        # Regions the caller knows to be site boilerplate (for example a
+        # sidebar whose text repeats on every page of the host) never win;
+        # the next-best region and its peers are selected instead.
+        kept = [(el, score) for el, score in regions if not reject(el)]
+        if regions and not kept:
+            return None
+        regions = kept
     if not regions:
-        return body if _inner_text_length(body) > 50 else None
+        return body if _inner_text_length(body) > 50 and not (reject and reject(body)) else None
 
     # Step 5: Scope-aware core-region selection.
     # Broad wrapper containers often win on aggregate score alone. Walk down
