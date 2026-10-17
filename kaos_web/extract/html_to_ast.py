@@ -74,6 +74,44 @@ def _find_semantic_container(body: HtmlElement) -> HtmlElement | None:
     return None
 
 
+def _word_trigrams(text: str) -> set[tuple[str, ...]]:
+    words = text.lower().split()
+    return {tuple(words[i : i + 3]) for i in range(len(words) - 2)}
+
+
+def _declared_main(body: HtmlElement) -> HtmlElement | None:
+    """The page's declared main region (``<main>`` / ``role="main"``), if it has text.
+
+    The largest such element with at least ``_MIN_READABILITY_WORDS`` words.
+    """
+    best: HtmlElement | None = None
+    best_words = 0
+    for el in body.iter():
+        if not isinstance(el.tag, str):
+            continue
+        if el.tag.lower() != "main" and (el.get("role") or "").lower() != "main":
+            continue
+        words = len((el.text_content() or "").split())
+        if words >= _MIN_READABILITY_WORDS and words > best_words:
+            best, best_words = el, words
+    return best
+
+
+def _outside_declared_main(root: HtmlElement, main_el: HtmlElement) -> bool:
+    """True if the extracted region shares little text with the declared main.
+
+    Text-based, because the learned model may return a wrapper built from
+    detached sibling regions. Less than half of the region's word trigrams
+    inside ``main_el`` means the model picked navigation, a sidebar or a
+    footer instead of the region the page marks as its main content.
+    """
+    region = _word_trigrams(root.text_content() or "")
+    if not region:
+        return True
+    inside = _word_trigrams(main_el.text_content() or "")
+    return len(region & inside) < 0.5 * len(region)
+
+
 def html_to_document(
     html_content: str,
     *,
@@ -162,11 +200,26 @@ def html_to_document(
     if root is None:
         root = readability_extract(html_content)
 
+    # Guard: the page declares its main region (``<main>`` or
+    # ``role="main"``) and the extracted region lies outside it -- the
+    # model picked a navigation drawer, sidebar or footer. Use the
+    # declared region instead.
+    if root is not None:
+        try:
+            full_doc = lxml_html.document_fromstring(html_content)
+        except Exception as exc:
+            logger.debug("html_to_ast: declared-main check skipped: %s", exc)
+            full_doc = None
+        full_body = document_body(full_doc) if full_doc is not None else None
+        main_el = _declared_main(full_body) if full_body is not None else None
+        if main_el is not None and _outside_declared_main(root, main_el):
+            root = main_el
+
     # Guard: if extraction returned a suspiciously small fragment,
     # fall back to semantic container extraction.
     if root is not None:
         readability_words = len((root.text_content() or "").split())
-        if readability_words < _MIN_READABILITY_WORDS:
+        if readability_words < _MIN_READABILITY_WORDS and full_doc is None:
             try:
                 full_doc = lxml_html.document_fromstring(html_content)
             except Exception as exc:
@@ -175,6 +228,7 @@ def html_to_document(
                     exc,
                 )
                 full_doc = None
+        if readability_words < _MIN_READABILITY_WORDS:
             full_body = document_body(full_doc) if full_doc is not None else None
             if full_body is not None:
                 body_words = len((full_body.text_content() or "").split())
