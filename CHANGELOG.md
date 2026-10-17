@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `html_to_document()` no longer returns a navigation drawer, sidebar or
+  footer when the page declares its main region. If the page has a
+  `<main>` or `role="main"` element with at least 50 words and the region
+  chosen by the learned extractor shares less than half of its word
+  trigrams with it, the declared region is used instead. On 2,251 public
+  U.S. government pages this, with the kaos-content walker fixes below,
+  raised the mean share of bc-web's content found from 0.68 to 0.71.
+- Word spacing: with the kaos-content release that keeps whitespace at
+  inline element boundaries (whitespace-only spans and tails, `&nbsp;`,
+  block elements inside links, paragraphs in table cells, page-wrapper
+  `<form>`s), the glued-token rate of `html_to_document()` on the same
+  pages fell from 11.1 to 0.03 per 1,000 words and pages under 50 words
+  from 8.9% to 6.0%. Regression tests are in
+  `tests/unit/test_html_to_ast_main_and_whitespace.py`; the spacing tests
+  skip on older kaos-content. The `kaos-content` floor should be raised to
+  that release when both are published.
+
 ## [0.1.18] - 2026-09-25
 
 ### Fixed
