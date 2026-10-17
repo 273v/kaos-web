@@ -23,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   U.S. government pages this changed 37 documents (1.5%), all of them
   tables or lists that now keep their rows and items.
 
-### Fixed
-
 - `html_to_document()` no longer returns a navigation drawer, sidebar or
   footer when the page declares its main region. If the page has a
   `<main>` or `role="main"` element with at least 50 words and the region
