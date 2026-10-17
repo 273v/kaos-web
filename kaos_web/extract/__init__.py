@@ -3,7 +3,7 @@
 # Re-export canonical search from kaos-content
 from kaos_content.search import SearchResult, SearchResults, search_document
 from kaos_web.extract.feed import FeedItem, FeedResult, parse_feed
-from kaos_web.extract.html_to_ast import html_to_document
+from kaos_web.extract.html_to_ast import html_to_document, text_fingerprint
 from kaos_web.extract.images import ExtractedImage, extract_images
 from kaos_web.extract.links import ExtractedLink, extract_links
 from kaos_web.extract.metadata import extract_metadata
@@ -29,4 +29,5 @@ __all__ = [
     "html_to_document",
     "parse_feed",
     "search_document",
+    "text_fingerprint",
 ]

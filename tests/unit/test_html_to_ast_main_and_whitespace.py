@@ -35,15 +35,17 @@ _PAGE = (
 )
 
 
-def _nav_region(html: str, content_scope: float = 0.5) -> HtmlElement | None:
-    del content_scope
+def _nav_region(html: str, content_scope: float = 0.5, reject: object = None) -> HtmlElement | None:
+    del content_scope, reject
     doc = lxml_html.document_fromstring(html)
     found = doc.find_class("nav__drawer")
     return found[0] if found else None
 
 
-def _main_region(html: str, content_scope: float = 0.5) -> HtmlElement | None:
-    del content_scope
+def _main_region(
+    html: str, content_scope: float = 0.5, reject: object = None
+) -> HtmlElement | None:
+    del content_scope, reject
     doc = lxml_html.document_fromstring(html)
     return doc.find(".//main")
 
@@ -142,13 +144,17 @@ _TABLE = (
 )
 
 
-def _table_region(html: str, content_scope: float = 0.5) -> HtmlElement | None:
-    del content_scope
+def _table_region(
+    html: str, content_scope: float = 0.5, reject: object = None
+) -> HtmlElement | None:
+    del content_scope, reject
     return lxml_html.document_fromstring(html).find(".//table")
 
 
-def _rows_wrapper(html: str, content_scope: float = 0.5) -> HtmlElement | None:
-    del content_scope
+def _rows_wrapper(
+    html: str, content_scope: float = 0.5, reject: object = None
+) -> HtmlElement | None:
+    del content_scope, reject
     doc = lxml_html.document_fromstring(html)
     wrapper = lxml_html.fragment_fromstring("<div></div>", create_parent=False)
     for tr in doc.findall(".//tr"):
@@ -171,8 +177,10 @@ class TestStructuralRoot:
         assert "Q3 | 3.5 | 3.7" in text
 
     def test_list_region_keeps_items(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        def ul_region(html: str, content_scope: float = 0.5) -> HtmlElement | None:
-            del content_scope
+        def ul_region(
+            html: str, content_scope: float = 0.5, reject: object = None
+        ) -> HtmlElement | None:
+            del content_scope, reject
             return lxml_html.document_fromstring(html).find(".//ul")
 
         monkeypatch.setattr(html_to_ast, "extract_content_l3", ul_region)

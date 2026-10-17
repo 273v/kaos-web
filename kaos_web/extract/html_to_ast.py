@@ -12,9 +12,14 @@ For raw (no-readability) conversion, use
 
 from __future__ import annotations
 
+import hashlib
+import re
+from collections.abc import Callable, Collection
+
 from lxml import html as lxml_html
 from lxml.html import HtmlElement
 
+from kaos_content import serialize_text
 from kaos_content.model.attr import SourceRef
 from kaos_content.model.document import ContentDocument
 from kaos_content.model.metadata import DocumentMetadata
@@ -186,6 +191,70 @@ def _is_layout_table(table: HtmlElement) -> bool:
     return biggest >= 200 and biggest * 2 >= total
 
 
+_FINGERPRINT_WORD = re.compile(r"\w+")
+
+
+def text_fingerprint(text: str) -> str:
+    """Fingerprint of a text's words, for matching extracted text across pages.
+
+    SHA-1 of the lower-cased word tokens joined by single spaces: layout
+    (line breaks, list markers, table pipes) does not change it, any change
+    in the words does. Callers fingerprint the text ``html_to_document``
+    produced for pages of one site to find regions that repeat on many of
+    them (site boilerplate) and pass those fingerprints back as
+    ``boilerplate``.
+    """
+    words = _FINGERPRINT_WORD.findall(text.lower())
+    return hashlib.sha1(" ".join(words).encode("utf-8")).hexdigest()
+
+
+def _region_text(el: HtmlElement, url: str) -> str:
+    """Text the walker would produce for ``el`` as a region (no tree changes)."""
+    tag = el.tag.lower() if isinstance(el.tag, str) else ""
+    blocks = (
+        process_element(el, url) if tag in ("ol", "ul") else process_children_as_blocks(el, url)
+    )
+    return serialize_text(
+        ContentDocument.model_construct(
+            metadata=DocumentMetadata.model_construct(
+                title=None,
+                authors=(),
+                date=None,
+                language=None,
+                source=None,
+                document_type=None,
+                extra={},
+            ),
+            body=tuple(blocks),
+            footnotes={},
+            definitions={},
+            annotations=(),
+        )
+    )
+
+
+def _boilerplate_rejector(boilerplate: Collection[str], url: str) -> Callable[[HtmlElement], bool]:
+    """Predicate: is this region's whole text a known boilerplate fingerprint?
+
+    The fingerprint must match the region's entire text. A content region
+    that merely *contains* a shared block (a legal disclaimer at the end of
+    every article) has a different fingerprint and is never rejected.
+    """
+    cache: dict[int, bool] = {}
+
+    def reject(el: HtmlElement) -> bool:
+        key = id(el)
+        if key not in cache:
+            try:
+                cache[key] = text_fingerprint(_region_text(el, url)) in boilerplate
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("html_to_ast: boilerplate check failed: %s", exc)
+                cache[key] = False
+        return cache[key]
+
+    return reject
+
+
 def html_to_document(
     html_content: str,
     *,
@@ -194,6 +263,7 @@ def html_to_document(
     content_scope: float = 0.5,
     strip_xbrl: bool | None = None,
     pre_content_mode: str = "code",
+    boilerplate: Collection[str] | None = None,
 ) -> ContentDocument:
     """Convert HTML to a ContentDocument AST.
 
@@ -227,6 +297,17 @@ def html_to_document(
             Use ``"prose"`` for sources (e.g. Federal Register
             ``raw_text_url``) that abuse ``<pre>`` as a plain-text
             container.
+        boilerplate: Optional set of :func:`text_fingerprint` values of
+            regions known to be site boilerplate (text that repeats,
+            identically, on many different pages of the same site, such
+            as a sidebar, a translation widget or a facet list). A
+            candidate region whose whole text has one of these
+            fingerprints is never selected; the next-best region wins. If
+            every candidate is boilerplate, the page's declared ``<main>``
+            is used, then heuristic readability, then the whole body. The
+            source used is recorded in ``metadata.extra["region_source"]``
+            (``"l3"``, ``"main"``, ``"readability"``, ``"semantic"`` or
+            ``"body"``) whenever ``boilerplate`` is given.
 
     Returns:
         ContentDocument with Block/Inline AST nodes and provenance.
@@ -252,10 +333,12 @@ def html_to_document(
 
     root: HtmlElement | None = None
     full_doc: HtmlElement | None = None  # Parsed once, reused if needed
+    reject = _boilerplate_rejector(boilerplate, url) if boilerplate else None
+    region_source = "l3"
 
     # Try Level 3 learned model first, fall back to heuristic readability.
     try:
-        root = extract_content_l3(html_content, content_scope=content_scope)
+        root = extract_content_l3(html_content, content_scope=content_scope, reject=reject)
     except Exception as exc:
         logger.debug("html_to_ast: fallback from L3 extraction to L3 retry/heuristic: %s", exc)
         root = None
@@ -264,7 +347,7 @@ def html_to_document(
     # before falling back to the heuristic (which ignores content_scope).
     if root is None and content_scope < 0.4:
         try:
-            root = extract_content_l3(html_content, content_scope=0.5)
+            root = extract_content_l3(html_content, content_scope=0.5, reject=reject)
         except Exception as exc:
             logger.debug(
                 "html_to_ast: fallback from L3 retry (scope=0.5) to heuristic readability: %s",
@@ -273,6 +356,9 @@ def html_to_document(
 
     if root is None:
         root = readability_extract(html_content)
+        region_source = "readability"
+        if root is not None and reject is not None and reject(root):
+            root = None
 
     # Guard: the page declares its main region (``<main>`` or
     # ``role="main"``) and the extracted region lies outside it -- the
@@ -286,8 +372,13 @@ def html_to_document(
             full_doc = None
         full_body = document_body(full_doc) if full_doc is not None else None
         main_el = _declared_main(full_body) if full_body is not None else None
-        if main_el is not None and _outside_declared_main(root, main_el):
+        if (
+            main_el is not None
+            and _outside_declared_main(root, main_el)
+            and (reject is None or not reject(main_el))
+        ):
             root = main_el
+            region_source = "main"
 
     # Guard: if extraction returned a suspiciously small fragment,
     # fall back to semantic container extraction.
@@ -310,6 +401,25 @@ def html_to_document(
                     # Extraction returned too little -- try semantic containers.
                     semantic = _find_semantic_container(full_body)
                     root = semantic if semantic is not None else full_body
+                    region_source = "semantic" if semantic is not None else "body"
+
+    # Boilerplate guard: the chosen region is still known site boilerplate
+    # (or every candidate was): use the declared main region if it is not
+    # boilerplate itself, otherwise the whole body.
+    if reject is not None and (root is None or (region_source != "body" and reject(root))):
+        root = None
+        if full_doc is None:
+            try:
+                full_doc = lxml_html.document_fromstring(html_content)
+            except Exception as exc:
+                logger.debug("html_to_ast: boilerplate fallback parse failed: %s", exc)
+                full_doc = None
+        full_body = document_body(full_doc) if full_doc is not None else None
+        main_el = _declared_main(full_body) if full_body is not None else None
+        if main_el is not None and not reject(main_el):
+            root, region_source = main_el, "main"
+        else:
+            region_source = "body"
 
     if root is None:
         # Parse full document and use <body>.
@@ -352,7 +462,7 @@ def html_to_document(
         if url
         else None,
         document_type=None,
-        extra={},
+        extra={"region_source": region_source} if boilerplate else {},
     )
 
     return ContentDocument.model_construct(
