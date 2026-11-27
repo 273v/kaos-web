@@ -110,6 +110,24 @@ class TestWordSpacing:
         body = "<p><strong>health problems.</strong>&nbsp;<strong>(It won't.)</strong></p>"
         assert _doc_text(body).strip() == "health problems. (It won't.)"
 
+    @pytest.mark.parametrize(
+        ("body", "expected"),
+        [
+            # A Michigan Senate Fiscal Agency bill analysis exported from Word:
+            # a no-break space opening a span, a span holding only a no-break
+            # space, and a literal U+00A0 at a span edge.
+            (
+                "<p><span>Hospitals may use</span><span>&nbsp;those lost funds </span>"
+                "<span>to</span><span>&nbsp;</span><span>reduce</span> the price.</p>",
+                "Hospitals may use those lost funds to reduce the price.",
+            ),
+            ("<p>may use<span>\u00a0those</span> funds</p>", "may use those funds"),
+            ("<p><span>to</span>\r\n<span>reduce</span> it</p>", "to reduce it"),
+        ],
+    )
+    def test_word_html_no_break_spaces_at_span_edges(self, body: str, expected: str) -> None:
+        assert " ".join(_doc_text(body).split()) == expected
+
     def test_divs_inside_link(self) -> None:
         body = '<p><a href="/staff"><div>Michael Sarich</div><div>Eric Stein</div></a></p>'
         assert _doc_text(body).strip() == "Michael Sarich\nEric Stein"

@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Regression tests for word spacing in Word-exported HTML: a no-break space
+  that opens a span, a span holding only a no-break space, a literal U+00A0
+  at a span edge, and a line break between two spans. With kaos-content
+  0.1.8, `html_to_document()` joins the words on each side ("may use" +
+  "&nbsp;those" reads "may usethose"); kaos-content `main` (#83, inline
+  whitespace at element boundaries) keeps the spaces. The tests are skipped
+  until a kaos-content release with that fix is installed.
+
 - `html_to_document()` keeps a table or list whole when the learned
   extractor returns it as the content region. The region was walked child
   by child, so a `<table>` region became one paragraph per cell (numbers
